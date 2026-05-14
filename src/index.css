@@ -250,6 +250,14 @@ html:is(.theme-amber, .theme-violet, .theme-blue) [data-toggle-state="on"] {
   box-shadow: 0 1px 2px rgba(0,0,0,0.4) !important;
 }
 
+/* Standalone toggles in the "off" state need a visible background in dark mode.
+   Scoped to data-toggle-style="standalone" so segmented toggles stay transparent. */
+html:is(.theme-amber, .theme-violet, .theme-blue) [data-toggle-state="off"][data-toggle-style="standalone"] {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-strong) !important;
+  color: var(--text-2) !important;
+}
+
 /* Status: amber / rose / emerald soft badges */
 html:is(.theme-amber, .theme-violet, .theme-blue) :is(.bg-amber-50, .bg-amber-50\/40) { background-color: var(--warning-bg) !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .bg-amber-100 { background-color: var(--warning-bg2) !important; }

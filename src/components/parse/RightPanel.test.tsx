@@ -176,6 +176,9 @@ describe('RightPanel', () => {
     const colorToggle = screen.getByTestId('survey-color-coding-toggle') as HTMLButtonElement;
     expect(colorToggle.disabled).toBe(false);
     expect(colorToggle.title).toBe('Toggle survey color coding workspace-wide.');
+    expect(colorToggle.getAttribute('data-toggle-state')).toBe('off');
+    expect(colorToggle.getAttribute('data-toggle-style')).toBe('standalone');
+    expect(document.querySelector('[data-toggle-state="off"][data-toggle-style="standalone"]')).toBe(colorToggle);
 
     fireEvent.click(screen.getByRole('button', { name: /Edit survey label Kurdish List/i }));
     const input = screen.getByLabelText('Survey label for klq') as HTMLInputElement;
@@ -185,6 +188,80 @@ describe('RightPanel', () => {
     expect(onSurveyOverlapUpdate).toHaveBeenCalledWith(expect.objectContaining({
       surveys: { klq: { display_label: 'KLQ Field List', display_color: 'slate' } },
     }));
+  });
+
+  it('updates color-coding toggle state when the controlled setting changes', () => {
+    const activeConcept = {
+      id: 7,
+      key: 'rain',
+      name: 'rain',
+      tag: 'untagged',
+      sourceItem: 'KLQ_1.10',
+      sourceSurvey: 'klq',
+      surveys: { klq: 'KLQ_1.10' },
+    } as const;
+    const onSurveyOverlapUpdate = vi.fn();
+    const { rerender } = renderRightPanel({
+      currentMode: 'annotate',
+      selectedSpeakers: ['Fail01'],
+      activeActionSpeaker: 'Fail01',
+      activeConcept,
+      workspaceConcepts: [activeConcept],
+      surveyColorCodingEnabled: false,
+      surveySettings: { klq: { display_label: 'Kurdish List', display_color: 'slate' } },
+      onSurveyOverlapUpdate,
+    });
+
+    const toggle = screen.getByTestId('survey-color-coding-toggle');
+    expect(toggle.getAttribute('data-toggle-state')).toBe('off');
+    fireEvent.click(toggle);
+    expect(onSurveyOverlapUpdate).toHaveBeenCalledWith({ color_coding_enabled: true });
+
+    rerender(
+      <RightPanel
+        panelOpen
+        onTogglePanel={vi.fn()}
+        currentMode="annotate"
+        selectedSpeakers={['Fail01']}
+        speakers={['Fail01', 'Fail02']}
+        conceptCount={2}
+        speakerPicker="Fail02"
+        onSpeakerSelect={vi.fn()}
+        onAddSpeaker={vi.fn()}
+        onToggleSpeaker={vi.fn()}
+        computeMode="cognates"
+        onComputeModeChange={vi.fn()}
+        onComputeRun={vi.fn()}
+        crossSpeakerJobStatus="idle"
+        computeJobStatus="idle"
+        computeJobProgress={0}
+        computeJobEtaMs={null}
+        computeJobError={null}
+        clefConfigured={false}
+        onOpenSourcesReport={vi.fn()}
+        onOpenClefConfig={vi.fn()}
+        onRefreshEnrichments={vi.fn()}
+        onOpenLoadDecisions={vi.fn()}
+        onSaveDecisions={vi.fn()}
+        onExportLingPy={vi.fn()}
+        exporting={false}
+        onOpenCommentsImport={vi.fn()}
+        activeActionSpeaker="Fail01"
+        workspaceConcepts={[activeConcept]}
+        offsetPhase="idle"
+        onDetectOffset={vi.fn()}
+        onOpenManualOffset={vi.fn()}
+        currentConceptId="c1"
+        onSaveAnnotations={vi.fn()}
+        activeConcept={activeConcept}
+        surveyColorCodingEnabled
+        surveySettings={{ klq: { display_label: 'Kurdish List', display_color: 'slate' } }}
+        speakerSurveyChoices={{}}
+        onSurveyOverlapUpdate={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('survey-color-coding-toggle').getAttribute('data-toggle-state')).toBe('on');
   });
 
   it('lists workspace-level surveys and updates color swatches/reset defaults', () => {

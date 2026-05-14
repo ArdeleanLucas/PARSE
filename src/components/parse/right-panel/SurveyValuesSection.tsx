@@ -210,6 +210,8 @@ export function SurveyValuesSection({
           <button
             type="button"
             data-testid="survey-color-coding-toggle"
+            data-toggle-state={surveyColorCodingEnabled ? 'on' : 'off'}
+            data-toggle-style="standalone"
             disabled={!hasWorkspaceSurveys}
             onClick={() => onSurveyOverlapUpdate({ color_coding_enabled: !surveyColorCodingEnabled })}
             className="rounded border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-45"
