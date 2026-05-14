@@ -299,9 +299,9 @@ describe('RightPanel', () => {
 
     expect(screen.getByRole('button', { name: /Current survey Kurdish List KLQ_1.10/i }).className).toContain('bg-teal-50');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Set Kurdish List color to orange' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Set Kurdish List color to rose' }));
     expect(onSurveyOverlapUpdate).toHaveBeenCalledWith({
-      surveys: { klq: { display_label: 'Kurdish List', display_color: 'orange' } },
+      surveys: { klq: { display_label: 'Kurdish List', display_color: 'rose' } },
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Reset survey display defaults/i }));
@@ -341,7 +341,7 @@ describe('RightPanel', () => {
     });
 
     expect(screen.getByText('Turn on color-coding to apply.')).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Set Kurdish List color to teal' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Set Kurdish List color to amber' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('collapses drawer sections when their headers are clicked', () => {

@@ -35,6 +35,28 @@ function renderSection(onRelinkApplied = vi.fn()) {
 
 describe('SurveyValuesSection cross-survey reconciliation', () => {
 
+  it('renders five pickable survey color swatches in a single grid row', () => {
+    render(
+      <SurveyValuesSection
+        activeConcept={{ id: 527, key: '527', name: 'nose', tag: 'untagged' as never, surveys: { klq: '1.5', jbil: '34' } }}
+        activeSpeaker="Fail01"
+        workspaceConcepts={[]}
+        conceptSurveyLinks={{}}
+        surveyColorCodingEnabled
+        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'slate' }, jbil: { display_label: 'JBIL', display_color: 'orange' } }}
+        speakerSurveyChoices={{}}
+        onSurveyOverlapUpdate={vi.fn()}
+      />,
+    );
+
+    const klqGrid = screen.getByRole('button', { name: /Set KLQ color to indigo/i }).closest('.grid');
+    expect(klqGrid?.className).toContain('grid-cols-5');
+    const klqSwatches = Array.from(klqGrid?.querySelectorAll('button') ?? []);
+    expect(klqSwatches.map((button) => button.getAttribute('title'))).toEqual(['indigo', 'emerald', 'amber', 'rose', 'slate']);
+    expect(screen.getByRole('button', { name: /Set JBIL color to amber/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Set KLQ color to orange/i })).toBeNull();
+  });
+
   it('renders speaker override survey IDs for merged/source-item active concepts using merged raw concept ids', () => {
     render(
       <SurveyValuesSection
