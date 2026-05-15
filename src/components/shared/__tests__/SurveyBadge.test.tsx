@@ -6,6 +6,7 @@ import { SurveyBadge } from '../SurveyBadge';
 import type { SurveySettingsMap } from '../../../api/types';
 
 const surveySettings: SurveySettingsMap = {
+  ext: { display_label: 'EXT', display_color: 'emerald' },
   klq: { display_label: 'KLQ', display_color: 'indigo' },
   jbil: { display_label: 'JBIL', display_color: 'rose' },
 };
@@ -37,7 +38,110 @@ describe('SurveyBadge', () => {
     expect(badge?.className).toContain('text-indigo-500');
   });
 
-  it('cycles to the next sorted survey when clickable', () => {
+  it('opens a menu for three available surveys', () => {
+    render(
+      <SurveyBadge
+        {...baseProps}
+        availableSurveys={{ klq: '1.1', jbil: '31', ext: 'EXT-7' }}
+        onCycle={vi.fn()}
+      />,
+    );
+
+    const badge = screen.getByRole('button', {
+      name: 'Choose survey for head from 3 linked surveys',
+    });
+    expect(badge.getAttribute('aria-haspopup')).toBe('menu');
+    expect(badge.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(badge);
+    expect(badge.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('menu')).toBeTruthy();
+    expect(screen.getAllByRole('menuitem')).toHaveLength(3);
+  });
+
+  it('selects a menu survey with the cycle handler and closes the menu', () => {
+    const onCycle = vi.fn();
+    render(
+      <SurveyBadge
+        {...baseProps}
+        availableSurveys={{ klq: '1.1', jbil: '31', ext: 'EXT-7' }}
+        onCycle={onCycle}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Choose survey for head from 3 linked surveys',
+    }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /EXT EXT-7/ }));
+
+    expect(onCycle).toHaveBeenCalledWith({ surveyId: 'ext', sourceItem: 'EXT-7' });
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('closes the menu on Escape without firing the cycle handler', () => {
+    const onCycle = vi.fn();
+    render(
+      <SurveyBadge
+        {...baseProps}
+        availableSurveys={{ klq: '1.1', jbil: '31', ext: 'EXT-7' }}
+        onCycle={onCycle}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Choose survey for head from 3 linked surveys',
+    }));
+    fireEvent.keyDown(screen.getByRole('button', {
+      name: 'Choose survey for head from 3 linked surveys',
+    }), { key: 'Escape' });
+
+    expect(onCycle).not.toHaveBeenCalled();
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('closes the menu on outside click', () => {
+    render(
+      <div>
+        <button type="button">Outside target</button>
+        <SurveyBadge
+          {...baseProps}
+          availableSurveys={{ klq: '1.1', jbil: '31', ext: 'EXT-7' }}
+          onCycle={vi.fn()}
+        />
+      </div>,
+    );
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Choose survey for head from 3 linked surveys',
+    }));
+    expect(screen.getByRole('menu')).toBeTruthy();
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Outside target' }));
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('supports ArrowDown and Enter keyboard selection in the menu', () => {
+    const onCycle = vi.fn();
+    render(
+      <SurveyBadge
+        {...baseProps}
+        availableSurveys={{ klq: '1.1', jbil: '31', ext: 'EXT-7' }}
+        onCycle={onCycle}
+      />,
+    );
+
+    const badge = screen.getByRole('button', {
+      name: 'Choose survey for head from 3 linked surveys',
+    });
+    fireEvent.click(badge);
+    fireEvent.keyDown(badge, { key: 'ArrowDown' });
+    fireEvent.keyDown(badge, { key: 'Enter' });
+
+    expect(onCycle).toHaveBeenCalledWith({ surveyId: 'ext', sourceItem: 'EXT-7' });
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('cycles to the next sorted survey when exactly two surveys are clickable', () => {
     const onCycle = vi.fn();
     render(
       <SurveyBadge
@@ -50,6 +154,7 @@ describe('SurveyBadge', () => {
     const badge = screen.getByRole('button', {
       name: 'Switch survey for head from KLQ 1.1 to JBIL 31',
     });
+    expect(badge.getAttribute('aria-haspopup')).toBeNull();
     expect(badge.textContent).toBe('KLQ 1.1');
     expect(badge.className).toContain('hover:underline');
 
