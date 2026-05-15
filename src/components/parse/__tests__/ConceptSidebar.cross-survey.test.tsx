@@ -159,6 +159,53 @@ describe('ConceptSidebar cross-survey linking', () => {
     expect(screen.getByRole('button', { name: /Switch survey for head from JBIL 31 to KLQ 1\.1/i }).textContent).toBe('JBIL 31');
   });
 
+  it('reflects speakerSurveyChoices in the resolved badge without re-mount', () => {
+    const smallConcept = {
+      id: 54,
+      key: '54',
+      name: 'small',
+      tag: 'untagged' as const,
+      sourceItem: '4.2',
+      sourceSurvey: 'klq',
+      surveys: { klq: '4.2', jbil: '170' },
+    };
+    const onSurveyChoiceChange = vi.fn();
+    const { rerender } = render(
+      <ConceptSidebar
+        {...baseProps}
+        filteredConcepts={[smallConcept]}
+        activeConceptId={54}
+        activeSpeaker="Qasr01"
+        conceptSurveyLinks={{ '54': { klq: '4.2', jbil: '170' } }}
+        speakerConceptSurveyLinks={{}}
+        speakerSurveyChoices={{}}
+        onSurveyChoiceChange={onSurveyChoiceChange}
+      />,
+    );
+
+    const row = screen.getByTestId('concept-row-54');
+    expect(row.textContent).toContain('JBIL 170');
+    expect(row.textContent).not.toContain('KLQ 4.2');
+
+    rerender(
+      <ConceptSidebar
+        {...baseProps}
+        filteredConcepts={[smallConcept]}
+        activeConceptId={54}
+        activeSpeaker="Qasr01"
+        conceptSurveyLinks={{ '54': { klq: '4.2', jbil: '170' } }}
+        speakerConceptSurveyLinks={{}}
+        speakerSurveyChoices={{ Qasr01: { '54': 'klq' } }}
+        onSurveyChoiceChange={onSurveyChoiceChange}
+      />,
+    );
+
+    expect(row.textContent).toContain('KLQ 4.2');
+    expect(row.textContent).not.toContain('JBIL 170');
+    const selectedKlqChip = within(row).getByRole('button', { name: /Current survey KLQ 4\.2/i });
+    expect(selectedKlqChip.className).toContain('bg-slate-900');
+  });
+
   it('opens a bucket-aware Change survey ID editor from the row context menu', () => {
     render(
       <ConceptSidebar

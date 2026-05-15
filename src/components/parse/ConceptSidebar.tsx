@@ -538,7 +538,12 @@ export function ConceptSidebar({
           const speakerBuckets = hasSpeakerAwareSurveyLinks ? bucketsForConcept(surveyConcept, activeSpeaker, conceptSurveyLinks, speakerConceptSurveyLinks) : [];
           const fallbackResolvedSurvey = resolveConceptSurvey(surveyConcept, activeSpeaker, speakerSurveyChoices, surveySettings);
           const sourceSurvey = normalizeSurveyId(concept.sourceSurvey);
-          const preferredSpeakerBucket = !activeSpeaker && sourceSurvey
+          const speakerChoice = activeSpeaker
+            ? normalizeSurveyId(speakerSurveyChoices?.[activeSpeaker]?.[surveyConcept.key] ?? '')
+            : '';
+          const preferredSpeakerBucket = activeSpeaker && speakerChoice
+            ? speakerBuckets.find((bucket) => bucket.surveyId === speakerChoice) ?? speakerBuckets[0]
+            : !activeSpeaker && sourceSurvey
             ? speakerBuckets.find((bucket) => bucket.surveyId === sourceSurvey) ?? speakerBuckets[0]
             : speakerBuckets[0];
           const resolvedSurvey = preferredSpeakerBucket ? {
