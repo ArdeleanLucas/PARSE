@@ -161,6 +161,92 @@ def test_promote_survey_primary_noops_when_pair_is_already_primary(tmp_path, mon
     assert list(tmp_path.glob("concepts.csv.bak-*-pre-promote-1")) == []
 
 
+def test_promote_survey_primary_404_when_concept_id_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_concepts(
+        tmp_path,
+        [{"id": "1", "concept_en": "head", "source_item": "72", "source_survey": "JBIL"}],
+    )
+    _seed_overlap(
+        tmp_path,
+        {
+            "version": 1,
+            "color_coding_enabled": False,
+            "surveys": {},
+            "concept_survey_links": {"1": {"klq": "2.1"}},
+            "speaker_choices": {},
+            "speaker_concept_survey_links": {},
+        },
+    )
+    original_csv = (tmp_path / "concepts.csv").read_bytes()
+
+    with pytest.raises(server.ApiError) as exc_info:
+        _post({"survey_id": "klq", "source_item": "2.1"}, concept_id="9999")
+
+    assert exc_info.value.status == HTTPStatus.NOT_FOUND
+    assert (tmp_path / "concepts.csv").read_bytes() == original_csv
+    assert list(tmp_path.glob("concepts.csv.bak-*-pre-promote-*")) == []
+
+
+def test_promote_survey_primary_400_when_required_fields_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_concepts(
+        tmp_path,
+        [{"id": "1", "concept_en": "head", "source_item": "72", "source_survey": "JBIL"}],
+    )
+    _seed_overlap(
+        tmp_path,
+        {
+            "version": 1,
+            "color_coding_enabled": False,
+            "surveys": {},
+            "concept_survey_links": {"1": {"klq": "2.1"}},
+            "speaker_choices": {},
+            "speaker_concept_survey_links": {},
+        },
+    )
+
+    with pytest.raises(server.ApiError) as missing_survey:
+        _post({"survey_id": "", "source_item": "2.1"})
+    assert missing_survey.value.status == HTTPStatus.BAD_REQUEST
+    assert list(tmp_path.glob("concepts.csv.bak-*-pre-promote-*")) == []
+
+    with pytest.raises(server.ApiError) as missing_source_item:
+        _post({"survey_id": "klq", "source_item": ""})
+    assert missing_source_item.value.status == HTTPStatus.BAD_REQUEST
+    assert list(tmp_path.glob("concepts.csv.bak-*-pre-promote-*")) == []
+
+
+def test_promote_survey_primary_preserves_other_sidecar_links(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_concepts(
+        tmp_path,
+        [{"id": "1", "concept_en": "head", "source_item": "72", "source_survey": "JBIL"}],
+    )
+    _seed_overlap(
+        tmp_path,
+        {
+            "version": 1,
+            "color_coding_enabled": False,
+            "surveys": {},
+            "concept_survey_links": {"1": {"klq": "2.1", "ext": "9"}},
+            "speaker_choices": {},
+            "speaker_concept_survey_links": {},
+        },
+    )
+
+    handler = _post({"survey_id": "klq", "source_item": "2.1"})
+
+    assert handler.status == HTTPStatus.OK
+    payload = handler.wfile.payload()
+    assert payload["concept"]["surveys"] == {"klq": "2.1", "jbil": "72", "ext": "9"}
+    row = _read_concepts(tmp_path)[0]
+    assert row["source_survey"] == "KLQ"
+    assert row["source_item"] == "2.1"
+    assert _read_overlap(tmp_path)["concept_survey_links"]["1"] == {"jbil": "72", "ext": "9"}
+    assert len(list(tmp_path.glob("concepts.csv.bak-*-pre-promote-1"))) == 1
+
+
 def test_promote_survey_primary_400_when_pair_is_not_primary_or_sidecar(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
     _seed_concepts(
