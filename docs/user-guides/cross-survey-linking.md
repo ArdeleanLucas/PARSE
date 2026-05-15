@@ -1,210 +1,220 @@
 # Cross-survey concept linking
 
-PARSE supports linking the same concept across multiple elicitation surveys (e.g. "father" from the JBIL list and "father" from the Kurdish Lexicon Questionnaire) so the workspace recognizes them as the same lexical concept. This guide covers the data model, the MCP tool that populates the link map, and the workflow for managing primary and alternate survey IDs in the UI.
+Use this guide when two or more word lists, questionnaires, or elicitation surveys contain the same concept but use different item IDs. PARSE is not tied to any one language, survey, or research project. You provide a small reference CSV that says:
 
-## Overview
+> Survey **A** calls this concept item **001**; survey **B** calls the same concept item **A-10**.
 
-Many PARSE workspaces collect data using two or more standardized concept lists — the Jena-Bamberg Iranian List (JBIL), the Kurdish Lexicon Questionnaire (KLQ), custom surveys, and so on. The same English gloss often appears in multiple lists with different numbering: JBIL `nose=34`, KLQ `nose=1.5`. PARSE tracks each concept once in `concepts.csv` with a single primary `(source_survey, source_item)` pair, and stores alternates in a sidecar JSON. The UI surfaces those alternates as a flippable badge so you can switch between survey IDs without editing the CSV by hand.
+The MCP tool reads that CSV, previews the safe links it can add, and then writes those links into the workspace only after you run it with `dryRun: false`.
 
-## Data model
+## Quick answer: the CSV format
 
-Two files in your workspace work together.
+Create a CSV with these three columns:
 
-### `concepts.csv` — durable primary
-
-The five-column CSV PARSE has always used:
-
-```
-id,concept_en,source_item,source_survey,custom_order
-1,nose,1.5,KLQ,1
-2,father,2.1,KLQ,2
-```
-
-One row per concept. The `(source_survey, source_item)` pair is the **primary** identifier. Exports (LingPy, NEXUS, CLEF) write out this primary value.
-
-### `survey-overlap.json` — additive sidecar
-
-JSON file in the workspace root. Stores alternates and per-speaker preferences:
-
-```json
-{
-  "version": 1,
-  "color_coding_enabled": true,
-  "surveys": {
-    "jbil": { "display_label": "JBIL", "display_color": "indigo" },
-    "klq":  { "display_label": "KLQ",  "display_color": "rose" }
-  },
-  "concept_survey_links": {
-    "1": { "jbil": "34" }
-  },
-  "speaker_choices": {
-    "Fail01": { "1": "klq" }
-  },
-  "speaker_concept_survey_links": {
-    "Qasr01": { "1": { "jbil": "32" } }
-  }
-}
-```
-
-| Field | Purpose |
-|---|---|
-| `surveys` | Registry of survey IDs → display label + color |
-| `concept_survey_links` | For each concept, the alternate `{survey_id: source_item}` pairs that supplement the CSV primary |
-| `speaker_choices` | Per-speaker preference: when speaker S annotates concept C, prefer survey X |
-| `speaker_concept_survey_links` | Per-speaker per-concept survey/source_item actually used during their elicitation |
-| `color_coding_enabled` | Toggle for color-coded badges in the sidebar |
-
-A concept with primary `(KLQ, 1.5)` and `concept_survey_links["1"] = {"jbil": "34"}` is linked to both surveys. The CSV row reflects whichever is currently primary; the sidecar holds the rest.
-
-## How linking works
-
-1. **Detect.** A script (`scripts/populate_cross_survey_links.py`) or its MCP wrapper reads a reference lexeme CSV and finds workspace concepts whose English gloss appears in the reference.
-2. **Validate.** By default, only single-word concepts (no parentheses, commas, or whitespace in `concept_en`) are matched — this avoids false equivalences between elicitation variants like `father (vocative)` and bare `father`. The reference's primary entry for that survey must also match the workspace's legacy primary, or the row is flagged as a conflict and skipped.
-3. **Write.** Matched concepts get sidecar entries in `concept_survey_links` for the surveys they're linked to. `concepts.csv` stays untouched.
-4. **Surface.** The React UI reads `concept_survey_links` at render time. A concept with two or more linked surveys shows an interactive badge.
-
-### Interaction modes
-
-The shared `<SurveyBadge>` component (in the concept sidebar and the right-panel "Active survey" line) adapts to context:
-
-| Context | Click behavior |
-|---|---|
-| 1 linked survey | Static badge — no interaction |
-| 2 linked surveys, active speaker | Cycle: writes a per-speaker preference into `speaker_choices` (non-destructive) |
-| 2 linked surveys, no active speaker | **Promote**: rewrites `concepts.csv` primary to the next survey and demotes the old primary into `concept_survey_links` |
-| 3+ linked surveys | Opens a popover menu of all options; selecting one performs the cycle or promote action depending on speaker state |
-
-The promote action calls `POST /api/concepts/{id}/promote-survey-primary` — a global, no-speaker endpoint that changes the canonical primary for the concept. It writes an atomic CSV backup (`concepts.csv.bak-<timestamp>-pre-promote-<concept_id>`) before each rewrite.
-
-## Using the MCP tool
-
-The `populate_cross_survey_links` MCP tool runs the same logic as the CLI script but is callable by the AI agent. The workspace root comes from the agent's `project_root`; you only supply the reference CSV path.
-
-### Reference CSV format
-
-Required columns (case-insensitive header):
-
-```
+```csv
 source,id,lexeme
-JBIL,1,one
-JBIL,2,two
-KLQ,1.1,hair (collective)
-KLQ,1.5,nose
-KLQ,2.1,father
 ```
 
-- `source` — survey ID, case-insensitive (normalized to lowercase internally). Common values: `JBIL`, `KLQ`, or any custom survey ID you've registered in `survey-overlap.json::surveys`.
-- `id` — `source_item` exactly as it should appear in the CSV (e.g. `1.1`, `34`).
-- `lexeme` — English gloss. Match is case-insensitive after collapsing whitespace.
+| Column | What to put there | Example value |
+|---|---|---|
+| `source` | The survey/list name or code. Use any stable name that makes sense for your project. | `SurveyA`, `SurveyB`, `WordList2024` |
+| `id` | The item number or item code from that survey. PARSE treats it as text, so keep punctuation and leading zeros if your survey uses them. | `001`, `A-10`, `4.2` |
+| `lexeme` | The concept gloss that matches `concept_en` in PARSE's `concepts.csv`. This is the meaning label, not a speaker's actual word form. | `water`, `fire`, `eat` |
 
-The CSV can contain rows for any number of surveys. Duplicate entries for the same `(survey, lexeme)` pair with different IDs are flagged as `reference_ambiguous` and the affected concept is skipped.
+Header names are case-insensitive, so `Source,ID,Lexeme` also works. Extra columns may be present, but the tool only uses `source`, `id`, and `lexeme`. Save the file as a UTF-8, comma-delimited `.csv` file.
 
-### Tool parameters
+### Blank template
 
-| Parameter | Type | Required | Default | Notes |
-|---|---|---|---|---|
-| `referencePath` | string | yes | — | Absolute path or workspace-relative path to the reference CSV |
-| `dryRun` | boolean | yes | — | `true` returns the would-add summary without writing; `false` applies |
-| `singleWordOnly` | boolean | no | `true` | When true, only matches concepts whose `concept_en` has no parens, commas, or whitespace |
+```csv
+source,id,lexeme
+<survey_name>,<survey_item_id>,<concept_gloss>
+<survey_name>,<survey_item_id>,<concept_gloss>
+```
 
-### Example dry-run call
+### Generic example
+
+```csv
+source,id,lexeme
+SurveyA,001,water
+SurveyA,002,fire
+SurveyA,003,eat
+SurveyB,A-10,water
+SurveyB,A-20,fire
+SurveyB,A-30,eat
+SurveyC,4.1,water
+SurveyC,4.2,fire
+```
+
+This tells PARSE that:
+
+- `SurveyA` item `001`, `SurveyB` item `A-10`, and `SurveyC` item `4.1` all mean `water`.
+- `SurveyA` item `002`, `SurveyB` item `A-20`, and `SurveyC` item `4.2` all mean `fire`.
+- `SurveyA` item `003` and `SurveyB` item `A-30` both mean `eat`.
+
+The exact survey names and item IDs are yours. The important rule is that the same `lexeme` text must be used for rows that describe the same concept.
+
+## Matching rules in plain language
+
+The tool compares your reference CSV against the workspace's existing `concepts.csv`.
+
+For each PARSE concept, it checks:
+
+1. Does the concept's `concept_en` gloss appear in the reference CSV?
+2. Does the reference CSV include the concept's current primary survey and item ID?
+3. Are there other surveys in the reference CSV with the same gloss?
+
+If all three are true, the tool can add those other survey IDs as alternates.
+
+### Example of a safe match
+
+Suppose a row in PARSE's `concepts.csv` says:
+
+```csv
+id,concept_en,source_item,source_survey,custom_order
+1,water,001,SurveyA,1
+```
+
+Your reference CSV should include the current primary row plus the alternate rows:
+
+```csv
+source,id,lexeme
+SurveyA,001,water
+SurveyB,A-10,water
+SurveyC,4.1,water
+```
+
+The dry run will propose adding `SurveyB` item `A-10` and `SurveyC` item `4.1` as alternate survey IDs for the existing `water` concept. It will not change `concepts.csv` during population.
+
+### Common formatting mistakes
+
+| Problem | Why it matters | Fix |
+|---|---|---|
+| Missing `source`, `id`, or `lexeme` column | The tool ignores rows without all three values. | Add the required columns exactly, or with different capitalization only. |
+| A survey item ID is changed by spreadsheet formatting | IDs like `001` can become `1`; IDs like `4.10` can become `4.1`. | Format the ID column as text before saving the CSV. |
+| The reference CSV omits the current primary survey row | PARSE cannot prove the alternate rows belong to the same existing concept. | Include the current primary survey/item row and every alternate survey/item row for that gloss. |
+| The same survey and gloss appears twice with different IDs | PARSE cannot know which ID is correct. | Deduplicate the reference CSV before running the tool. |
+| `lexeme` contains full language forms instead of glosses | The tool matches concepts by `concept_en`, not by speaker responses. | Use stable concept glosses such as `water`, `fire`, or your project's existing `concept_en` labels. |
+
+## MCP tool usage
+
+Tool name:
+
+```text
+populate_cross_survey_links
+```
+
+Parameters:
+
+| Parameter | Required | What it means |
+|---|---|---|
+| `referencePath` | yes | Path to the reference CSV. Use an absolute path or a path relative to the PARSE workspace. |
+| `dryRun` | yes | `true` previews the result without writing. `false` applies the safe proposed links. |
+| `singleWordOnly` | no | Defaults to `true`. When true, PARSE only auto-links simple one-word concept labels and skips concept labels with spaces, commas, or parentheses. |
+
+### Step 1: dry run first
+
+Ask the MCP tool to preview the links:
 
 ```jsonc
 {
   "name": "populate_cross_survey_links",
   "arguments": {
-    "referencePath": "imports/lexemes_combined.csv",
+    "referencePath": "imports/concept-reference.csv",
     "dryRun": true,
     "singleWordOnly": true
   }
 }
 ```
 
-Response shape:
+Read the dry-run result before applying anything:
 
-```jsonc
-{
-  "dryRun": true,
-  "matched": [
-    {
-      "concept_id": "1",
-      "concept_en": "nose",
-      "legacy_primary": { "survey": "klq", "source_item": "1.5" },
-      "reference_links": { "jbil": "34", "klq": "1.5" }
-    }
-    // ...
-  ],
-  "would_add": [
-    { "concept_id": "1", "concept_en": "nose", "links": { "jbil": "34" } }
-    // ...
-  ],
-  "conflicts": [
-    {
-      "concept_id": "12",
-      "concept_en": "rain",
-      "reason": "legacy_primary_mismatch",
-      "legacy_primary": { "survey": "jbil", "source_item": "126" },
-      "reference_primary": { "survey": "jbil", "source_item": "999" }
-    }
-  ],
-  "skipped_multiword": [
-    { "concept_id": "2", "concept_en": "father (vocative)", "reason": "single_word_only" }
-  ]
-}
-```
+| Result field | Meaning |
+|---|---|
+| `matched` | Concepts found in both PARSE and your reference CSV. |
+| `would_add` | Links PARSE would add if you apply the run. This is the main list to review. |
+| `conflicts` | Rows PARSE did not trust. Fix these in the CSV or workspace before applying. |
+| `skipped_multiword` | Concepts skipped because `singleWordOnly` is true. |
 
-Inspect `would_add` and `conflicts` before applying. To apply, call again with `dryRun: false`:
+A useful dry-run result should have the expected concepts in `would_add` and no surprising entries in `conflicts`.
+
+### Step 2: apply after review
+
+When the dry run looks correct, run the same tool with `dryRun: false`:
 
 ```jsonc
 {
   "name": "populate_cross_survey_links",
   "arguments": {
-    "referencePath": "imports/lexemes_combined.csv",
-    "dryRun": false
+    "referencePath": "imports/concept-reference.csv",
+    "dryRun": false,
+    "singleWordOnly": true
   }
 }
 ```
 
-The response now includes a `sidecar_diff` showing the pre-apply and post-apply state of `concept_survey_links`. The operation is idempotent — calling apply a second time on the same inputs produces no further write.
+Applying the tool writes the alternate links to `survey-overlap.json`. It does not rewrite `concepts.csv` and does not change speaker annotations.
 
-### Equivalent CLI invocation
+## What PARSE stores
 
-Same logic outside the agent:
+PARSE uses two workspace files together:
 
-```bash
-PYTHONPATH=python python3 scripts/populate_cross_survey_links.py \
-  --reference imports/lexemes_combined.csv \
-  --workspace ~/parse-workspace \
-  --apply   # omit for dry-run
-```
+| File | User-facing role |
+|---|---|
+| `concepts.csv` | The main concept list. Each concept has one current primary survey and item ID. Exports use this primary value. |
+| `survey-overlap.json` | PARSE-managed sidecar file for alternate survey IDs and per-speaker survey preferences. You usually do not edit this by hand. |
+
+After population, a concept can have one primary survey ID in `concepts.csv` and one or more alternate survey IDs in `survey-overlap.json`.
+
+## What changes in the UI
+
+After the links are applied:
+
+- Concepts with only one survey ID show a normal static survey badge.
+- Concepts with multiple survey IDs show a clickable badge.
+- With a speaker active, clicking the badge changes that speaker's preferred survey ID for the concept. This is non-destructive and does not rewrite `concepts.csv`.
+- Without a speaker active, clicking the badge can promote another survey ID to the global primary value. PARSE backs up `concepts.csv` before rewriting it.
+
+Use promotion only when you want exports to use a different survey's IDs as the primary IDs.
 
 ## End-to-end workflow
 
-1. **Prepare** a reference lexeme CSV with `source,id,lexeme` columns covering every survey you want PARSE to know about. For the JBIL+KLQ case, this is one file with both surveys' entries combined.
-2. **Place** the file in the workspace (e.g. `~/parse-workspace/imports/lexemes_combined.csv`). Any path readable by the workspace works.
-3. **Dry-run.** Call `populate_cross_survey_links` with `dryRun: true`. Read the `would_add` list to confirm the proposed links and the `conflicts` list for anything to investigate.
-4. **Apply.** Re-call with `dryRun: false`. `survey-overlap.json::concept_survey_links` now contains alternates for the matched concepts.
-5. **Verify in the UI.** Open PARSE. Concepts with multiple linked surveys now show a clickable badge in the sidebar. The right-panel "Active survey" line is also flippable.
-6. **Flip primaries** (no-speaker context). Click a badge while browsing the concept list to promote a sidecar entry to primary. PARSE rewrites `concepts.csv` (with a `.bak-*` backup) and moves the old primary into the sidecar so nothing is lost.
-7. **Per-speaker preferences** (annotation context). With a speaker active, clicking the badge sets a per-speaker preference under `speaker_choices`. The CSV primary is unchanged; only what this speaker sees changes.
+1. **Prepare your reference CSV.** Use the required `source,id,lexeme` columns. Include one row per survey item you want PARSE to know about.
+2. **Check the glosses.** The `lexeme` values should match the `concept_en` labels in PARSE's `concepts.csv`.
+3. **Place the CSV where PARSE can read it.** A workspace-relative path such as `imports/concept-reference.csv` is easiest.
+4. **Run the MCP dry run.** Use `dryRun: true` and inspect `would_add`, `conflicts`, and `skipped_multiword`.
+5. **Fix the CSV if needed.** Resolve duplicate IDs, missing primary rows, spelling differences, or spreadsheet formatting issues.
+6. **Apply the links.** Re-run with `dryRun: false` only after the preview is correct.
+7. **Verify in PARSE.** Open the concept list and check that linked concepts now show clickable survey badges.
+8. **Promote only if needed.** If an export should use another survey's IDs as primary, promote that survey in the UI before exporting.
 
 ## Troubleshooting
 
-**Badge isn't clickable.** Only one survey is linked. Check `survey-overlap.json::concept_survey_links` for that concept ID — if it's missing or empty, the population step didn't match it. Re-run the dry-run and check `conflicts` and `skipped_multiword`.
+**The tool says there are no `would_add` rows.** Check that the `lexeme` values in the reference CSV match the `concept_en` values in `concepts.csv`. Also check that the current primary survey/item row is present in the reference CSV.
 
-**Concept appears in `conflicts` with `legacy_primary_mismatch`.** The workspace's CSV primary disagrees with the reference for that survey. Fix by either correcting `concepts.csv` or correcting the reference. Don't override — a mismatch usually reflects a real disagreement worth resolving.
+**Rows appear under `conflicts`.** PARSE found something it could not safely link. Common causes are duplicate survey/gloss rows with different IDs, a current primary ID that disagrees with `concepts.csv`, or an existing sidecar entry with a different item ID.
 
-**Concept appears in `conflicts` with `reference_ambiguous`.** The reference CSV has multiple rows for the same `(survey, lexeme)` pair with different IDs. Deduplicate the reference.
+**IDs changed after saving the CSV.** Spreadsheet tools often strip leading zeros or change decimals. Reopen the CSV as plain text and verify the `id` column. If needed, set the spreadsheet column type to text and export again.
 
-**Concept appears in `conflicts` with `existing_sidecar_mismatch`.** The sidecar already has a different `source_item` recorded for that concept+survey pair. Either edit `survey-overlap.json` to remove the stale entry, or update the reference.
+**Multi-word concepts are skipped.** This is expected when `singleWordOnly` is true. You can set `singleWordOnly: false`, but review the dry run carefully because longer labels are more likely to represent variants rather than exact duplicates.
 
-**Multi-word concepts not matched.** Expected — the single-word filter is on by default to avoid false matches between elicitation variants. Pass `singleWordOnly: false` to relax (use with care; review the resulting `would_add` carefully).
+**The badge is not clickable.** The concept probably has only one linked survey ID. Re-run the dry run and confirm that the concept appears in `would_add` or is already linked in the workspace.
 
-**Where do exports look?** LingPy, NEXUS, and CLEF export from the CSV primary, not the sidecar. To export a different survey's IDs, promote that survey to primary first (single click in the UI or call the endpoint).
+**Exports still use the old survey ID.** Exports use the primary value in `concepts.csv`. Promote the desired survey ID to primary before exporting.
 
-## See also
+## Advanced: optional CLI equivalent
 
-- `POST /api/concepts/{id}/promote-survey-primary` — promote a sidecar link to primary (also called automatically by the badge click in no-speaker mode)
-- `POST /api/concepts/{id}/survey-links` — add or remove a sidecar entry directly
-- `python/survey_overlap.py` — sidecar read/write helpers (Python)
-- `src/components/shared/SurveyBadge.tsx` — UI component that renders the flippable badge
+Most users should use the MCP tool. If you are running the script manually from a terminal, the equivalent dry run is:
+
+```bash
+PYTHONPATH=python python3 scripts/populate_cross_survey_links.py \
+  --reference imports/concept-reference.csv \
+  --workspace /path/to/parse-workspace
+```
+
+To apply the result, add `--apply` after reviewing the dry run:
+
+```bash
+PYTHONPATH=python python3 scripts/populate_cross_survey_links.py \
+  --reference imports/concept-reference.csv \
+  --workspace /path/to/parse-workspace \
+  --apply
+```
