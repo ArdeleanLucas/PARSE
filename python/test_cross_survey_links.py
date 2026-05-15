@@ -50,12 +50,16 @@ def test_compute_cross_survey_link_patch_adds_single_word_twin(tmp_path: Path) -
 
 
 def test_compute_cross_survey_link_patch_skips_multiword_by_default(tmp_path: Path) -> None:
-    workspace = copy_workspace(tmp_path)
+    workspace = write_minimal_workspace(
+        tmp_path,
+        concepts_csv="id,concept_en,source_item,source_survey,custom_order\n2,big stone,20,JBIL,1\n",
+        reference_csv="source,id,lexeme\nJBIL,20,big stone\nKLQ,2.5,big stone\n",
+    )
 
     summary = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
 
     skipped = by_concept(summary["skipped_multiword"])
-    assert skipped["2"]["concept_en"] == "father (vocative)"
+    assert skipped["2"]["concept_en"] == "big stone"
     assert skipped["2"]["reason"] == "single_word_only"
 
 
@@ -137,7 +141,7 @@ def test_cross_survey_link_patch_is_idempotent_after_sidecar_update(tmp_path: Pa
     update_survey_overlap_state(workspace, {"concept_survey_links": patch})
     second = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
 
-    assert patch == {"1": {"klq": "1.5"}, "5": {"klq": "5.0"}}
+    assert patch == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "5": {"klq": "5.0"}}
     assert second["would_add"] == []
 
 
@@ -157,8 +161,8 @@ def test_apply_replace_resets_concept_survey_links_before_write(tmp_path: Path) 
     state = load_survey_overlap_state(workspace)
 
     assert diff["replace_mode"] is True
-    assert diff["added"] == {"1": {"klq": "1.5"}, "5": {"klq": "5.0"}}
-    assert state["concept_survey_links"] == {"1": {"klq": "1.5"}, "5": {"klq": "5.0"}}
+    assert diff["added"] == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "5": {"klq": "5.0"}}
+    assert state["concept_survey_links"] == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "5": {"klq": "5.0"}}
     assert state["speaker_choices"] == {"speaker-a": {"1": "jbil"}}
     assert state["speaker_concept_survey_links"] == {"speaker-a": {"1": {"jbil": "10"}}}
 
@@ -174,3 +178,105 @@ def test_apply_merge_preserves_stale_concept_survey_links(tmp_path: Path) -> Non
     assert diff["replace_mode"] is False
     assert state["concept_survey_links"]["99"] == {"jbil": "999"}
     assert state["concept_survey_links"]["4"] == {"klq": "5.5"}
+
+
+def test_compute_cross_survey_link_patch_matches_stripped_parens_when_exact_misses(tmp_path: Path) -> None:
+    workspace = write_minimal_workspace(
+        tmp_path,
+        concepts_csv=(
+            "id,concept_en,source_item,source_survey,custom_order\n"
+            "385,green,177,JBIL,1\n"
+            "52,salt,139,JBIL,2\n"
+        ),
+        reference_csv=(
+            "source,id,lexeme\n"
+            "JBIL,177,green\n"
+            "KLQ,5.4,green (grass)\n"
+            "JBIL,139,salt\n"
+            "KLQ,3.14,salt (eating)\n"
+        ),
+    )
+
+    summary = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
+
+    additions = by_concept(summary["would_add"])
+    assert additions["385"]["links"] == {"klq": "5.4"}
+    assert additions["52"]["links"] == {"klq": "3.14"}
+
+
+def test_compute_cross_survey_link_patch_matches_variant_workspace_concept_via_stripped_form(tmp_path: Path) -> None:
+    workspace = write_minimal_workspace(
+        tmp_path,
+        concepts_csv="id,concept_en,source_item,source_survey,custom_order\n1,hair (A),1.1,KLQ,1\n",
+        reference_csv=(
+            "source,id,lexeme\n"
+            "JBIL,32,hair\n"
+            "KLQ,1.1,hair (collective)\n"
+        ),
+    )
+
+    summary = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
+
+    additions = by_concept(summary["would_add"])
+    assert additions["1"]["links"] == {"jbil": "32"}
+    assert by_concept(summary["matched"])["1"]["reference_links"] == {"jbil": "32", "klq": "1.1"}
+
+
+def test_compute_cross_survey_link_patch_rejects_stripped_match_when_within_survey_ambiguous(tmp_path: Path) -> None:
+    workspace = write_minimal_workspace(
+        tmp_path,
+        concepts_csv="id,concept_en,source_item,source_survey,custom_order\n7,father (vocative),2.3,KLQ,1\n",
+        reference_csv=(
+            "source,id,lexeme\n"
+            "KLQ,2.1,father\n"
+            "KLQ,2.3,father (vocative)\n"
+            "JBIL,72,father\n"
+        ),
+    )
+
+    summary = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
+
+    conflict = by_concept(summary["conflicts"])["7"]
+    assert conflict["reason"] == "stripped_match_ambiguous"
+    assert "7" not in by_concept(summary["would_add"])
+
+
+def test_compute_cross_survey_link_patch_preserves_exact_match_when_both_present(tmp_path: Path) -> None:
+    workspace = write_minimal_workspace(
+        tmp_path,
+        concepts_csv="id,concept_en,source_item,source_survey,custom_order\n8,father,2.1,KLQ,1\n",
+        reference_csv=(
+            "source,id,lexeme\n"
+            "KLQ,2.1,father\n"
+            "KLQ,2.3,father (vocative)\n"
+            "JBIL,72,father\n"
+        ),
+    )
+
+    summary = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
+
+    additions = by_concept(summary["would_add"])
+    assert additions["8"]["links"] == {"jbil": "72"}
+    assert by_concept(summary["matched"])["8"]["reference_links"] == {"jbil": "72", "klq": "2.1"}
+    assert summary["conflicts"] == []
+
+
+def test_compute_cross_survey_link_patch_strips_nested_commas_inside_parens(tmp_path: Path) -> None:
+    workspace = write_minimal_workspace(
+        tmp_path,
+        concepts_csv=(
+            "id,concept_en,source_item,source_survey,custom_order\n"
+            "9,\"hard (like a stone, opposite of soft 'nerm')\",4.18,KLQ,1\n"
+        ),
+        reference_csv=(
+            "source,id,lexeme\n"
+            "KLQ,4.18,hard (something)\n"
+            "JBIL,172,hard\n"
+        ),
+    )
+
+    summary = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
+
+    additions = by_concept(summary["would_add"])
+    assert additions["9"]["links"] == {"jbil": "172"}
+    assert by_concept(summary["matched"])["9"]["reference_links"] == {"jbil": "172", "klq": "4.18"}

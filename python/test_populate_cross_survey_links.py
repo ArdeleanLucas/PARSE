@@ -37,6 +37,7 @@ def test_populate_cross_survey_links_dry_run_prints_json_without_writing(tmp_pat
     assert set(payload) == {"matched", "would_add", "conflicts", "skipped_multiword"}
     assert payload["would_add"] == [
         {"concept_id": "1", "concept_en": "nose", "links": {"klq": "1.5"}},
+        {"concept_id": "2", "concept_en": "father (vocative)", "links": {"klq": "2.5"}},
         {"concept_id": "5", "concept_en": "stone", "links": {"klq": "5.0"}},
     ]
     assert (workspace / "survey-overlap.json").read_text(encoding="utf-8") == before
@@ -48,8 +49,9 @@ def test_populate_cross_survey_links_apply_writes_sidecar_and_is_idempotent(tmp_
     first = run_script("--workspace", str(workspace), "--reference", str(workspace / "reference.csv"), "--apply")
     state = json.loads((workspace / "survey-overlap.json").read_text(encoding="utf-8"))
 
-    assert first["sidecar_diff"]["added"] == {"1": {"klq": "1.5"}, "5": {"klq": "5.0"}}
+    assert first["sidecar_diff"]["added"] == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "5": {"klq": "5.0"}}
     assert state["concept_survey_links"]["1"] == {"klq": "1.5"}
+    assert state["concept_survey_links"]["2"] == {"klq": "2.5"}
     assert state["concept_survey_links"]["4"] == {"klq": "5.5"}
     assert state["concept_survey_links"]["5"] == {"klq": "5.0"}
 
@@ -79,7 +81,7 @@ def test_populate_cross_survey_links_replace_apply_resets_stale_sidecar_entries(
     replaced = json.loads(sidecar_path.read_text(encoding="utf-8"))
 
     assert payload["sidecar_diff"]["replace_mode"] is True
-    assert payload["sidecar_diff"]["added"] == {"1": {"klq": "1.5"}, "5": {"klq": "5.0"}}
-    assert replaced["concept_survey_links"] == {"1": {"klq": "1.5"}, "5": {"klq": "5.0"}}
+    assert payload["sidecar_diff"]["added"] == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "5": {"klq": "5.0"}}
+    assert replaced["concept_survey_links"] == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "5": {"klq": "5.0"}}
     assert replaced["speaker_choices"] == {"speaker-a": {"1": "jbil"}}
     assert replaced["speaker_concept_survey_links"] == {"speaker-a": {"1": {"jbil": "10"}}}
