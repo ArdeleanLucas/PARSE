@@ -160,3 +160,30 @@ def test_concept_tags_are_speaker_local_on_disk(tmp_path: pathlib.Path, monkeypa
 
     assert reloaded_a["concept_tags"] == {"1": ["confirmed", "review"]}
     assert reloaded_b["concept_tags"] == {"1": ["problematic"], "2": ["review"]}
+
+
+def test_workflow_concept_tags_are_exclusive_when_confirmed_replaces_problematic() -> None:
+    raw = _base_annotation()
+    raw["concept_tags"] = {"322": ["custom-sk-concept-list", "problematic", "confirmed"]}
+
+    normalized = server._normalize_annotation_record(raw, "Saha01")
+
+    assert normalized["concept_tags"] == {"322": ["custom-sk-concept-list", "confirmed"]}
+
+
+def test_workflow_concept_tags_leave_non_workflow_tags_alone() -> None:
+    raw = _base_annotation()
+    raw["concept_tags"] = {"322": ["custom-sk-concept-list", "problematic"]}
+
+    normalized = server._normalize_annotation_record(raw, "Saha01")
+
+    assert normalized["concept_tags"] == {"322": ["custom-sk-concept-list", "problematic"]}
+
+
+def test_workflow_concept_tags_are_exclusive_when_review_needed_replaces_confirmed() -> None:
+    raw = _base_annotation()
+    raw["concept_tags"] = {"322": ["custom-sk-concept-list", "confirmed", "review-needed"]}
+
+    normalized = server._normalize_annotation_record(raw, "Saha01")
+
+    assert normalized["concept_tags"] == {"322": ["custom-sk-concept-list", "review-needed"]}

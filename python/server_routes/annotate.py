@@ -7,6 +7,8 @@ import hashlib
 import logging
 import math
 import server as _server
+
+WORKFLOW_TAG_IDS = frozenset({"review-needed", "confirmed", "problematic"})
 from ai.provider import AIProvider
 from app.services.audio_paths import pipeline_audio_path_for_speaker
 from app.services.speaker_id import normalize_speaker_id as _shared_normalize_speaker_id
@@ -514,8 +516,14 @@ def _annotation_normalize_concept_tags(raw_tags: _server.Any) -> _server.Dict[st
             continue
         tag_ids: _server.List[str] = []
         seen: Set[str] = set()
+        workflow_tag: str | None = None
+        for raw_tag_id in raw_tag_ids:
+            if isinstance(raw_tag_id, str) and raw_tag_id in WORKFLOW_TAG_IDS:
+                workflow_tag = raw_tag_id
         for raw_tag_id in raw_tag_ids:
             if not isinstance(raw_tag_id, str) or raw_tag_id in seen:
+                continue
+            if raw_tag_id in WORKFLOW_TAG_IDS and raw_tag_id != workflow_tag:
                 continue
             seen.add(raw_tag_id)
             tag_ids.append(raw_tag_id)

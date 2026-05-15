@@ -111,6 +111,22 @@ def _read_csv_text(form: cgi.FieldStorage) -> tuple[str, str]:
     return csv_text, str(csv_item.filename or "")
 
 
+def _is_truthy_form_value(value: Any) -> bool:
+    return str(value or "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _source_identity_key(source_item: Any, source_survey: Any) -> tuple[str, str] | None:
+    item = str(source_item or "").strip()
+    survey = normalize_survey_id(source_survey)
+    if not item or not survey:
+        return None
+    return item, survey
+
+
+def _concept_conflict_entry(row: Dict[str, str]) -> Dict[str, str]:
+    return {"id": str(row.get("id") or ""), "label": str(row.get("concept_en") or "")}
+
+
 def _empty_survey_counter() -> Dict[str, int]:
     return {"linked_count": 0, "created_count": 0, "matched_count": 0}
 
@@ -136,6 +152,8 @@ def build_concepts_import_response(
 
     mode_field = form.getfirst("mode", "") if "mode" in form else ""
     replace_mode = str(mode_field or "").strip().lower() == "replace"
+    allow_variant_field = form.getfirst("allow_variant", form.getfirst("allowVariant", ""))
+    allow_variant = _is_truthy_form_value(allow_variant_field)
 
     try:
         reader = _csv.DictReader(io.StringIO(csv_text))
@@ -158,6 +176,7 @@ def build_concepts_import_response(
 
     by_id: Dict[str, int] = {}
     by_label: Dict[str, int] = {}
+    by_source_identity: Dict[tuple[str, str], List[int]] = {}
     for idx, row in enumerate(existing):
         rid = normalize_concept_id(row.get("id"))
         lbl = str(row.get("concept_en") or "").strip().lower()
@@ -165,6 +184,9 @@ def build_concepts_import_response(
             by_id[rid] = idx
         if lbl:
             by_label[lbl] = idx
+        source_key = _source_identity_key(row.get("source_item"), row.get("source_survey"))
+        if source_key is not None:
+            by_source_identity.setdefault(source_key, []).append(idx)
 
     canonical_index = build_canonical_gloss_index(existing)
 
@@ -222,6 +244,18 @@ def build_concepts_import_response(
         if target_idx is None:
             if not up_label:
                 continue
+            source_key = _source_identity_key(source_item_raw, source_survey_raw)
+            if source_key is not None and not allow_variant:
+                collisions = [_concept_conflict_entry(existing[idx]) for idx in by_source_identity.get(source_key, [])]
+                if collisions:
+                    return JsonResponseSpec(
+                        status=HTTPStatus.CONFLICT,
+                        payload={
+                            "error": "duplicate_source_identity",
+                            "existing": collisions,
+                            "hint": "pass allow_variant=true to create a sibling variant",
+                        },
+                    )
             if not up_id:
                 existing_ids = {normalize_concept_id(row.get("id")) for row in existing}
                 next_id = 1
@@ -239,6 +273,9 @@ def build_concepts_import_response(
             new_idx = len(existing) - 1
             by_id[up_id] = new_idx
             by_label[up_label.lower()] = new_idx
+            source_key = _source_identity_key(row.get("source_item"), row.get("source_survey"))
+            if source_key is not None:
+                by_source_identity.setdefault(source_key, []).append(new_idx)
             canonical_key = normalize_cross_survey_gloss(up_label)
             if canonical_key:
                 bucket = canonical_index.setdefault(canonical_key, [])
