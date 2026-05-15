@@ -179,6 +179,15 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
                 },
                 "additionalProperties": False,
             },
+            "ConceptPromoteSurveyPrimaryRequest": {
+                "type": "object",
+                "required": ["survey_id", "source_item"],
+                "properties": {
+                    "survey_id": {"type": "string"},
+                    "source_item": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
             "ConceptSurveyLinkDeleteRequest": {
                 "type": "object",
                 "required": ["survey_id"],
@@ -690,6 +699,23 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
         },
         "/api/concepts/{conceptId}/duplicate": {
             "post": {"tags": ["Annotations"], "summary": "Duplicate one concept row into a new variant", "operationId": "duplicateConcept", "parameters": [{"name": "conceptId", "in": "path", "required": True, "schema": {"type": "string", "pattern": "^[0-9]+$"}}], "requestBody": {"required": False, "content": _json_content({"type": "object", "maxProperties": 0, "additionalProperties": False})}, "responses": {"200": _response("Duplicated concept rows", _schema_ref("ConceptDuplicateResponse")), "400": _response("Invalid concept id or malformed path", _schema_ref("ErrorResponse")), "404": _response("Concept row not found", _schema_ref("ErrorResponse")), "409": _response("Concept row cannot be duplicated (no free variant labels remain)", _schema_ref("ErrorResponse")), "500": _response("Write failure", _schema_ref("ErrorResponse"))}, "x-parse": {"idempotent": False}},
+        },
+        "/api/concepts/{conceptId}/promote-survey-primary": {
+            "post": {
+                "tags": ["Annotations"],
+                "summary": "Promote one linked survey item to the concepts.csv primary link",
+                "description": "Moves the current concepts.csv source_survey/source_item pair into concept_survey_links, removes the requested sidecar link, and rewrites the CSV primary to the requested survey item. This endpoint is global and does not accept a speaker field.",
+                "operationId": "promoteConceptSurveyPrimary",
+                "parameters": [{"name": "conceptId", "in": "path", "required": True, "schema": {"type": "string", "pattern": "^[0-9]+$"}}],
+                "requestBody": {"required": True, "content": _json_content(_schema_ref("ConceptPromoteSurveyPrimaryRequest"))},
+                "responses": {
+                    "200": _response("Promoted concept primary survey link", _schema_ref("ConceptSurveyLinkResponse")),
+                    "400": _response("Invalid concept id, missing fields, or requested pair not currently linked", _schema_ref("ErrorResponse")),
+                    "404": _response("Concept row not found", _schema_ref("ErrorResponse")),
+                    "500": _response("Sidecar or CSV write failure", _schema_ref("ErrorResponse")),
+                },
+                "x-parse": {"idempotent": False},
+            },
         },
         "/api/concepts/{conceptId}/survey-links": {
             "post": {

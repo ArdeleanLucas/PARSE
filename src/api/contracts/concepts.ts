@@ -1,4 +1,13 @@
-import type { ConceptEntry, ConceptSurveyLinkMutation, ConceptSurveyLinkResponse, ComputeJob, RelinkByGlossRequest, RelinkByGlossResponse } from "../types";
+import type {
+  ConceptEntry,
+  ConceptPromoteSurveyPrimaryRequest,
+  ConceptPromoteSurveyPrimaryResponse,
+  ConceptSurveyLinkMutation,
+  ConceptSurveyLinkResponse,
+  ComputeJob,
+  RelinkByGlossRequest,
+  RelinkByGlossResponse,
+} from "../types";
 import { apiFetch } from "./shared";
 import { startCompute } from "./chat-and-generic-compute";
 
@@ -58,6 +67,16 @@ export async function deleteConceptSurveyLink(
   return apiFetch<ConceptSurveyLinkResponse>(
     `/api/concepts/${encodeConceptIdOrList(conceptIdOrList)}/survey-links`,
     { method: "DELETE", body: JSON.stringify(payload) },
+  );
+}
+
+export async function promoteConceptSurveyPrimary(
+  conceptId: string,
+  payload: ConceptPromoteSurveyPrimaryRequest,
+): Promise<ConceptPromoteSurveyPrimaryResponse> {
+  return apiFetch<ConceptPromoteSurveyPrimaryResponse>(
+    `/api/concepts/${encodeURIComponent(conceptId)}/promote-survey-primary`,
+    { method: "POST", body: JSON.stringify(payload) },
   );
 }
 
