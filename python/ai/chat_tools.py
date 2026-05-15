@@ -65,6 +65,7 @@ LEGACY_CURATED_MCP_TOOL_NAMES = (
     "detect_timestamp_offset_from_pair",
     "apply_timestamp_offset",
     "import_tag_csv",
+    "populate_cross_survey_links",
     "list_concepts_by_tag",
     "prepare_tag_import",
     "rerun_lexemes_by_tag",
@@ -117,6 +118,7 @@ WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "export_lingpy_tsv",
     "export_nexus",
     "import_tag_csv",
+    "populate_cross_survey_links",
     "peaks_generate",
     "source_index_validate",
     "transcript_reformat",
@@ -462,6 +464,10 @@ from ai.tools.contact_lexeme_tools import (
     contact_lexeme_lookup as tool_contact_lexeme_lookup,
     load_project_concepts,
 )
+from ai.tools.cross_survey_link_tools import (
+    CROSS_SURVEY_LINK_TOOL_SPECS,
+    tool_populate_cross_survey_links,
+)
 from ai.tools.enrichment_tools import (
     ENRICHMENT_TOOL_SPECS,
     enrichments_read as tool_enrichments_read,
@@ -571,6 +577,7 @@ REGISTRY: Dict[str, ChatToolSpec] = {
     **COMPARATIVE_TOOL_SPECS,
     **CONCEPT_FIELD_TOOL_SPECS,
     **CONTACT_LEXEME_TOOL_SPECS,
+    **CROSS_SURVEY_LINK_TOOL_SPECS,
     **ENRICHMENT_TOOL_SPECS,
     **EXPORT_TOOL_SPECS,
     **TRANSFORM_TOOL_SPECS,
@@ -679,6 +686,7 @@ class ParseChatTools:
             **COMPARATIVE_TOOL_SPECS,
             **CONCEPT_FIELD_TOOL_SPECS,
             **CONTACT_LEXEME_TOOL_SPECS,
+            **CROSS_SURVEY_LINK_TOOL_SPECS,
             **ENRICHMENT_TOOL_SPECS,
             **EXPORT_TOOL_SPECS,
             **TRANSFORM_TOOL_SPECS,
@@ -1358,6 +1366,9 @@ class ParseChatTools:
 
     def _tool_import_tag_csv(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_import_tag_csv(self, args)
+
+    def _tool_populate_cross_survey_links(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        return tool_populate_cross_survey_links(self, args)
 
     def _tool_prepare_tag_import(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_prepare_tag_import(self, args)

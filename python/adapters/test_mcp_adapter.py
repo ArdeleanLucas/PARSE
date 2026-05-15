@@ -238,7 +238,7 @@ def test_job_observability_tools_are_allowlisted(tmp_path) -> None:
 
 
 @pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
-def test_create_mcp_server_exposes_60_parse_tools_by_default_without_config(tmp_path, monkeypatch) -> None:
+def test_create_mcp_server_exposes_61_parse_tools_by_default_without_config(tmp_path, monkeypatch) -> None:
     import asyncio
     import json
 
@@ -249,7 +249,7 @@ def test_create_mcp_server_exposes_60_parse_tools_by_default_without_config(tmp_
     mcp_tools = asyncio.run(server.list_tools())
     tool_names = {tool.name for tool in mcp_tools}
 
-    assert len(mcp_tools) == 64
+    assert len(mcp_tools) == 65
     assert "mcp_get_exposure_mode" in tool_names
     assert "run_full_annotation_pipeline" in tool_names
     assert "prepare_compare_mode" in tool_names
@@ -266,14 +266,15 @@ def test_create_mcp_server_exposes_60_parse_tools_by_default_without_config(tmp_
     assert "revert_csv_reimport" in tool_names
     assert "set_concept_field" in tool_names
     assert "transcript_reformat" in tool_names
+    assert "populate_cross_survey_links" in tool_names
 
     _, meta = asyncio.run(server.call_tool("mcp_get_exposure_mode", {}))
     payload = json.loads(meta["result"])
     assert payload["ok"] is True
     assert payload["result"]["exposeAllTools"] is False
     assert payload["result"]["configSource"] is None
-    assert payload["result"]["mcpToolCount"] == 64
-    assert payload["result"]["parseChatToolCount"] == 60
+    assert payload["result"]["mcpToolCount"] == 65
+    assert payload["result"]["parseChatToolCount"] == 61
     assert payload["result"]["workflowToolCount"] == 3
 
 
@@ -293,7 +294,7 @@ def test_create_mcp_server_explicit_false_config_preserves_legacy_curated_surfac
     mcp_tools = asyncio.run(server.list_tools())
     tool_names = {tool.name for tool in mcp_tools}
 
-    assert len(mcp_tools) == 44
+    assert len(mcp_tools) == 45
     assert "annotation_read" in tool_names
     assert "jobs_list" in tool_names
     assert "csv_only_reimport" in tool_names
@@ -308,12 +309,12 @@ def test_create_mcp_server_explicit_false_config_preserves_legacy_curated_surfac
     assert payload["ok"] is True
     assert payload["result"]["exposeAllTools"] is False
     assert payload["result"]["configSource"] == str(config_dir / "mcp_config.json")
-    assert payload["result"]["mcpToolCount"] == 44
-    assert payload["result"]["defaultParseMcpToolCount"] == 60
+    assert payload["result"]["mcpToolCount"] == 45
+    assert payload["result"]["defaultParseMcpToolCount"] == 61
 
 
 @pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
-def test_create_mcp_server_exposes_all_60_tools_when_enabled_in_config_dir(tmp_path, monkeypatch) -> None:
+def test_create_mcp_server_exposes_all_61_tools_when_enabled_in_config_dir(tmp_path, monkeypatch) -> None:
     import asyncio
     import json
 
@@ -329,19 +330,19 @@ def test_create_mcp_server_exposes_all_60_tools_when_enabled_in_config_dir(tmp_p
     monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
     server = create_mcp_server(str(tmp_path))
     mcp_tools = asyncio.run(server.list_tools())
-    assert len(mcp_tools) == 64
+    assert len(mcp_tools) == 65
 
     _, meta = asyncio.run(server.call_tool("mcp_get_exposure_mode", {}))
     payload = json.loads(meta["result"])
     assert payload["ok"] is True
     assert payload["result"]["exposeAllTools"] is True
-    assert payload["result"]["mcpToolCount"] == 64
-    assert payload["result"]["parseChatToolCount"] == 60
+    assert payload["result"]["mcpToolCount"] == 65
+    assert payload["result"]["parseChatToolCount"] == 61
     assert payload["result"]["workflowToolCount"] == 3
 
 
 @pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
-def test_create_mcp_server_exposes_all_60_tools_when_enabled_in_root_config(tmp_path, monkeypatch) -> None:
+def test_create_mcp_server_exposes_all_61_tools_when_enabled_in_root_config(tmp_path, monkeypatch) -> None:
     import asyncio
     import json
 
@@ -355,7 +356,7 @@ def test_create_mcp_server_exposes_all_60_tools_when_enabled_in_root_config(tmp_
     monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
     server = create_mcp_server(str(tmp_path))
     mcp_tools = asyncio.run(server.list_tools())
-    assert len(mcp_tools) == 64
+    assert len(mcp_tools) == 65
 
     _, meta = asyncio.run(server.call_tool("mcp_get_exposure_mode", {}))
     payload = json.loads(meta["result"])
