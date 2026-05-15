@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
 
 import { deleteConceptSurveyLink, setConceptSurveyLink } from '../../api/client';
@@ -204,6 +204,7 @@ export function ConceptSidebar({
   onDismissActionFeedback,
 }: ConceptSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{ concept: SidebarConcept; x: number; y: number } | null>(null);
+  const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
   const [surveyLinkEditor, setSurveyLinkEditor] = useState<SurveyLinkEditorState | null>(null);
   const [expandedConceptIds, setExpandedConceptIds] = useState<Set<number>>(() => new Set());
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -217,6 +218,28 @@ export function ConceptSidebar({
     window.addEventListener('mousedown', close);
     return () => window.removeEventListener('mousedown', close);
   }, [contextMenu]);
+
+  useLayoutEffect(() => {
+    if (!contextMenu) {
+      setMenuPos(null);
+      return;
+    }
+    const el = menuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const margin = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = contextMenu.x;
+    let top = contextMenu.y;
+    if (left + rect.width + margin > vw) {
+      left = Math.max(margin, vw - rect.width - margin);
+    }
+    if (top + rect.height + margin > vh) {
+      top = Math.max(margin, vh - rect.height - margin);
+    }
+    setMenuPos({ left, top });
+  }, [contextMenu, surveyLinkEditor]);
   useEffect(() => {
     if (activeConceptId == null || !activeConceptKey) return;
     const parent = filteredConcepts.find((concept) => concept.id === activeConceptId);
@@ -701,7 +724,11 @@ export function ConceptSidebar({
           ref={menuRef}
           role="menu"
           className="fixed z-50 min-w-[130px] rounded-md border border-slate-200 bg-white p-1 text-xs shadow-lg"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
+          style={{
+            left: menuPos?.left ?? contextMenu.x,
+            top: menuPos?.top ?? contextMenu.y,
+            visibility: menuPos ? 'visible' : 'hidden',
+          }}
         >
           <button
             type="button"
