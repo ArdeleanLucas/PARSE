@@ -181,6 +181,30 @@ describe('SurveyBadge', () => {
     expect(onPromote).toHaveBeenCalledWith({ surveyId: 'jbil', sourceItem: '31' });
   });
 
+  it('promotes via the popover when 3+ surveys are linked and no speaker is active', () => {
+    const onPromote = vi.fn();
+    const onCycle = vi.fn();
+    render(
+      <SurveyBadge
+        {...baseProps}
+        activeSpeaker={null}
+        availableSurveys={{ klq: '1.1', jbil: '31', ext: 'EXT-7' }}
+        onCycle={onCycle}
+        onPromote={onPromote}
+      />,
+    );
+
+    const badge = screen.getByRole('button', {
+      name: /Choose primary survey for head from 3 linked surveys/,
+    });
+    fireEvent.click(badge);
+    fireEvent.click(screen.getByRole('menuitem', { name: /EXT EXT-7/ }));
+
+    expect(onPromote).toHaveBeenCalledWith({ surveyId: 'ext', sourceItem: 'EXT-7' });
+    expect(onCycle).not.toHaveBeenCalled();
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
   it('keeps multi-survey badges static without an active speaker or promote handler', () => {
     const onCycle = vi.fn();
     const { container } = render(

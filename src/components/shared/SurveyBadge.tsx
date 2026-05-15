@@ -77,7 +77,9 @@ export function SurveyBadge({
   };
 
   const selectSurveyChoice = (surveyId: string) => {
-    onCycle?.({ surveyId, sourceItem: availableSurveys[surveyId] ?? '' });
+    const sourceItem = availableSurveys[surveyId] ?? '';
+    if (canCycleSurveyBadge && onCycle) onCycle({ surveyId, sourceItem });
+    else if (canPromoteSurveyBadge && onPromote) void onPromote({ surveyId, sourceItem });
     setOpen(false);
   };
 
@@ -120,7 +122,9 @@ export function SurveyBadge({
       <span ref={popoverRef} className="relative mr-2 inline-block">
         <button
           type="button"
-          aria-label={`Choose survey for ${conceptName} from ${surveyChoices.length} linked surveys`}
+          aria-label={canCycleSurveyBadge
+            ? `Choose survey for ${conceptName} from ${surveyChoices.length} linked surveys`
+            : `Choose primary survey for ${conceptName} from ${surveyChoices.length} linked surveys`}
           aria-haspopup="menu"
           aria-expanded={open}
           onClick={() => (open ? setOpen(false) : openMenu())}
