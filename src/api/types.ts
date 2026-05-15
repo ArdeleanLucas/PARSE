@@ -211,6 +211,13 @@ export interface ConceptSurveyLinkResponse {
   survey_overlap?: SurveyOverlapState;
 }
 
+export interface ConceptPromoteSurveyPrimaryRequest {
+  survey_id: string;
+  source_item: string;
+}
+
+export type ConceptPromoteSurveyPrimaryResponse = ConceptSurveyLinkResponse;
+
 export type RelinkByGlossReason = "parenthetical_stripped_match" | "comma_token_match";
 
 export interface RelinkByGlossGroup {

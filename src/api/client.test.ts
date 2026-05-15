@@ -16,6 +16,7 @@ import {
   updateSurveyOverlap,
   setConceptSurveyLink,
   deleteConceptSurveyLink,
+  promoteConceptSurveyPrimary,
   relinkConceptsByGloss,
   getCompareBundles,
   putCanonicalLexeme,
@@ -531,6 +532,17 @@ describe("concept survey-link/relink contract", () => {
     await expect(deleteConceptSurveyLink("527", { survey_id: "jbil", source_item: "31" })).resolves.toMatchObject({ ok: true });
     expect(fetchMock).toHaveBeenLastCalledWith("/api/concepts/527/survey-links", expect.objectContaining({
       method: "DELETE",
+      body: JSON.stringify({ survey_id: "jbil", source_item: "31" }),
+    }));
+  });
+
+  it("posts promote-survey-primary at the concept-scoped endpoint", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, concept: { id: "527", label: "head", source_survey: "JBIL", source_item: "31" } }));
+
+    await expect(promoteConceptSurveyPrimary("527", { survey_id: "jbil", source_item: "31" })).resolves.toMatchObject({ ok: true });
+
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/concepts/527/promote-survey-primary", expect.objectContaining({
+      method: "POST",
       body: JSON.stringify({ survey_id: "jbil", source_item: "31" }),
     }));
   });

@@ -8,11 +8,12 @@ import json
 import os
 import pathlib
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Any, BinaryIO, Callable, Dict, List
 
 from concept_linking import build_canonical_gloss_index, normalize_cross_survey_gloss
-from concept_source_item import normalize_concept_csv_row, row_value, write_concepts_csv_rows
+from concept_source_item import normalize_concept_csv_row, read_concepts_csv_rows, row_value, write_concepts_csv_rows
 from survey_overlap import (
     load_survey_overlap_state,
     normalize_survey_id,
@@ -525,6 +526,126 @@ def _build_concept_entry(row: Dict[str, str], state: Dict[str, Any], *, speaker:
     if speaker is not None:
         entry["speaker_surveys"] = speaker_concept_survey_links_for_id(cid, speaker, state)
     return entry
+
+
+def _concept_survey_link_response_payload(
+    row: Dict[str, str],
+    state: Dict[str, Any],
+    *,
+    speaker: str | None = None,
+) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "concept": _build_concept_entry(row, state, speaker=speaker),
+        "survey_overlap": state,
+    }
+
+
+def _promote_backup_path(concepts_path: pathlib.Path, concept_id: str) -> pathlib.Path:
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%S.%fZ")
+    return concepts_path.with_name("concepts.csv.bak-{0}-pre-promote-{1}".format(timestamp, concept_id))
+
+
+def build_concept_promote_survey_primary_response(
+    *,
+    headers: Any,
+    rfile: BinaryIO,
+    project_root: pathlib.Path,
+    concept_id: str,
+    upload_limit: int,
+) -> JsonResponseSpec:
+    payload = _read_json_body(rfile, headers, upload_limit=upload_limit)
+    survey_id = normalize_survey_id(payload.get("survey_id"))
+    source_item = str(payload.get("source_item") or "").strip()
+    concept_ids = _parse_concept_id_list(concept_id)
+    if len(concept_ids) != 1:
+        raise ProjectConfigHandlerError(HTTPStatus.BAD_REQUEST, "conceptId must name exactly one concept")
+    if not survey_id:
+        raise ProjectConfigHandlerError(HTTPStatus.BAD_REQUEST, "survey_id is required")
+    if not source_item:
+        raise ProjectConfigHandlerError(HTTPStatus.BAD_REQUEST, "source_item is required")
+
+    cid = concept_ids[0]
+    concepts_path = project_root / "concepts.csv"
+    try:
+        rows = read_concepts_csv_rows(concepts_path)
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ProjectConfigHandlerError(HTTPStatus.INTERNAL_SERVER_ERROR, "failed to read concepts.csv") from exc
+
+    target_index: int | None = None
+    for index, candidate in enumerate(rows):
+        if str(candidate.get("id") or "").strip() == cid:
+            target_index = index
+            break
+    if target_index is None:
+        raise ProjectConfigHandlerError(HTTPStatus.NOT_FOUND, "concept not found: {0}".format(cid))
+
+    row = dict(rows[target_index])
+    legacy_survey = normalize_survey_id(row_value(row, "source_survey"))
+    legacy_item = row_value(row, "source_item", "survey_item")
+    current = load_survey_overlap_state(project_root)
+    sidecar_links = dict(current["concept_survey_links"].get(cid, {}))
+
+    if legacy_survey == survey_id and legacy_item == source_item:
+        return JsonResponseSpec(status=HTTPStatus.OK, payload=_concept_survey_link_response_payload(row, current))
+
+    if sidecar_links.get(survey_id) != source_item:
+        raise ProjectConfigHandlerError(
+            HTTPStatus.BAD_REQUEST,
+            "requested survey_id/source_item is not linked to this concept",
+        )
+
+    new_concept_links = dict(sidecar_links)
+    new_concept_links.pop(survey_id, None)
+    if legacy_survey and legacy_item:
+        new_concept_links[legacy_survey] = legacy_item
+    new_links_section = {
+        other_cid: dict(other_links)
+        for other_cid, other_links in current["concept_survey_links"].items()
+        if other_cid != cid
+    }
+    if new_concept_links:
+        new_links_section[cid] = new_concept_links
+
+    try:
+        original_bytes = concepts_path.read_bytes()
+        backup_path = _promote_backup_path(concepts_path, cid)
+        backup_path.write_bytes(original_bytes)
+    except OSError as exc:
+        raise ProjectConfigHandlerError(HTTPStatus.INTERNAL_SERVER_ERROR, "failed to promote survey primary") from exc
+
+    try:
+        state = update_survey_overlap_state(
+            project_root,
+            {"reset_concept_survey_links": True, "concept_survey_links": new_links_section},
+        )
+    except Exception as exc:
+        raise ProjectConfigHandlerError(HTTPStatus.INTERNAL_SERVER_ERROR, "failed to promote survey primary") from exc
+
+    updated_rows = [dict(candidate) for candidate in rows]
+    updated_row = dict(row)
+    updated_row["source_survey"] = survey_id.upper()
+    updated_row["source_item"] = source_item
+    updated_rows[target_index] = updated_row
+    try:
+        write_concepts_csv_rows(concepts_path, updated_rows, atomic=True)
+    except Exception as exc:
+        try:
+            concepts_path.write_bytes(original_bytes)
+        finally:
+            try:
+                update_survey_overlap_state(
+                    project_root,
+                    {
+                        "reset_concept_survey_links": True,
+                        "concept_survey_links": current["concept_survey_links"],
+                    },
+                )
+            except Exception:
+                pass
+        raise ProjectConfigHandlerError(HTTPStatus.INTERNAL_SERVER_ERROR, "failed to promote survey primary") from exc
+
+    return JsonResponseSpec(status=HTTPStatus.OK, payload=_concept_survey_link_response_payload(updated_row, state))
 
 
 def build_concept_survey_link_post_response(

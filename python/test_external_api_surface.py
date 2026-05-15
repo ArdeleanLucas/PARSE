@@ -92,6 +92,7 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
         "/api/concepts/relink-by-gloss",
         "/api/concepts/{conceptId}",
         "/api/concepts/{conceptId}/duplicate",
+        "/api/concepts/{conceptId}/promote-survey-primary",
         "/api/concepts/{conceptId}/survey-links",
         "/api/concepts/by-tag",
         "/api/lexemes/rerun-by-tag",
@@ -258,6 +259,39 @@ def test_build_openapi_document_covers_concept_survey_links_contract() -> None:
     assert components["ConceptSurveyLinkResponse"]["properties"]["ok"] == {"type": "boolean", "const": True}
     assert components["ConceptSurveyLinkResponse"]["properties"]["concept"] == {"$ref": "#/components/schemas/ConceptEntry"}
     assert components["ConceptSurveyLinkResponse"]["properties"]["survey_overlap"] == {"$ref": "#/components/schemas/SurveyOverlapState"}
+
+
+def test_build_openapi_document_covers_promote_survey_primary_contract() -> None:
+    spec = build_openapi_document(base_url="http://127.0.0.1:8766")
+    operation = spec["paths"]["/api/concepts/{conceptId}/promote-survey-primary"]["post"]
+
+    assert operation["operationId"] == "promoteConceptSurveyPrimary"
+    assert operation["parameters"] == [
+        {
+            "name": "conceptId",
+            "in": "path",
+            "required": True,
+            "schema": {"type": "string", "pattern": "^[0-9]+$"},
+        }
+    ]
+    assert operation["requestBody"]["required"] is True
+    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ConceptPromoteSurveyPrimaryRequest"
+    }
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ConceptSurveyLinkResponse"
+    }
+    assert set(operation["responses"]) == {"200", "400", "404", "500"}
+
+    assert spec["components"]["schemas"]["ConceptPromoteSurveyPrimaryRequest"] == {
+        "type": "object",
+        "required": ["survey_id", "source_item"],
+        "properties": {
+            "survey_id": {"type": "string"},
+            "source_item": {"type": "string"},
+        },
+        "additionalProperties": False,
+    }
 
 
 def test_build_openapi_document_covers_concepts_by_tag_contract() -> None:
