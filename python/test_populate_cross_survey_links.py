@@ -57,3 +57,29 @@ def test_populate_cross_survey_links_apply_writes_sidecar_and_is_idempotent(tmp_
 
     assert second["would_add"] == []
     assert second["sidecar_diff"]["added"] == {}
+
+
+def test_populate_cross_survey_links_replace_apply_resets_stale_sidecar_entries(tmp_path: Path) -> None:
+    workspace = copy_workspace(tmp_path)
+    sidecar_path = workspace / "survey-overlap.json"
+    state = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    state["concept_survey_links"]["99"] = {"jbil": "999"}
+    state["speaker_choices"] = {"speaker-a": {"1": "jbil"}}
+    state["speaker_concept_survey_links"] = {"speaker-a": {"1": {"jbil": "10"}}}
+    sidecar_path.write_text(json.dumps(state), encoding="utf-8")
+
+    payload = run_script(
+        "--workspace",
+        str(workspace),
+        "--reference",
+        str(workspace / "reference.csv"),
+        "--apply",
+        "--replace",
+    )
+    replaced = json.loads(sidecar_path.read_text(encoding="utf-8"))
+
+    assert payload["sidecar_diff"]["replace_mode"] is True
+    assert payload["sidecar_diff"]["added"] == {"1": {"klq": "1.5"}, "5": {"klq": "5.0"}}
+    assert replaced["concept_survey_links"] == {"1": {"klq": "1.5"}, "5": {"klq": "5.0"}}
+    assert replaced["speaker_choices"] == {"speaker-a": {"1": "jbil"}}
+    assert replaced["speaker_concept_survey_links"] == {"speaker-a": {"1": {"jbil": "10"}}}

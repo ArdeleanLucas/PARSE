@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 
 from concept_registry import concept_label_key
 from concept_source_item import read_concepts_csv_rows, row_value
-from survey_overlap import load_survey_overlap_state, normalize_survey_id
+from survey_overlap import load_survey_overlap_state, normalize_survey_id, update_survey_overlap_state
 
 CrossSurveyLinkSummary = dict[str, list[dict[str, object]]]
 
@@ -191,3 +191,47 @@ def patch_from_cross_survey_link_summary(summary: Mapping[str, object]) -> dict[
         if links:
             patch[concept_id] = _ordered_links(links)
     return patch
+
+
+def _sidecar_diff(
+    before: Mapping[str, object],
+    after: Mapping[str, object],
+    patch: Mapping[str, Mapping[str, str]],
+    *,
+    replace: bool,
+) -> dict[str, Any]:
+    concept_ids = sorted(patch)
+    return {
+        "before": {concept_id: before.get(concept_id, {}) for concept_id in concept_ids},
+        "after": {concept_id: after.get(concept_id, {}) for concept_id in concept_ids},
+        "added": {concept_id: dict(patch[concept_id]) for concept_id in concept_ids},
+        "replace_mode": bool(replace),
+    }
+
+
+def apply_cross_survey_link_patch(
+    workspace: Path | str,
+    summary: Mapping[str, object],
+    *,
+    replace: bool = False,
+) -> dict[str, Any]:
+    """Apply a computed cross-survey link summary to survey-overlap.json.
+
+    Merge mode preserves existing `concept_survey_links`; replace mode clears only
+    that sidecar section before writing the computed patch. All other
+    survey-overlap sections are left untouched by `update_survey_overlap_state`.
+    """
+
+    workspace_path = Path(workspace).expanduser().resolve()
+    patch = patch_from_cross_survey_link_summary(summary)
+    before_state = load_survey_overlap_state(workspace_path)
+    before_links = dict(before_state.get("concept_survey_links") or {})
+    if patch or replace:
+        patch_payload: dict[str, object] = {"concept_survey_links": patch}
+        if replace:
+            patch_payload["reset_concept_survey_links"] = True
+        after_state = update_survey_overlap_state(workspace_path, patch_payload)
+    else:
+        after_state = before_state
+    after_links = dict(after_state.get("concept_survey_links") or {})
+    return _sidecar_diff(before_links, after_links, patch, replace=replace)

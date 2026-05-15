@@ -26,6 +26,7 @@ CROSS_SURVEY_LINK_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                 "referencePath": {"type": "string", "minLength": 1, "maxLength": 1024},
                 "dryRun": {"type": "boolean"},
                 "singleWordOnly": {"type": "boolean", "default": True},
+                "replace": {"type": "boolean", "default": False},
             },
         },
         mutability="mutating",
@@ -45,8 +46,7 @@ def _resolve_reference_path(tools: "ParseChatTools", raw_path: str) -> Path:
 
 
 def tool_populate_cross_survey_links(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
-    from cross_survey_links import compute_cross_survey_link_patch, patch_from_cross_survey_link_summary
-    from survey_overlap import load_survey_overlap_state, update_survey_overlap_state
+    from cross_survey_links import apply_cross_survey_link_patch, compute_cross_survey_link_patch
 
     raw_reference = str(args.get("referencePath") or "").strip()
     if not raw_reference:
@@ -56,25 +56,14 @@ def tool_populate_cross_survey_links(tools: "ParseChatTools", args: Dict[str, An
         return {"ok": False, "error": "Reference CSV not found: {0}".format(reference_path)}
 
     dry_run = bool(args.get("dryRun"))
+    replace = bool(args.get("replace", False))
     single_word_only = bool(args.get("singleWordOnly", True))
     summary = compute_cross_survey_link_patch(tools.project_root, reference_path, single_word_only=single_word_only)
     payload: Dict[str, Any] = {"dryRun": dry_run, **summary}
     if dry_run:
         return payload
 
-    patch = patch_from_cross_survey_link_summary(summary)
-    before_state = load_survey_overlap_state(tools.project_root)
-    before_links = dict(before_state.get("concept_survey_links") or {})
-    if patch:
-        after_state = update_survey_overlap_state(tools.project_root, {"concept_survey_links": patch})
-    else:
-        after_state = before_state
-    after_links = dict(after_state.get("concept_survey_links") or {})
-    payload["sidecar_diff"] = {
-        "before": {concept_id: before_links.get(concept_id, {}) for concept_id in sorted(patch)},
-        "after": {concept_id: after_links.get(concept_id, {}) for concept_id in sorted(patch)},
-        "added": patch,
-    }
+    payload["sidecar_diff"] = apply_cross_survey_link_patch(tools.project_root, summary, replace=replace)
     return payload
 
 

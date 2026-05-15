@@ -3,8 +3,12 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from cross_survey_links import compute_cross_survey_link_patch, patch_from_cross_survey_link_summary
-from survey_overlap import update_survey_overlap_state
+from cross_survey_links import (
+    apply_cross_survey_link_patch,
+    compute_cross_survey_link_patch,
+    patch_from_cross_survey_link_summary,
+)
+from survey_overlap import load_survey_overlap_state, update_survey_overlap_state
 
 FIXTURE = Path(__file__).parent / "test_fixtures" / "cross_survey_links_workspace"
 
@@ -135,3 +139,38 @@ def test_cross_survey_link_patch_is_idempotent_after_sidecar_update(tmp_path: Pa
 
     assert patch == {"1": {"klq": "1.5"}, "5": {"klq": "5.0"}}
     assert second["would_add"] == []
+
+
+def test_apply_replace_resets_concept_survey_links_before_write(tmp_path: Path) -> None:
+    workspace = copy_workspace(tmp_path)
+    update_survey_overlap_state(
+        workspace,
+        {
+            "concept_survey_links": {"99": {"jbil": "999"}},
+            "speaker_choices": {"speaker-a": {"1": "jbil"}},
+            "speaker_concept_survey_links": {"speaker-a": {"1": {"jbil": "10"}}},
+        },
+    )
+    summary = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
+
+    diff = apply_cross_survey_link_patch(workspace, summary, replace=True)
+    state = load_survey_overlap_state(workspace)
+
+    assert diff["replace_mode"] is True
+    assert diff["added"] == {"1": {"klq": "1.5"}, "5": {"klq": "5.0"}}
+    assert state["concept_survey_links"] == {"1": {"klq": "1.5"}, "5": {"klq": "5.0"}}
+    assert state["speaker_choices"] == {"speaker-a": {"1": "jbil"}}
+    assert state["speaker_concept_survey_links"] == {"speaker-a": {"1": {"jbil": "10"}}}
+
+
+def test_apply_merge_preserves_stale_concept_survey_links(tmp_path: Path) -> None:
+    workspace = copy_workspace(tmp_path)
+    update_survey_overlap_state(workspace, {"concept_survey_links": {"99": {"jbil": "999"}}})
+    summary = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
+
+    diff = apply_cross_survey_link_patch(workspace, summary, replace=False)
+    state = load_survey_overlap_state(workspace)
+
+    assert diff["replace_mode"] is False
+    assert state["concept_survey_links"]["99"] == {"jbil": "999"}
+    assert state["concept_survey_links"]["4"] == {"klq": "5.5"}
