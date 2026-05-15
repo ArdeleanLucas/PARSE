@@ -13,6 +13,7 @@ import {
 import { resolveSurveyLinksForSpeaker, surveyRowIdsForConcept } from '../../../lib/surveyLinksForSpeaker';
 import { relinkConceptsByGloss } from '../../../api/client';
 import type {
+  ConceptSurveyLinks,
   ConceptSurveyLinksByConcept,
   RelinkByGlossRequest,
   RelinkByGlossResponse,
@@ -48,6 +49,19 @@ const SURVEY_COLOR_PALETTE = [
   'slate',
 ] as const;
 
+function surveyLinksForActiveConcept(concept: Concept): ConceptSurveyLinks {
+  const links: ConceptSurveyLinks = {};
+  for (const [surveyId, sourceItem] of Object.entries(concept.surveys ?? {})) {
+    const key = normalizeSurveyId(surveyId);
+    const item = String(sourceItem ?? '').trim();
+    if (key && item) links[key] = item;
+  }
+  const legacySurvey = normalizeSurveyId(concept.sourceSurvey);
+  const legacyItem = String(concept.sourceItem ?? '').trim();
+  if (legacySurvey && legacyItem && !links[legacySurvey]) links[legacySurvey] = legacyItem;
+  return links;
+}
+
 export function SurveyValuesSection({
   activeConcept,
   activeSpeaker,
@@ -73,7 +87,11 @@ export function SurveyValuesSection({
   const speakerBuckets = useMemo(() => {
     if (!activeConcept) return [];
     const rowIds = surveyRowIdsForConcept(activeConcept);
-    const fallbackByRowId = Object.fromEntries(rowIds.map((rowId) => [rowId, conceptSurveyLinks?.[rowId] ?? activeConcept.surveys ?? {}]));
+    const fallback = surveyLinksForActiveConcept(activeConcept);
+    const fallbackByRowId = Object.fromEntries(rowIds.map((rowId) => {
+      const sidecar = conceptSurveyLinks?.[rowId];
+      return [rowId, sidecar ? { ...fallback, ...sidecar } : fallback];
+    }));
     return resolveSurveyLinksForSpeaker(rowIds, activeSpeaker, fallbackByRowId, speakerConceptSurveyLinks);
   }, [activeConcept, activeSpeaker, conceptSurveyLinks, speakerConceptSurveyLinks]);
   const hasSpeakerOverride = useMemo(() => {

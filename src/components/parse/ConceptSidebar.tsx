@@ -136,7 +136,8 @@ function globalLinksForConcept(concept: SidebarConcept, conceptSurveyLinks: Conc
   const links: ConceptSurveyLinksByConcept = {};
   const fallback = surveyLinksForSidebarConcept(concept);
   for (const rowId of bundleRowIds(concept)) {
-    links[rowId] = conceptSurveyLinks[rowId] ?? fallback;
+    const sidecar = conceptSurveyLinks[rowId];
+    links[rowId] = sidecar ? { ...fallback, ...sidecar } : fallback;
   }
   return links;
 }
