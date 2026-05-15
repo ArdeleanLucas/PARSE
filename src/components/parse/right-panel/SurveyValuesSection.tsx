@@ -21,6 +21,7 @@ import type {
   SurveyOverlapPatch,
   SurveySettingsMap,
 } from '../../../api/types';
+import { SurveyBadge } from '../../shared/SurveyBadge';
 import { CollapsibleSection } from './CollapsibleSection';
 import { RelinkReviewDialog } from './RelinkReviewDialog';
 
@@ -34,6 +35,8 @@ interface SurveyValuesSectionProps {
   surveySettings: SurveySettingsMap;
   speakerSurveyChoices: SpeakerSurveyChoices;
   onSurveyOverlapUpdate: (patch: SurveyOverlapPatch) => void;
+  onSurveyChoiceChange?: (speaker: string, conceptKey: string, surveyId: string) => void;
+  onPromoteSurveyPrimary?: (conceptId: string, surveyId: string, sourceItem: string) => void | Promise<void>;
   onRelinkApplied?: () => void | Promise<void>;
 }
 
@@ -55,6 +58,8 @@ export function SurveyValuesSection({
   surveySettings,
   speakerSurveyChoices,
   onSurveyOverlapUpdate,
+  onSurveyChoiceChange,
+  onPromoteSurveyPrimary,
   onRelinkApplied,
 }: SurveyValuesSectionProps) {
   const [editingSurveyId, setEditingSurveyId] = useState<string | null>(null);
@@ -90,6 +95,12 @@ export function SurveyValuesSection({
     const bucket = choiceMatch ?? sourceMatch ?? speakerBuckets[0];
     return { surveyId: bucket.surveyId, sourceItem: bucket.sourceItem };
   }, [activeConcept, activeSpeaker, hasSpeakerOverride, speakerBuckets, speakerSurveyChoices, surveySettings]);
+  const activeAvailableSurveys = useMemo(() => (
+    speakerBuckets.length > 0
+      ? Object.fromEntries(speakerBuckets.map((bucket) => [bucket.surveyId, bucket.sourceItem]))
+      : Object.fromEntries(Object.entries(activeConcept?.surveys ?? {}).map(([surveyId, sourceItem]) => [normalizeSurveyId(surveyId), String(sourceItem ?? '').trim()]).filter(([surveyId, sourceItem]) => surveyId && sourceItem))
+  ), [activeConcept, speakerBuckets]);
+  const resolvedDisplayColor = (surveySettings[resolved.surveyId] ?? defaultSurveySettings(resolved.surveyId)).display_color;
   const hasWorkspaceSurveys = workspaceChoices.length > 0;
   const updateLabel = (surveyId: string, label: string) => {
     const existing = surveySettings[surveyId] ?? defaultSurveySettings(surveyId);
@@ -192,9 +203,24 @@ export function SurveyValuesSection({
           <>
             {activeConcept ? (
               <div className="rounded-md bg-slate-50 px-2.5 py-2 text-[10px] text-slate-500 space-y-0.5" data-testid="survey-current-summary">
-                <div>
+                <div className="flex items-center gap-1">
                   <span className="font-semibold text-slate-600">Active survey</span>
-                  <span className="ml-1 font-mono text-slate-700">{surveyLabelFor(resolved.surveyId, surveySettings) || '—'}</span>
+                  <SurveyBadge
+                    conceptId={String(activeConcept.id)}
+                    conceptKey={activeConcept.key}
+                    conceptName={activeConcept.name}
+                    resolvedSurveyId={resolved.surveyId}
+                    resolvedSourceItem={resolved.sourceItem}
+                    resolvedDisplayColor={resolvedDisplayColor}
+                    availableSurveys={activeAvailableSurveys}
+                    surveySettings={surveySettings}
+                    surveyColorCodingEnabled={surveyColorCodingEnabled}
+                    activeSpeaker={activeSpeaker ?? null}
+                    parentActive={false}
+                    onCycle={activeSpeaker && onSurveyChoiceChange ? (next) => onSurveyChoiceChange(activeSpeaker, activeConcept.key, next.surveyId) : undefined}
+                    onPromote={onPromoteSurveyPrimary ? (next) => onPromoteSurveyPrimary(String(activeConcept.id), next.surveyId, next.sourceItem) : undefined}
+                    className="ml-1 text-slate-700"
+                  />
                 </div>
                 {resolved.sourceItem ? (
                   <div>

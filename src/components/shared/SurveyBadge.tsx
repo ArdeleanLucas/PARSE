@@ -17,6 +17,7 @@ export interface SurveyBadgeProps {
   activeSpeaker: string | null;
   parentActive: boolean;
   onCycle?: (next: { surveyId: string; sourceItem: string }) => void;
+  onPromote?: (next: { surveyId: string; sourceItem: string }) => void | Promise<void>;
   className?: string;
 }
 
@@ -32,6 +33,7 @@ export function SurveyBadge({
   activeSpeaker,
   parentActive,
   onCycle,
+  onPromote,
   className = '',
 }: SurveyBadgeProps) {
   const resolvedSurveyLabel = surveyLabelFor(resolvedSurveyId, surveySettings);
@@ -47,7 +49,9 @@ export function SurveyBadge({
     : undefined;
   const nextSurveySourceItem = nextSurveyId ? availableSurveys[nextSurveyId] ?? '' : '';
   const nextSurveyLabel = nextSurveyId ? surveyLabelFor(nextSurveyId, surveySettings) : '';
-  const canFlipSurveyBadge = !!(activeSpeaker && onCycle && multiSurveyBadge && nextSurveyId);
+  const canCycleSurveyBadge = !!(activeSpeaker && onCycle && multiSurveyBadge && nextSurveyId);
+  const canPromoteSurveyBadge = !!(!activeSpeaker && onPromote && multiSurveyBadge && nextSurveyId);
+  const canFlipSurveyBadge = canCycleSurveyBadge || canPromoteSurveyBadge;
   const surveyBadgeClassName = `font-mono text-[10px] ${surveyColorCodingEnabled && resolvedSurveyId ? (SURVEY_BADGE_TEXT_CLASSES[resolvedDisplayColor] ?? 'text-slate-400') : parentActive ? 'text-indigo-400' : 'text-slate-300'}`;
   const mergedClassName = `${surveyBadgeClassName}${className ? ` ${className}` : ''}`;
   const [open, setOpen] = useState(false);
@@ -162,8 +166,13 @@ export function SurveyBadge({
     return (
       <button
         type="button"
-        aria-label={`Switch survey for ${conceptName} from ${resolvedSurveyLabel} ${resolvedSourceItem} to ${nextSurveyLabel} ${nextSurveySourceItem}`}
-        onClick={() => onCycle({ surveyId: nextSurveyId, sourceItem: nextSurveySourceItem })}
+        aria-label={canCycleSurveyBadge
+          ? `Switch survey for ${conceptName} from ${resolvedSurveyLabel} ${resolvedSourceItem} to ${nextSurveyLabel} ${nextSurveySourceItem}`
+          : `Promote survey for ${conceptName} from ${resolvedSurveyLabel} ${resolvedSourceItem} to ${nextSurveyLabel} ${nextSurveySourceItem}`}
+        onClick={() => {
+          if (canCycleSurveyBadge && onCycle) onCycle({ surveyId: nextSurveyId, sourceItem: nextSurveySourceItem });
+          else if (canPromoteSurveyBadge && onPromote) void onPromote({ surveyId: nextSurveyId, sourceItem: nextSurveySourceItem });
+        }}
         className={`mr-2 rounded px-1 py-0.5 hover:bg-slate-100 hover:underline ${mergedClassName}`}
       >
         {badge}

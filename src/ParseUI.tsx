@@ -63,7 +63,7 @@ import { useExport } from './hooks/useExport';
 import { useTagImport } from './hooks/useTagImport';
 import { useActiveJobsFeed } from './hooks/useActiveJobsFeed';
 import { listActiveJobs } from './api/client';
-import { deleteConcept, duplicateConcept } from './api/client';
+import { deleteConcept, duplicateConcept, promoteConceptSurveyPrimary } from './api/client';
 import { ApiError } from './api/contracts/shared';
 import { useConfigStore } from './stores/configStore';
 import { useEnrichmentStore } from './stores/enrichmentStore';
@@ -922,6 +922,16 @@ export function ParseUI() {
       actionFeedbackTimeoutRef.current = null;
     }, 5000);
   }, []);
+
+  const handlePromoteSurveyPrimary = useCallback(async (conceptId: string, surveyId: string, sourceItem: string) => {
+    try {
+      await promoteConceptSurveyPrimary(conceptId, { survey_id: surveyId, source_item: sourceItem });
+      await reloadConfig();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      flashActionFeedback(`Could not promote survey primary: ${message}`, 'error');
+    }
+  }, [flashActionFeedback, reloadConfig]);
 
   useEffect(() => {
     try {
@@ -1910,6 +1920,7 @@ export function ParseUI() {
           speakerSurveyChoices={speakerSurveyChoices}
           surveyColorCodingEnabled={surveyColorCodingEnabled}
           onSurveyChoiceChange={handleSurveyChoiceChange}
+          onPromoteSurveyPrimary={handlePromoteSurveyPrimary}
           scopedToSpeaker={scopedToSpeaker}
           onScopedToSpeakerChange={setScopedToSpeaker}
           elicitedConceptKeys={elicitedConceptKeys}
@@ -2474,6 +2485,8 @@ export function ParseUI() {
           surveySettings={surveySettings}
           speakerSurveyChoices={speakerSurveyChoices}
           onSurveyOverlapUpdate={handleSurveyOverlapUpdate}
+          onSurveyChoiceChange={handleSurveyChoiceChange}
+          onPromoteSurveyPrimary={handlePromoteSurveyPrimary}
           onRelinkApplied={() => { void reloadConfig(); Object.keys(useAnnotationStore.getState().records).forEach((speaker) => { void useAnnotationStore.getState().loadSpeaker(speaker); }); }}
         />
       </div>

@@ -109,10 +109,11 @@ let mockWaveOptions: Array<{ audioUrl?: string; onReady?: (duration: number) => 
 let mockWaveSurferInstance: unknown = null;
 
 const mockReloadConfig = vi.fn().mockResolvedValue(undefined);
+const mockUpdateSurveyOverlap = vi.fn().mockResolvedValue(undefined);
 const mockConfigGetState = vi.fn(() => ({ config: mockConfig }));
 vi.mock("./stores/configStore", () => {
   const useConfigStore = (selector: (s: unknown) => unknown) =>
-    selector({ config: mockConfig, load: mockLoadConfig, reload: mockReloadConfig });
+    selector({ config: mockConfig, load: mockLoadConfig, reload: mockReloadConfig, updateSurveyOverlap: mockUpdateSurveyOverlap });
   (useConfigStore as unknown as { setState: (...args: unknown[]) => void }).setState = (...args: unknown[]) =>
     mockConfigSetState(...args);
   (useConfigStore as unknown as { getState: () => unknown }).getState = () => mockConfigGetState();
@@ -414,6 +415,7 @@ vi.mock("./api/client", () => ({
     sibling: { id: '618', label: 'water (B)', source_item: '1.1', source_survey: 'KLQ' },
   }),
   deleteConcept: vi.fn().mockResolvedValue({ ok: true, deleted_id: '618' }),
+  promoteConceptSurveyPrimary: vi.fn().mockResolvedValue({ ok: true, concept: { id: '1', label: 'nose', source_survey: 'jbil', source_item: '34' } }),
 }));
 
 import { ParseUI } from "./ParseUI";
@@ -708,6 +710,8 @@ beforeEach(() => {
   vi.mocked(apiClient.listActiveJobs).mockResolvedValue([]);
 
   mockLoadConfig.mockClear();
+  mockReloadConfig.mockClear();
+  mockUpdateSurveyOverlap.mockClear();
   mockHydrateTags.mockClear();
   mockLoadSpeaker.mockClear();
   mockSetInterval.mockClear();
@@ -761,6 +765,8 @@ beforeEach(() => {
   });
   vi.mocked(apiClient.deleteConcept).mockReset();
   vi.mocked(apiClient.deleteConcept).mockResolvedValue({ ok: true, deleted_id: '618' });
+  vi.mocked(apiClient.promoteConceptSurveyPrimary).mockReset();
+  vi.mocked(apiClient.promoteConceptSurveyPrimary).mockResolvedValue({ ok: true, concept: { id: '1', label: 'nose', source_survey: 'jbil', source_item: '34' } });
 
   mockAnnotationSetState.mockClear();
   mockEnrichmentSetState.mockClear();
@@ -783,6 +789,39 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+});
+
+
+describe('ParseUI survey primary promotion', () => {
+  it('promotes primary survey from the no-speaker sidebar badge and refreshes config', async () => {
+    window.localStorage.setItem('parse.currentMode', 'compare');
+    mockConfig = {
+      ...mockConfig!,
+      speakers: [],
+      concepts: [
+        { id: '1', label: 'nose', source_survey: 'klq', source_item: '1.5', surveys: { klq: '1.5', jbil: '34' } },
+      ],
+      concept_survey_links: { '1': { klq: '1.5', jbil: '34' } },
+      survey_settings: {
+        klq: { display_label: 'KLQ', display_color: 'indigo' },
+        jbil: { display_label: 'JBIL', display_color: 'rose' },
+      },
+      survey_color_coding_enabled: true,
+    };
+
+    render(<ParseUI />);
+
+    const badge = await screen.findByRole('button', {
+      name: 'Promote survey for nose from KLQ 1.5 to JBIL 34',
+    });
+    fireEvent.click(badge);
+
+    await waitFor(() => expect(apiClient.promoteConceptSurveyPrimary).toHaveBeenCalledWith('1', {
+      survey_id: 'jbil',
+      source_item: '34',
+    }));
+    await waitFor(() => expect(mockReloadConfig).toHaveBeenCalled());
+  });
 });
 
 describe("ParseUI", () => {
