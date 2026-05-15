@@ -208,6 +208,20 @@ describe('SurveyBadge', () => {
     expect(container.querySelector('span')?.className).toContain('text-slate-300');
   });
 
+  it('renders the precomposed source item verbatim when surveyId is empty', () => {
+    const { container } = render(
+      <SurveyBadge
+        {...baseProps}
+        resolvedSurveyId=""
+        resolvedSourceItem="JBIL 34"
+        availableSurveys={{}}
+      />,
+    );
+
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(container.querySelector('span')?.textContent).toBe('JBIL 34');
+  });
+
   it('matches the existing aria-label format', () => {
     render(
       <SurveyBadge
