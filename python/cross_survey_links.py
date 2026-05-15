@@ -9,6 +9,7 @@ annotations directly.
 from __future__ import annotations
 
 import csv
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -23,8 +24,18 @@ def _empty_summary() -> CrossSurveyLinkSummary:
     return {"matched": [], "would_add": [], "conflicts": [], "skipped_multiword": []}
 
 
+def _strip_parens(label: str) -> str:
+    """Return label text with one pass of parenthetical disambiguators removed."""
+
+    return re.sub(r"\s*\([^)]*\)\s*", " ", str(label or "")).strip()
+
+
+def _stripped_label_key(label: str) -> str:
+    return concept_label_key(_strip_parens(label))
+
+
 def _is_single_word_concept(label: str) -> bool:
-    text = str(label or "").strip()
+    text = _strip_parens(label)
     return bool(text) and "(" not in text and ")" not in text and "," not in text and not any(ch.isspace() for ch in text)
 
 
@@ -32,9 +43,35 @@ def _ordered_links(links: Mapping[str, str]) -> dict[str, str]:
     return {sid: str(links[sid]) for sid in sorted(links)}
 
 
-def _read_reference_links(reference_path: Path) -> tuple[dict[str, dict[str, str]], dict[str, list[dict[str, str]]]]:
-    index: dict[str, dict[str, str]] = {}
-    conflicts: dict[str, list[dict[str, str]]] = {}
+def _add_reference_link(
+    index: dict[str, dict[str, str]],
+    conflicts: dict[str, list[dict[str, str]]],
+    key: str,
+    survey_id: str,
+    source_item: str,
+) -> None:
+    links = index.setdefault(key, {})
+    existing = links.get(survey_id)
+    if existing and existing != source_item:
+        conflicts.setdefault(key, []).append(
+            {"survey": survey_id, "first_source_item": existing, "conflicting_source_item": source_item}
+        )
+        return
+    links[survey_id] = source_item
+
+
+def _read_reference_links(
+    reference_path: Path,
+) -> tuple[
+    dict[str, dict[str, str]],
+    dict[str, list[dict[str, str]]],
+    dict[str, dict[str, str]],
+    set[str],
+]:
+    exact_index: dict[str, dict[str, str]] = {}
+    exact_conflicts: dict[str, list[dict[str, str]]] = {}
+    stripped_index: dict[str, dict[str, str]] = {}
+    stripped_conflicts: dict[str, list[dict[str, str]]] = {}
     with reference_path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         for row in reader:
@@ -42,17 +79,13 @@ def _read_reference_links(reference_path: Path) -> tuple[dict[str, dict[str, str
             source_item = row_value(row, "id")
             label = row_value(row, "lexeme")
             key = concept_label_key(label)
+            stripped_key = _stripped_label_key(label)
             if not survey_id or not source_item or not key:
                 continue
-            links = index.setdefault(key, {})
-            existing = links.get(survey_id)
-            if existing and existing != source_item:
-                conflicts.setdefault(key, []).append(
-                    {"survey": survey_id, "first_source_item": existing, "conflicting_source_item": source_item}
-                )
-                continue
-            links[survey_id] = source_item
-    return index, conflicts
+            _add_reference_link(exact_index, exact_conflicts, key, survey_id, source_item)
+            if stripped_key:
+                _add_reference_link(stripped_index, stripped_conflicts, stripped_key, survey_id, source_item)
+    return exact_index, exact_conflicts, stripped_index, set(stripped_conflicts)
 
 
 def compute_cross_survey_link_patch(
@@ -75,7 +108,7 @@ def compute_cross_survey_link_patch(
     if not rows:
         return summary
 
-    reference_links, reference_conflicts = _read_reference_links(reference)
+    reference_links, reference_conflicts, stripped_reference_links, stripped_ambiguous_keys = _read_reference_links(reference)
     state = load_survey_overlap_state(workspace_path)
     sidecar_links_raw = state.get("concept_survey_links")
     sidecar_links = sidecar_links_raw if isinstance(sidecar_links_raw, Mapping) else {}
@@ -93,8 +126,6 @@ def compute_cross_survey_link_patch(
 
         label_key = concept_label_key(label)
         links = reference_links.get(label_key)
-        if not links:
-            continue
         if label_key in reference_conflicts:
             summary["conflicts"].append(
                 {
@@ -104,6 +135,24 @@ def compute_cross_survey_link_patch(
                     "reference_conflicts": reference_conflicts[label_key],
                 }
             )
+            continue
+
+        if not links or len(links) < 2:
+            stripped_key = _stripped_label_key(label)
+            stripped_links = stripped_reference_links.get(stripped_key) if stripped_key else None
+            if stripped_key in stripped_ambiguous_keys:
+                summary["conflicts"].append(
+                    {
+                        "concept_id": concept_id,
+                        "concept_en": label,
+                        "reason": "stripped_match_ambiguous",
+                        "stripped_key": stripped_key,
+                    }
+                )
+                continue
+            if stripped_links and len(stripped_links) >= 2:
+                links = stripped_links
+        if not links:
             continue
 
         legacy_survey = normalize_survey_id(row.get("source_survey"))

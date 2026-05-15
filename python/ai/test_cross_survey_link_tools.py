@@ -33,6 +33,7 @@ def test_populate_cross_survey_links_tool_happy_path_dry_run(tmp_path: Path) -> 
     assert payload["dryRun"] is True
     assert payload["would_add"] == [
         {"concept_id": "1", "concept_en": "nose", "links": {"klq": "1.5"}},
+        {"concept_id": "2", "concept_en": "father (vocative)", "links": {"klq": "2.5"}},
         {"concept_id": "5", "concept_en": "stone", "links": {"klq": "5.0"}},
     ]
 
@@ -58,6 +59,6 @@ def test_populate_cross_survey_links_tool_replace_mode(tmp_path: Path) -> None:
     payload = result["result"]
     assert payload["dryRun"] is False
     assert payload["sidecar_diff"]["replace_mode"] is True
-    assert payload["sidecar_diff"]["added"] == {"1": {"klq": "1.5"}, "5": {"klq": "5.0"}}
-    assert state["concept_survey_links"] == {"1": {"klq": "1.5"}, "5": {"klq": "5.0"}}
+    assert payload["sidecar_diff"]["added"] == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "5": {"klq": "5.0"}}
+    assert state["concept_survey_links"] == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "5": {"klq": "5.0"}}
     assert state["speaker_choices"] == {"speaker-a": {"1": "jbil"}}

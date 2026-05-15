@@ -108,7 +108,7 @@ Parameters:
 |---|---|---|
 | `referencePath` | yes | Path to the reference CSV. Use an absolute path or a path relative to the PARSE workspace. |
 | `dryRun` | yes | `true` previews the result without writing. `false` applies the safe proposed links. |
-| `singleWordOnly` | no | Defaults to `true`. When true, PARSE only auto-links simple one-word concept labels and skips concept labels with spaces, commas, or parentheses. |
+| `singleWordOnly` | no | Defaults to `true`. When true, PARSE auto-links only labels whose gloss is one word after parenthetical disambiguators are stripped. For example, `green (grass)` is treated as `green`, but labels with remaining spaces or commas are skipped. |
 | `replace` | no | Defaults to `false`. When false, PARSE merges the new links with existing links. When true, PARSE replaces the existing `concept_survey_links` section with the links computed from this CSV. |
 
 ### Step 1: dry run first
@@ -224,7 +224,7 @@ Use promotion only when you want exports to use a different survey's IDs as the 
 
 **IDs changed after saving the CSV.** Spreadsheet tools often strip leading zeros or change decimals. Reopen the CSV as plain text and verify the `id` column. If needed, set the spreadsheet column type to text and export again.
 
-**Multi-word concepts are skipped.** This is expected when `singleWordOnly` is true. You can set `singleWordOnly: false`, but review the dry run carefully because longer labels are more likely to represent variants rather than exact duplicates.
+**Multi-word concepts are skipped.** This is expected when `singleWordOnly` is true and the label still has spaces or commas after parenthetical text is stripped. You can set `singleWordOnly: false`, but review the dry run carefully because longer labels are more likely to represent variants rather than exact duplicates.
 
 **The badge is not clickable.** The concept probably has only one linked survey ID. Re-run the dry run and confirm that the concept appears in `would_add` or is already linked in the workspace.
 
