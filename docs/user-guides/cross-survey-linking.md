@@ -109,6 +109,7 @@ Parameters:
 | `referencePath` | yes | Path to the reference CSV. Use an absolute path or a path relative to the PARSE workspace. |
 | `dryRun` | yes | `true` previews the result without writing. `false` applies the safe proposed links. |
 | `singleWordOnly` | no | Defaults to `true`. When true, PARSE only auto-links simple one-word concept labels and skips concept labels with spaces, commas, or parentheses. |
+| `replace` | no | Defaults to `false`. When false, PARSE merges the new links with existing links. When true, PARSE replaces the existing `concept_survey_links` section with the links computed from this CSV. |
 
 ### Step 1: dry run first
 
@@ -134,11 +135,22 @@ Read the dry-run result before applying anything:
 | `conflicts` | Rows PARSE did not trust. Fix these in the CSV or workspace before applying. |
 | `skipped_multiword` | Concepts skipped because `singleWordOnly` is true. |
 
-A useful dry-run result should have the expected concepts in `would_add` and no surprising entries in `conflicts`.
+A useful dry-run result should have the expected concepts in `would_add` and no surprising entries in `conflicts`. The `replace` setting does not change the dry-run preview; it only changes what happens when you apply.
 
-### Step 2: apply after review
+### Step 2: choose merge or replace
 
-When the dry run looks correct, run the same tool with `dryRun: false`:
+For most updates, leave `replace` unset or set it to `false`.
+
+| Mode | MCP value | Use when |
+|---|---|---|
+| Merge | `"replace": false` or omitted | You want to add links from the new CSV while keeping any existing cross-survey links that are already in the workspace. This is the safer default. |
+| Replace | `"replace": true` | Your reference CSV is now the authoritative full map, and you want PARSE to remove old `concept_survey_links` entries that are not produced from this CSV. |
+
+Replace mode only resets the `concept_survey_links` part of `survey-overlap.json`. It does not clear survey labels, speaker choices, speaker-specific links, `concepts.csv`, or speaker annotations.
+
+### Step 3: apply after review
+
+When the dry run looks correct, run the same tool with `dryRun: false`. The default merge apply is:
 
 ```jsonc
 {
@@ -146,12 +158,29 @@ When the dry run looks correct, run the same tool with `dryRun: false`:
   "arguments": {
     "referencePath": "imports/concept-reference.csv",
     "dryRun": false,
-    "singleWordOnly": true
+    "singleWordOnly": true,
+    "replace": false
   }
 }
 ```
 
-Applying the tool writes the alternate links to `survey-overlap.json`. It does not rewrite `concepts.csv` and does not change speaker annotations.
+Applying in merge mode writes the alternate links from `would_add` to `survey-overlap.json`. It does not rewrite `concepts.csv`, does not remove older cross-survey links, and does not change speaker annotations.
+
+If your CSV is meant to replace the whole cross-survey link map, apply with `replace: true`:
+
+```jsonc
+{
+  "name": "populate_cross_survey_links",
+  "arguments": {
+    "referencePath": "imports/concept-reference.csv",
+    "dryRun": false,
+    "singleWordOnly": true,
+    "replace": true
+  }
+}
+```
+
+Use `replace: true` carefully. Any old concept-level survey links not produced from the current CSV will be removed from `concept_survey_links`.
 
 ## What PARSE stores
 
@@ -182,9 +211,10 @@ Use promotion only when you want exports to use a different survey's IDs as the 
 3. **Place the CSV where PARSE can read it.** A workspace-relative path such as `imports/concept-reference.csv` is easiest.
 4. **Run the MCP dry run.** Use `dryRun: true` and inspect `would_add`, `conflicts`, and `skipped_multiword`.
 5. **Fix the CSV if needed.** Resolve duplicate IDs, missing primary rows, spelling differences, or spreadsheet formatting issues.
-6. **Apply the links.** Re-run with `dryRun: false` only after the preview is correct.
-7. **Verify in PARSE.** Open the concept list and check that linked concepts now show clickable survey badges.
-8. **Promote only if needed.** If an export should use another survey's IDs as primary, promote that survey in the UI before exporting.
+6. **Choose merge or replace.** Use merge mode for normal additions. Use replace mode only when this CSV should become the full concept-level cross-survey link map.
+7. **Apply the links.** Re-run with `dryRun: false` only after the preview is correct.
+8. **Verify in PARSE.** Open the concept list and check that linked concepts now show clickable survey badges.
+9. **Promote only if needed.** If an export should use another survey's IDs as primary, promote that survey in the UI before exporting.
 
 ## Troubleshooting
 
@@ -200,6 +230,8 @@ Use promotion only when you want exports to use a different survey's IDs as the 
 
 **Exports still use the old survey ID.** Exports use the primary value in `concepts.csv`. Promote the desired survey ID to primary before exporting.
 
+**A link disappeared after applying.** Check whether you applied with `replace: true`. Replace mode intentionally rebuilds `concept_survey_links` from the current reference CSV. Re-run with merge mode (`replace: false`) if you only meant to add links.
+
 ## Advanced: optional CLI equivalent
 
 Most users should use the MCP tool. If you are running the script manually from a terminal, the equivalent dry run is:
@@ -210,11 +242,21 @@ PYTHONPATH=python python3 scripts/populate_cross_survey_links.py \
   --workspace /path/to/parse-workspace
 ```
 
-To apply the result, add `--apply` after reviewing the dry run:
+To apply in the default merge mode, add `--apply` after reviewing the dry run:
 
 ```bash
 PYTHONPATH=python python3 scripts/populate_cross_survey_links.py \
   --reference imports/concept-reference.csv \
   --workspace /path/to/parse-workspace \
   --apply
+```
+
+To replace the existing concept-level link map from the CSV, add `--replace`:
+
+```bash
+PYTHONPATH=python python3 scripts/populate_cross_survey_links.py \
+  --reference imports/concept-reference.csv \
+  --workspace /path/to/parse-workspace \
+  --apply \
+  --replace
 ```
