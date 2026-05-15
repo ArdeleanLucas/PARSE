@@ -317,4 +317,38 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
     expect(relinkConceptsByGloss).toHaveBeenCalledTimes(1);
   });
 
+
+  it('keeps legacy primary available when the active concept has a sidecar-only survey link', () => {
+    const onSurveyChoiceChange = vi.fn();
+    render(
+      <SurveyValuesSection
+        activeConcept={{
+          id: 44,
+          key: '44',
+          name: 'snow',
+          tag: 'untagged' as never,
+          sourceSurvey: 'KLQ',
+          sourceItem: '3.4',
+          surveys: { klq: '3.4' },
+          mergedKeys: undefined,
+          variants: undefined,
+        }}
+        activeSpeaker="Qasr01"
+        workspaceConcepts={[]}
+        conceptSurveyLinks={{ '44': { jbil: '124' } }}
+        speakerConceptSurveyLinks={{}}
+        surveyColorCodingEnabled={false}
+        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'slate' }, jbil: { display_label: 'JBIL', display_color: 'slate' } }}
+        speakerSurveyChoices={{}}
+        onSurveyChoiceChange={onSurveyChoiceChange}
+        onSurveyOverlapUpdate={vi.fn()}
+      />,
+    );
+
+    const summary = screen.getByTestId('survey-current-summary');
+    expect(summary.textContent).toContain('KLQ 3.4');
+    const badge = screen.getByRole('button', { name: /Switch survey for snow from KLQ 3\.4 to JBIL 124/i });
+    expect(badge).toBeTruthy();
+  });
+
 });

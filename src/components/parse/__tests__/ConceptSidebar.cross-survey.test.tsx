@@ -52,7 +52,7 @@ const groupedBigConcept = {
   tag: 'untagged' as const,
   sourceItem: '4.1',
   sourceSurvey: 'klq',
-  surveys: { klq: '4.1', jbil: '169' },
+  surveys: { klq: '4.1' },
   variants: [
     { conceptKey: '53', conceptEn: 'big (A)', variantLabel: 'A' },
     { conceptKey: '619', conceptEn: 'big (B)', variantLabel: 'B' },
@@ -199,7 +199,7 @@ describe('ConceptSidebar cross-survey linking', () => {
   it('disables Save on a grouped parent when no active speaker is selected', () => {
     renderSidebar({ activeSpeaker: null });
 
-    fireEvent.contextMenu(within(screen.getByTestId('concept-row-53')).getByRole('button', { name: /^big KLQ 4\.1$/i }));
+    fireEvent.contextMenu(screen.getByTestId('concept-parent-button-53'));
     fireEvent.click(screen.getByRole('menuitem', { name: /Change survey ID/i }));
 
     const saveButton = screen.getByRole('button', { name: /^Save$/i }) as HTMLButtonElement;
@@ -210,7 +210,7 @@ describe('ConceptSidebar cross-survey linking', () => {
   it('enables Save on a grouped parent once an active speaker is selected', () => {
     const { rerender } = renderSidebar({ activeSpeaker: null });
 
-    fireEvent.contextMenu(within(screen.getByTestId('concept-row-53')).getByRole('button', { name: /^big KLQ 4\.1$/i }));
+    fireEvent.contextMenu(screen.getByTestId('concept-parent-button-53'));
     fireEvent.click(screen.getByRole('menuitem', { name: /Change survey ID/i }));
     rerender(
       <ConceptSidebar
@@ -244,7 +244,7 @@ describe('ConceptSidebar cross-survey linking', () => {
   it('saves a grouped parent bucket with comma-separated csv row ids instead of the synthetic key', async () => {
     renderSidebar();
 
-    fireEvent.contextMenu(within(screen.getByTestId('concept-row-53')).getByRole('button', { name: /^big KLQ 4\.1$/i }));
+    fireEvent.contextMenu(screen.getByTestId('concept-parent-button-53'));
     fireEvent.click(screen.getByRole('menuitem', { name: /Change survey ID/i }));
     expect(screen.getByText(/Will update variants: A \(id 53\), B \(id 619\)/i)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('source_item'), { target: { value: '4.2' } });
@@ -267,7 +267,7 @@ describe('ConceptSidebar cross-survey linking', () => {
 
   it('adds a new link to every grouped parent variant id', async () => {
     renderSidebar();
-    fireEvent.contextMenu(within(screen.getByTestId('concept-row-53')).getByRole('button', { name: /^big KLQ 4\.1$/i }));
+    fireEvent.contextMenu(screen.getByTestId('concept-parent-button-53'));
     fireEvent.click(screen.getByRole('menuitem', { name: /Change survey ID/i }));
     fireEvent.click(screen.getByRole('button', { name: /Add new link/i }));
     fireEvent.change(screen.getByLabelText('survey_id'), { target: { value: 'jbil' } });
@@ -279,7 +279,7 @@ describe('ConceptSidebar cross-survey linking', () => {
 
   it('removes an existing bucket with bucket row ids and speaker scope', async () => {
     renderSidebar();
-    fireEvent.contextMenu(within(screen.getByTestId('concept-row-53')).getByRole('button', { name: /^big KLQ 4\.1$/i }));
+    fireEvent.contextMenu(screen.getByTestId('concept-parent-button-53'));
     fireEvent.click(screen.getByRole('menuitem', { name: /Change survey ID/i }));
     fireEvent.click(screen.getByRole('button', { name: /Remove link/i }));
 
@@ -305,4 +305,39 @@ describe('ConceptSidebar cross-survey linking', () => {
     );
     expect(screen.getByText('KLQ 4.9')).toBeTruthy();
   });
+
+  it('renders cycle chips when a single-row concept has a sidecar entry and a legacy primary', () => {
+    const onSurveyChoiceChange = vi.fn();
+    render(
+      <ConceptSidebar
+        {...baseProps}
+        filteredConcepts={[{
+          id: 44,
+          key: '44',
+          name: 'snow',
+          tag: 'untagged' as const,
+          sourceSurvey: 'KLQ',
+          sourceItem: '3.4',
+          surveys: { klq: '3.4' },
+          mergedKeys: undefined,
+          variants: undefined,
+        }]}
+        activeConceptId={44}
+        activeSpeaker="Qasr01"
+        conceptSurveyLinks={{ '44': { jbil: '124' } }}
+        speakerConceptSurveyLinks={{}}
+        speakerSurveyChoices={{}}
+        onSurveyChoiceChange={onSurveyChoiceChange}
+      />,
+    );
+
+    const row = screen.getByTestId('concept-row-44');
+    const chipLabels = within(row)
+      .getAllByRole('button')
+      .map((button) => button.textContent?.trim())
+      .filter((text) => text === 'JBIL' || text === 'KLQ');
+    expect(chipLabels.sort()).toEqual(['JBIL', 'KLQ']);
+    expect(within(row).getByRole('button', { name: /Switch survey for snow from JBIL 124 to KLQ 3\.4/i })).toBeTruthy();
+  });
+
 });
