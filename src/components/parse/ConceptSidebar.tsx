@@ -206,7 +206,6 @@ export function ConceptSidebar({
   const [contextMenu, setContextMenu] = useState<{ concept: SidebarConcept; x: number; y: number } | null>(null);
   const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
   const [surveyLinkEditor, setSurveyLinkEditor] = useState<SurveyLinkEditorState | null>(null);
-  const [expandedConceptIds, setExpandedConceptIds] = useState<Set<number>>(() => new Set());
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -240,20 +239,6 @@ export function ConceptSidebar({
     }
     setMenuPos({ left, top });
   }, [contextMenu, surveyLinkEditor]);
-  useEffect(() => {
-    if (activeConceptId == null || !activeConceptKey) return;
-    const parent = filteredConcepts.find((concept) => concept.id === activeConceptId);
-    const variants = parent?.variants ?? [];
-    if (variants.length <= 1) return;
-    if (!variants.some((variant) => variant.conceptKey === activeConceptKey)) return;
-    setExpandedConceptIds((current) => {
-      if (current.has(activeConceptId)) return current;
-      const next = new Set(current);
-      next.add(activeConceptId);
-      return next;
-    });
-  }, [activeConceptId, activeConceptKey, filteredConcepts]);
-
   const openSurveyLinkEditor = (concept: SidebarConcept) => {
     const buckets = bucketsForConcept(concept, activeSpeaker, conceptSurveyLinks, speakerConceptSurveyLinks);
     const resolved = resolveConceptSurvey(
@@ -591,33 +576,14 @@ export function ConceptSidebar({
           const hasVariants = visibleVariants.length > 1;
           const firstVariantKey = visibleVariants[0]?.conceptKey ?? variants[0]?.conceptKey ?? null;
           const parentActive = !!(concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey)));
-          const expanded = expandedConceptIds.has(concept.id);
           const parentName = concept.name;
           const noDataSuffix = !isElicited && !scopedToSpeaker && hasElicitedScope ? ' no data' : '';
           const mergeCountSuffix = concept.mergedKeys && concept.mergedKeys.length > 1 ? ` +${concept.mergedKeys.length - 1}` : '';
-          const parentButtonLabel = `${parentName}${noDataSuffix}${mergeCountSuffix} ${badge}`.trim();
+          const variantSuffix = hasVariants ? ` variants ${visibleVariants.map((variant) => variant.variantLabel).join(' ')}` : '';
+          const parentButtonLabel = `${parentName}${noDataSuffix}${mergeCountSuffix} ${badge}${variantSuffix}`.trim();
           return (
             <div key={concept.id} data-testid={`concept-row-${concept.id}`} className="mb-0.5 rounded-md hover:bg-slate-50">
               <div className="flex items-center">
-                {hasVariants ? (
-                  <button
-                    type="button"
-                    aria-label={expanded ? 'Collapse variants' : 'Expand variants'}
-                    data-testid={`concept-variant-toggle-${concept.id}`}
-                    aria-expanded={expanded}
-                    onClick={() => setExpandedConceptIds((current) => {
-                      const next = new Set(current);
-                      if (next.has(concept.id)) next.delete(concept.id);
-                      else next.add(concept.id);
-                      return next;
-                    })}
-                    className="ml-0.5 rounded px-1 py-1 text-[10px] font-semibold text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                  >
-                    {expanded ? '−' : '+'}
-                  </button>
-                ) : (
-                  <span className="ml-0.5 w-[18px]" />
-                )}
                 <button
                   aria-label={parentButtonLabel}
                   data-testid={`concept-parent-button-${concept.id}`}
@@ -644,6 +610,45 @@ export function ConceptSidebar({
                     </span>
                   )}
                 </button>
+                {hasVariants && (
+                  <div className="ml-1 flex shrink-0 items-center gap-0.5" aria-label={`${parentName} variants`}>
+                    {visibleVariants.map((variant) => {
+                      const childActive = concept.id === activeConceptId && activeConceptKey === variant.conceptKey;
+                      const isRecentlyDuplicated = !!recentlyDuplicatedSiblingKey
+                        && variant.conceptKey === recentlyDuplicatedSiblingKey;
+                      const childConcept: SidebarConcept = {
+                        ...concept,
+                        key: variant.conceptKey,
+                        name: variant.conceptEn,
+                        variants: undefined,
+                        mergedKeys: undefined,
+                        mergedVariants: undefined,
+                        mergeAbsorbedNames: undefined,
+                      };
+                      return (
+                        <button
+                          key={variant.conceptKey}
+                          type="button"
+                          aria-label={`${parentName} variant ${variant.variantLabel} ${variant.conceptEn}`}
+                          title={`${variant.conceptEn} (${variant.conceptKey})`}
+                          data-testid={`concept-variant-pill-${variant.conceptKey}`}
+                          onClick={() => onConceptSelect(concept.id, variant.conceptKey)}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setContextMenu({ concept: childConcept, x: event.clientX, y: event.clientY });
+                          }}
+                          className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 transition ${childActive ? 'bg-indigo-50 text-indigo-900 ring-indigo-200' : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50'} ${isRecentlyDuplicated ? 'bg-emerald-50 text-emerald-800 ring-2 ring-emerald-400' : ''}`}
+                        >
+                          <span data-testid={`concept-variant-pill-dot-${variant.conceptKey}`} className={`h-1.5 w-1.5 rounded-full ${tagDot[variant.tag ?? concept.tag]}`} />
+                          <span>{variant.variantLabel}</span>
+                          <span className="sr-only">{variant.conceptEn}</span>
+                          {isRecentlyDuplicated && <span className="text-[8px] font-bold">NEW</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 <SurveyBadge
                   conceptId={String(concept.id)}
                   conceptKey={surveyConcept.key}
@@ -660,40 +665,6 @@ export function ConceptSidebar({
                   onPromote={onPromoteSurveyPrimary ? (next) => onPromoteSurveyPrimary(String(concept.id), next.surveyId, next.sourceItem) : undefined}
                 />
               </div>
-              {expanded && hasVariants && visibleVariants.map((variant) => {
-                const childActive = concept.id === activeConceptId && activeConceptKey === variant.conceptKey;
-                const isRecentlyDuplicated = !!recentlyDuplicatedSiblingKey
-                  && variant.conceptKey === recentlyDuplicatedSiblingKey;
-                const childConcept: SidebarConcept = {
-                  ...concept,
-                  key: variant.conceptKey,
-                  name: variant.conceptEn,
-                  variants: undefined,
-                  mergedKeys: undefined,
-                  mergedVariants: undefined,
-                  mergeAbsorbedNames: undefined,
-                };
-                return (
-                  <button
-                    key={variant.conceptKey}
-                    data-testid={`concept-variant-row-${variant.conceptKey}`}
-                    onClick={() => onConceptSelect(concept.id, variant.conceptKey)}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setContextMenu({ concept: childConcept, x: event.clientX, y: event.clientY });
-                    }}
-                    className={`ml-7 flex w-[calc(100%-1.75rem)] items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${childActive ? 'bg-indigo-50 text-indigo-900' : inactiveRowClass} ${isRecentlyDuplicated ? 'border-l-2 border-emerald-400 bg-emerald-50 ring-2 ring-emerald-400' : ''}`}
-                  >
-                    <span className={`h-1.5 w-1.5 rounded-full ${tagDot[variant.tag ?? concept.tag]}`} />
-                    <span className={`flex-1 text-[12px] ${childActive ? 'font-semibold' : 'font-medium'}`}>{variant.conceptEn}</span>
-                    {isRecentlyDuplicated && (
-                      <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 ring-1 ring-emerald-200">NEW</span>
-                    )}
-                    <span className="font-mono text-[10px] text-slate-300">{variant.conceptKey}</span>
-                  </button>
-                );
-              })}
               {surveyChoices.length > 1 && activeSpeaker && onSurveyChoiceChange && (
                 <div className="flex flex-wrap gap-1 px-7 pb-1.5">
                   {surveyChoices.map((surveyId) => {
