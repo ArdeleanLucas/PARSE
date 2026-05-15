@@ -7,6 +7,7 @@ import io
 import json
 import pathlib
 import sys
+from http import HTTPStatus
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import server
@@ -45,7 +46,7 @@ class _FakeRequest:
         pass
 
 
-def _make_multipart(csv_body: str, mode: str = "") -> tuple[bytes, str]:
+def _make_multipart(csv_body: str, mode: str = "", allow_variant: bool = False) -> tuple[bytes, str]:
     boundary = "----parseboundary"
     parts = [
         f"--{boundary}\r\n".encode(),
@@ -61,12 +62,19 @@ def _make_multipart(csv_body: str, mode: str = "") -> tuple[bytes, str]:
             mode.encode(),
             b"\r\n",
         ]
+    if allow_variant:
+        parts += [
+            f"--{boundary}\r\n".encode(),
+            b'Content-Disposition: form-data; name="allow_variant"\r\n\r\n',
+            b"true",
+            b"\r\n",
+        ]
     parts.append(f"--{boundary}--\r\n".encode())
     body = b"".join(parts)
     return body, boundary
 
 
-def _invoke(tmp_path, monkeypatch, existing_rows, upload_csv, mode=""):
+def _invoke(tmp_path, monkeypatch, existing_rows, upload_csv, mode="", allow_variant=False):
     monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
     concepts_path = tmp_path / "concepts.csv"
     if existing_rows is not None:
@@ -76,7 +84,7 @@ def _invoke(tmp_path, monkeypatch, existing_rows, upload_csv, mode=""):
             for row in existing_rows:
                 w.writerow({k: row.get(k, "") for k in w.fieldnames})
 
-    body, boundary = _make_multipart(upload_csv, mode=mode)
+    body, boundary = _make_multipart(upload_csv, mode=mode, allow_variant=allow_variant)
     # cgi.FieldStorage expects an email.message.Message-like headers object
     hdr_text = (
         f"Content-Type: multipart/form-data; boundary={boundary}\r\n"
@@ -108,6 +116,51 @@ def _invoke(tmp_path, monkeypatch, existing_rows, upload_csv, mode=""):
     with open(concepts_path, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     return result, rows
+
+
+def _invoke_with_status(tmp_path, monkeypatch, existing_rows, upload_csv, mode="", allow_variant=False):
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    server._install_route_bindings()
+    concepts_path = tmp_path / "concepts.csv"
+    if existing_rows is not None:
+        with open(concepts_path, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=["id", "concept_en", "source_item", "source_survey", "custom_order"])
+            w.writeheader()
+            for row in existing_rows:
+                w.writerow({k: row.get(k, "") for k in w.fieldnames})
+
+    body, boundary = _make_multipart(upload_csv, mode=mode, allow_variant=allow_variant)
+    hdr_text = (
+        f"Content-Type: multipart/form-data; boundary={boundary}\r\n"
+        f"Content-Length: {len(body)}\r\n\r\n"
+    )
+    headers = email.parser.Parser(policy=email.policy.compat32).parsestr(hdr_text)
+
+    class H(server.RangeRequestHandler):
+        def __init__(self):
+            self.path = "/api/concepts/import"
+            self.rfile = io.BytesIO(body)
+            self.wfile = _FakeWfile()
+            self.headers = headers
+            self.status = None
+
+        def send_response(self, code):
+            self.status = code
+
+        def send_header(self, *a, **kw):
+            pass
+
+        def end_headers(self):
+            pass
+
+    handler = H()
+    assert handler._handle_api("POST") is True
+    result = handler.wfile.payload()
+    rows = []
+    if concepts_path.exists():
+        with open(concepts_path, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    return int(handler.status), result, rows
 
 
 def test_import_merges_source_fields_and_custom_order(tmp_path, monkeypatch):
@@ -205,3 +258,47 @@ def test_import_rewrites_legacy_two_column_concepts_with_full_source_schema(tmp_
     assert rows[0]["source_item"] == ""
     assert rows[0]["source_survey"] == ""
     assert rows[0]["custom_order"] == ""
+
+
+def test_import_rejects_new_row_with_duplicate_source_identity_without_allow_variant(tmp_path, monkeypatch):
+    existing = [
+        {"id": "298", "concept_en": "dog (A)", "source_item": "79", "source_survey": "JBIL", "custom_order": "298"},
+    ]
+    upload = "id,concept_en,source_item,source_survey,custom_order\n628,dog (B),79,JBIL,\n"
+
+    status, result, rows = _invoke_with_status(tmp_path, monkeypatch, existing, upload)
+
+    assert status == HTTPStatus.CONFLICT
+    assert result == {
+        "error": "duplicate_source_identity",
+        "existing": [{"id": "298", "label": "dog (A)"}],
+        "hint": "pass allow_variant=true to create a sibling variant",
+    }
+    assert rows == existing
+
+
+def test_import_allows_duplicate_source_identity_when_allow_variant_true(tmp_path, monkeypatch):
+    existing = [
+        {"id": "298", "concept_en": "dog (A)", "source_item": "79", "source_survey": "JBIL", "custom_order": "298"},
+    ]
+    upload = "id,concept_en,source_item,source_survey,custom_order\n628,dog (B),79,JBIL,\n"
+
+    status, result, rows = _invoke_with_status(tmp_path, monkeypatch, existing, upload, allow_variant=True)
+
+    assert status == HTTPStatus.OK
+    assert result["ok"] is True
+    assert result["added"] == 1
+    assert [row["id"] for row in rows] == ["298", "628"]
+
+
+def test_import_allows_new_singleton_source_identity(tmp_path, monkeypatch):
+    existing = [
+        {"id": "298", "concept_en": "dog (A)", "source_item": "79", "source_survey": "JBIL", "custom_order": "298"},
+    ]
+    upload = "id,concept_en,source_item,source_survey,custom_order\n617,rain,150,JBIL,617\n"
+
+    status, result, rows = _invoke_with_status(tmp_path, monkeypatch, existing, upload)
+
+    assert status == HTTPStatus.OK
+    assert result["added"] == 1
+    assert [row["id"] for row in rows] == ["298", "617"]
