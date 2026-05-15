@@ -279,8 +279,7 @@ describe('ConceptSidebar cross-survey linking', () => {
   it('keeps Save enabled for a child variant when no active speaker is selected', () => {
     renderSidebar({ activeSpeaker: null });
 
-    fireEvent.click(screen.getByTestId('concept-variant-toggle-53'));
-    fireEvent.contextMenu(screen.getByTestId('concept-variant-row-53'));
+        fireEvent.contextMenu(screen.getByTestId('concept-variant-pill-53'));
     fireEvent.click(screen.getByRole('menuitem', { name: /Change survey ID/i }));
 
     const saveButton = screen.getByRole('button', { name: /^Save$/i }) as HTMLButtonElement;
@@ -303,8 +302,7 @@ describe('ConceptSidebar cross-survey linking', () => {
 
   it('saves a child variant bucket with only that row id', async () => {
     renderSidebar();
-    fireEvent.click(screen.getByTestId('concept-variant-toggle-53'));
-    fireEvent.contextMenu(screen.getByTestId('concept-variant-row-53'));
+        fireEvent.contextMenu(screen.getByTestId('concept-variant-pill-53'));
     fireEvent.click(screen.getByRole('menuitem', { name: /Change survey ID/i }));
     fireEvent.change(screen.getByLabelText('source_item'), { target: { value: '4.3' } });
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));

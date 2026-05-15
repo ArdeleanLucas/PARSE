@@ -19,6 +19,126 @@ afterEach(() => {
 
 describe('ConceptSidebar', () => {
 
+
+  it('keeps singleton rows to one parent affordance and selects the singleton parent key', () => {
+    const onConceptSelect = vi.fn();
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={[{ id: 11, key: 'single-11', name: 'water', tag: 'confirmed' as const, sourceItem: '11' }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={11}
+        activeConceptKey="single-11"
+        onConceptSelect={onConceptSelect}
+      />,
+    );
+
+    const row = screen.getByTestId('concept-row-11');
+    const parentButton = screen.getByTestId('concept-parent-button-11');
+    expect(row.querySelector('.flex.items-center')?.firstElementChild).toBe(parentButton);
+    expect(row.querySelectorAll('button[data-testid^="concept-"]')).toHaveLength(1);
+    expect(row.querySelector('[data-testid^="concept-variant-pill-"]')).toBeNull();
+
+    fireEvent.click(parentButton);
+    expect(onConceptSelect).toHaveBeenCalledWith(11, 'single-11');
+  });
+
+  it('renders two grouped variants as flat pills with distinct per-variant tag dots', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={[{
+          id: 79,
+          key: 'source:JBIL:79',
+          name: 'dog',
+          tag: 'problematic' as const,
+          sourceItem: '79',
+          sourceSurvey: 'JBIL',
+          variants: [
+            { conceptKey: '298', conceptEn: 'dog (A)', variantLabel: 'A', tag: 'confirmed' as const },
+            { conceptKey: '628', conceptEn: 'dog (B)', variantLabel: 'B', tag: 'problematic' as const },
+          ],
+        }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={79}
+        activeConceptKey="298"
+        onConceptSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('concept-parent-button-79').textContent ?? '').toContain('dog');
+    expect(screen.getByTestId('concept-variant-pill-298').textContent ?? '').toContain('A');
+    expect(screen.getByTestId('concept-variant-pill-628').textContent ?? '').toContain('B');
+    expect(screen.getByTestId('concept-variant-pill-dot-298').className).toContain('bg-emerald-500');
+    expect(screen.getByTestId('concept-variant-pill-dot-628').className).toContain('bg-rose-500');
+  });
+
+  it("clicking flat variant B selects variant B's conceptKey instead of the parent group key", () => {
+    const onConceptSelect = vi.fn();
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={[{
+          id: 79,
+          key: 'source:JBIL:79',
+          name: 'dog',
+          tag: 'problematic' as const,
+          sourceItem: '79',
+          sourceSurvey: 'JBIL',
+          variants: [
+            { conceptKey: '298', conceptEn: 'dog (A)', variantLabel: 'A', tag: 'confirmed' as const },
+            { conceptKey: '628', conceptEn: 'dog (B)', variantLabel: 'B', tag: 'problematic' as const },
+          ],
+        }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={79}
+        activeConceptKey="298"
+        onConceptSelect={onConceptSelect}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('concept-variant-pill-628'));
+
+    expect(onConceptSelect).toHaveBeenCalledWith(79, '628');
+    expect(onConceptSelect).not.toHaveBeenCalledWith(79, 'source:JBIL:79');
+  });
+
   it('renders the action feedback banner when actionFeedback prop is set', () => {
     render(
       <ConceptSidebar
@@ -263,11 +383,11 @@ describe('ConceptSidebar', () => {
       />,
     );
 
-    const parentDot = screen.getByTestId('concept-row-42').querySelector('button[aria-label="hair #42"] span');
-    const variantARow = await screen.findByTestId('concept-variant-row-hair-a');
-    const variantCRow = await screen.findByTestId('concept-variant-row-hair-c');
-    const variantADot = variantARow.querySelector('span');
-    const variantCDot = variantCRow.querySelector('span');
+    const parentDot = screen.getByTestId('concept-parent-button-42').querySelector('span');
+    await screen.findByTestId('concept-variant-pill-hair-a');
+    await screen.findByTestId('concept-variant-pill-hair-c');
+    const variantADot = screen.getByTestId('concept-variant-pill-dot-hair-a');
+    const variantCDot = screen.getByTestId('concept-variant-pill-dot-hair-c');
     expect(parentDot?.className).toContain('bg-rose-500');
     expect(variantADot?.className).toContain('bg-slate-300');
     expect(variantCDot?.className).toContain('bg-rose-500');
@@ -306,10 +426,10 @@ describe('ConceptSidebar', () => {
       />,
     );
 
-    const variantARow = await screen.findByTestId('concept-variant-row-hair-a');
-    const variantCRow = await screen.findByTestId('concept-variant-row-hair-c');
-    expect(variantARow.querySelector('span')?.className).toContain('bg-amber-400');
-    expect(variantCRow.querySelector('span')?.className).toContain('bg-slate-300');
+    await screen.findByTestId('concept-variant-pill-hair-a');
+    await screen.findByTestId('concept-variant-pill-hair-c');
+    expect(screen.getByTestId('concept-variant-pill-dot-hair-a').className).toContain('bg-amber-400');
+    expect(screen.getByTestId('concept-variant-pill-dot-hair-c').className).toContain('bg-slate-300');
   });
   it('renders review-needed source-item variants independently of confirmed sibling rollups', async () => {
     render(
@@ -344,10 +464,10 @@ describe('ConceptSidebar', () => {
       />,
     );
 
-    const variantARow = await screen.findByTestId('concept-variant-row-hair-a');
-    const variantCRow = await screen.findByTestId('concept-variant-row-hair-c');
-    const variantADot = variantARow.querySelector('span');
-    const variantCDot = variantCRow.querySelector('span');
+    await screen.findByTestId('concept-variant-pill-hair-a');
+    await screen.findByTestId('concept-variant-pill-hair-c');
+    const variantADot = screen.getByTestId('concept-variant-pill-dot-hair-a');
+    const variantCDot = screen.getByTestId('concept-variant-pill-dot-hair-c');
     expect(variantADot?.className).toContain('bg-emerald-500');
     expect(variantCDot?.className).toContain('bg-amber-400');
   });
@@ -1110,7 +1230,8 @@ describe('ConceptSidebar', () => {
     }
 
     function openMenuFor(name: RegExp): void {
-      const button = screen.getByRole('button', { name });
+      const buttons = screen.getAllByRole('button', { name });
+      const button = buttons.find((candidate) => candidate.getAttribute('data-testid')?.startsWith('concept-parent-button')) ?? buttons[0];
       fireEvent.contextMenu(button);
     }
 
@@ -1161,9 +1282,9 @@ describe('ConceptSidebar', () => {
         />,
       );
 
-      expect(screen.getByTestId('concept-variant-row-365').textContent ?? '').toContain('new (A)');
-      const rowB = screen.getByTestId('concept-variant-row-618');
-      expect(rowB.textContent ?? '').toContain('new (B)');
+      expect(screen.getByTestId('concept-variant-pill-365').textContent ?? '').toContain('A');
+      const rowB = screen.getByTestId('concept-variant-pill-618');
+      expect(rowB.textContent ?? '').toContain('B');
       expect(rowB.className).toContain('bg-indigo-50');
       fireEvent.click(rowB);
       expect(onSelect).toHaveBeenCalledWith(3, '618');
@@ -1196,10 +1317,10 @@ describe('ConceptSidebar', () => {
       const wrapper = screen.getByTestId('concept-row-3');
       expect(wrapper.className).not.toContain('bg-indigo-50');
 
-      const rowA = screen.getByTestId('concept-variant-row-365');
+      const rowA = screen.getByTestId('concept-variant-pill-365');
       expect(rowA.className).toContain('bg-indigo-50');
 
-      const rowB = screen.getByTestId('concept-variant-row-618');
+      const rowB = screen.getByTestId('concept-variant-pill-618');
       expect(rowB.className).not.toContain('bg-indigo-50');
     });
 
@@ -1230,10 +1351,10 @@ describe('ConceptSidebar', () => {
       const parentButton = screen.getByTestId('concept-parent-button-3');
       expect(parentButton.className).not.toContain('bg-indigo-50');
 
-      const rowA = screen.getByTestId('concept-variant-row-365');
+      const rowA = screen.getByTestId('concept-variant-pill-365');
       expect(rowA.className).toContain('bg-indigo-50');
 
-      const rowB = screen.getByTestId('concept-variant-row-618');
+      const rowB = screen.getByTestId('concept-variant-pill-618');
       expect(rowB.className).not.toContain('bg-indigo-50');
     });
 
@@ -1261,8 +1382,8 @@ describe('ConceptSidebar', () => {
         />,
       );
 
-      expect(screen.getByTestId('concept-variant-toggle-3').getAttribute('aria-expanded')).toBe('true');
-      expect(screen.getByTestId('concept-variant-row-618').textContent ?? '').toContain('new (B)');
+      expect(screen.queryByTestId('concept-variant-toggle-3')).toBeNull();
+      expect(screen.getByTestId('concept-variant-pill-618').textContent ?? '').toContain('B');
     });
 
     it('renders the NEW badge on the recently duplicated variant row', () => {
@@ -1290,7 +1411,7 @@ describe('ConceptSidebar', () => {
         />,
       );
 
-      const row = screen.getByTestId('concept-variant-row-618');
+      const row = screen.getByTestId('concept-variant-pill-618');
       expect(row.textContent ?? '').toContain('NEW');
       expect(row.className).toContain('ring-2');
       expect(row.className).toContain('ring-emerald-400');
@@ -1320,8 +1441,8 @@ describe('ConceptSidebar', () => {
         />,
       );
 
-      expect(screen.getByTestId('concept-variant-toggle-3').getAttribute('aria-expanded')).toBe('false');
-      expect(screen.queryByTestId('concept-variant-row-618')).toBeNull();
+      expect(screen.queryByTestId('concept-variant-toggle-3')).toBeNull();
+      expect(screen.getByTestId('concept-variant-pill-618').textContent ?? '').toContain('B');
     });
 
     it('does not auto-expand when the active concept has zero or one variant', () => {
@@ -1355,8 +1476,7 @@ describe('ConceptSidebar', () => {
     it("right-click on a B child fires onDuplicateConcept with B's conceptKey", () => {
       const onDuplicate = vi.fn();
       renderWith(onDuplicate);
-      fireEvent.click(screen.getByTestId('concept-variant-toggle-3'));
-      fireEvent.contextMenu(screen.getByTestId('concept-variant-row-618'));
+            fireEvent.contextMenu(screen.getByTestId('concept-variant-pill-618'));
       fireEvent.click(screen.getByRole('menuitem', { name: /Duplicate \(split into next variant\)/ }));
 
       expect(onDuplicate).toHaveBeenCalledWith(expect.objectContaining({ key: '618', name: 'new (B)' }));
@@ -1364,8 +1484,7 @@ describe('ConceptSidebar', () => {
 
     it("renders Delete variant on a child variant row's context menu", () => {
       renderWith(vi.fn());
-      fireEvent.click(screen.getByTestId('concept-variant-toggle-3'));
-      fireEvent.contextMenu(screen.getByTestId('concept-variant-row-618'));
+            fireEvent.contextMenu(screen.getByTestId('concept-variant-pill-618'));
 
       expect(screen.getByRole('menuitem', { name: /Delete variant/i })).toBeTruthy();
     });
@@ -1380,8 +1499,7 @@ describe('ConceptSidebar', () => {
     it("calls onDeleteConcept with the child variant's conceptKey", () => {
       const onDelete = vi.fn();
       renderWith(vi.fn(), onDelete);
-      fireEvent.click(screen.getByTestId('concept-variant-toggle-3'));
-      fireEvent.contextMenu(screen.getByTestId('concept-variant-row-618'));
+            fireEvent.contextMenu(screen.getByTestId('concept-variant-pill-618'));
       fireEvent.click(screen.getByRole('menuitem', { name: /Delete variant/i }));
 
       expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ key: '618', name: 'new (B)' }));

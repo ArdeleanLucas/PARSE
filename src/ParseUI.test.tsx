@@ -1420,8 +1420,8 @@ describe("ParseUI", () => {
     const sidebar = screen.getByTestId("concept-sidebar");
     expect(within(sidebar).getByText("3 concepts")).toBeTruthy();
     expect(within(sidebar).getByText("brother of husband")).toBeTruthy();
-    expect(within(sidebar).getByTestId("concept-variant-row-concept-a").textContent ?? "").toContain("brother of husband A");
-    expect(within(sidebar).getByTestId("concept-variant-row-concept-b").textContent ?? "").toContain("brother of husband B");
+    expect(within(sidebar).getByTestId("concept-variant-pill-concept-a").textContent ?? "").toContain("brother of husband A");
+    expect(within(sidebar).getByTestId("concept-variant-pill-concept-b").textContent ?? "").toContain("brother of husband B");
     expect(within(sidebar).getByText("sister of husband")).toBeTruthy();
     expect(within(sidebar).getByText("water")).toBeTruthy();
     expect(within(sidebar).getByRole("button", { name: /brother of husband.*KLQ 2\.15/i })).toBeTruthy();
@@ -1755,15 +1755,15 @@ describe("ParseUI", () => {
     render(<ParseUI />);
 
     const sidebar = await screen.findByTestId("concept-sidebar");
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-618")).toBeTruthy());
-    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-row-618"));
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-618")).toBeTruthy());
+    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-pill-618"));
     fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
 
     await waitFor(() => expect(apiClient.duplicateConcept).toHaveBeenCalledWith("618"));
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-619")).toBeTruthy());
-    expect(within(sidebar).getByTestId("concept-variant-row-365").textContent ?? "").toContain("new (A)");
-    expect(within(sidebar).getByTestId("concept-variant-row-618").textContent ?? "").toContain("new (B)");
-    expect(within(sidebar).getByTestId("concept-variant-row-619").textContent ?? "").toContain("new (C)");
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-619")).toBeTruthy());
+    expect(within(sidebar).getByTestId("concept-variant-pill-365").textContent ?? "").toContain("new (A)");
+    expect(within(sidebar).getByTestId("concept-variant-pill-618").textContent ?? "").toContain("new (B)");
+    expect(within(sidebar).getByTestId("concept-variant-pill-619").textContent ?? "").toContain("new (C)");
   });
 
   it("focuses the new duplicate sibling, shows success feedback, and clears the NEW marker", async () => {
@@ -1798,10 +1798,10 @@ describe("ParseUI", () => {
     render(<ParseUI />);
 
     const sidebar = await screen.findByTestId("concept-sidebar");
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-618")).toBeTruthy());
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-618")).toBeTruthy());
     vi.useFakeTimers();
-    fireEvent.click(within(sidebar).getByTestId("concept-variant-row-618"));
-    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-row-618"));
+    fireEvent.click(within(sidebar).getByTestId("concept-variant-pill-618"));
+    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-pill-618"));
     fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
 
     await act(async () => {
@@ -1811,8 +1811,8 @@ describe("ParseUI", () => {
     });
 
     expect(apiClient.duplicateConcept).toHaveBeenCalledWith("618");
-    const originalRow = within(sidebar).getByTestId("concept-variant-row-618");
-    const siblingRow = within(sidebar).getByTestId("concept-variant-row-619");
+    const originalRow = within(sidebar).getByTestId("concept-variant-pill-618");
+    const siblingRow = within(sidebar).getByTestId("concept-variant-pill-619");
     expect(originalRow.className).not.toContain("bg-indigo-50");
     expect(siblingRow.className).toContain("bg-indigo-50");
     expect(siblingRow.textContent ?? "").toContain("NEW");
@@ -1821,7 +1821,7 @@ describe("ParseUI", () => {
     act(() => {
       vi.advanceTimersByTime(5000);
     });
-    expect(within(sidebar).getByTestId("concept-variant-row-619").textContent ?? "").not.toContain("NEW");
+    expect(within(sidebar).getByTestId("concept-variant-pill-619").textContent ?? "").not.toContain("NEW");
   });
 
   it("duplicate 409 error surfaces in the sidebar inline notice and clears after 5s", async () => {
@@ -1843,9 +1843,9 @@ describe("ParseUI", () => {
     render(<ParseUI />);
 
     const sidebar = await screen.findByTestId("concept-sidebar");
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-618")).toBeTruthy());
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-618")).toBeTruthy());
     vi.useFakeTimers();
-    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-row-618"));
+    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-pill-618"));
     fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
 
     await act(async () => {
@@ -1945,7 +1945,7 @@ describe("ParseUI", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
 
     await waitFor(() => expect(apiClient.duplicateConcept).toHaveBeenCalledWith("365"));
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-999")).toBeTruthy());
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-999")).toBeTruthy());
   });
 
   it("switching speakers scopes the fresh duplicate only to the duplicating speaker", async () => {
@@ -1985,13 +1985,13 @@ describe("ParseUI", () => {
     const sidebar = await screen.findByTestId("concept-sidebar");
     fireEvent.contextMenu(within(sidebar).getByRole("button", { name: /JBIL 154/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-999")).toBeTruthy());
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-999")).toBeTruthy());
 
     fireEvent.click(screen.getAllByRole("button", { name: "Kalh01" })[0]);
-    await waitFor(() => expect(within(sidebar).queryByTestId("concept-variant-row-999")).toBeNull());
+    await waitFor(() => expect(within(sidebar).queryByTestId("concept-variant-pill-999")).toBeNull());
 
     fireEvent.click(screen.getAllByRole("button", { name: "Fail01" })[0]);
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-999")).toBeTruthy());
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-999")).toBeTruthy());
   });
 
   it("other speakers' annotated variants do not appear in a scoped grouped row", async () => {
@@ -2018,7 +2018,7 @@ describe("ParseUI", () => {
     const parent = await within(sidebar).findByRole("button", { name: /head.*JBIL 31/i });
 
     expect(parent).toBeTruthy();
-    expect(within(sidebar).queryByTestId("concept-variant-row-247")).toBeNull();
+    expect(within(sidebar).queryByTestId("concept-variant-pill-247")).toBeNull();
   });
 
   it("right-click → Delete variant opens the confirmation modal", async () => {
@@ -2039,8 +2039,8 @@ describe("ParseUI", () => {
     render(<ParseUI />);
 
     const sidebar = await screen.findByTestId("concept-sidebar");
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-618")).toBeTruthy());
-    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-row-618"));
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-618")).toBeTruthy());
+    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-pill-618"));
     fireEvent.click(screen.getByRole("menuitem", { name: /Delete variant/i }));
 
     expect(screen.getByText("Delete new (B)?")).toBeTruthy();
@@ -2068,8 +2068,8 @@ describe("ParseUI", () => {
     render(<ParseUI />);
 
     const sidebar = await screen.findByTestId("concept-sidebar");
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-618")).toBeTruthy());
-    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-row-618"));
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-618")).toBeTruthy());
+    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-pill-618"));
     fireEvent.click(screen.getByRole("menuitem", { name: /Delete variant/i }));
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
@@ -2099,8 +2099,8 @@ describe("ParseUI", () => {
     render(<ParseUI />);
 
     const sidebar = await screen.findByTestId("concept-sidebar");
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-618")).toBeTruthy());
-    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-row-618"));
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-618")).toBeTruthy());
+    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-pill-618"));
     fireEvent.click(screen.getByRole("menuitem", { name: /Delete variant/i }));
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
@@ -2134,8 +2134,8 @@ describe("ParseUI", () => {
     render(<ParseUI />);
 
     const sidebar = await screen.findByTestId("concept-sidebar");
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-row-618")).toBeTruthy());
-    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-row-618"));
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-618")).toBeTruthy());
+    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-pill-618"));
     fireEvent.click(screen.getByRole("menuitem", { name: /Delete variant/i }));
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
