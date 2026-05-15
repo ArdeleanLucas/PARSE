@@ -53,6 +53,8 @@ export interface RightPanelProps {
   surveySettings: SurveySettingsMap;
   speakerSurveyChoices: SpeakerSurveyChoices;
   onSurveyOverlapUpdate: (patch: SurveyOverlapPatch) => void;
+  onSurveyChoiceChange?: (speaker: string, conceptKey: string, surveyId: string) => void;
+  onPromoteSurveyPrimary?: (conceptId: string, surveyId: string, sourceItem: string) => void | Promise<void>;
   onRelinkApplied?: () => void | Promise<void>;
 }
 

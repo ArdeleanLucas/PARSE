@@ -57,7 +57,26 @@ describe('SurveyBadge', () => {
     expect(onCycle).toHaveBeenCalledWith({ surveyId: 'jbil', sourceItem: '31' });
   });
 
-  it('keeps multi-survey badges static without an active speaker', () => {
+  it('promotes to the next sorted survey without an active speaker', () => {
+    const onPromote = vi.fn();
+    render(
+      <SurveyBadge
+        {...baseProps}
+        activeSpeaker={null}
+        availableSurveys={{ klq: '1.1', jbil: '31' }}
+        onPromote={onPromote}
+      />,
+    );
+
+    const badge = screen.getByRole('button', {
+      name: 'Promote survey for head from KLQ 1.1 to JBIL 31',
+    });
+    fireEvent.click(badge);
+
+    expect(onPromote).toHaveBeenCalledWith({ surveyId: 'jbil', sourceItem: '31' });
+  });
+
+  it('keeps multi-survey badges static without an active speaker or promote handler', () => {
     const onCycle = vi.fn();
     const { container } = render(
       <SurveyBadge

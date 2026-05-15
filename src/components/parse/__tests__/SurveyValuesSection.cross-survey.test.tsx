@@ -11,10 +11,12 @@ vi.mock('../../../api/client', () => ({
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+
 });
 
 beforeEach(() => {
   vi.mocked(relinkConceptsByGloss).mockReset();
+
 });
 
 function renderSection(onRelinkApplied = vi.fn()) {
@@ -34,6 +36,33 @@ function renderSection(onRelinkApplied = vi.fn()) {
 }
 
 describe('SurveyValuesSection cross-survey reconciliation', () => {
+
+  it('renders a clickable active survey badge that promotes primary survey without an active speaker', () => {
+    const onPromoteSurveyPrimary = vi.fn().mockResolvedValue(undefined);
+    render(
+      <SurveyValuesSection
+        activeConcept={{ id: 527, key: '527', name: 'nose', tag: 'untagged' as never, sourceSurvey: 'klq', sourceItem: '1.5', surveys: { klq: '1.5', jbil: '34' } }}
+        activeSpeaker={null}
+        workspaceConcepts={[]}
+        conceptSurveyLinks={{ '527': { klq: '1.5', jbil: '34' } }}
+        speakerConceptSurveyLinks={{}}
+        surveyColorCodingEnabled
+        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'indigo' }, jbil: { display_label: 'JBIL', display_color: 'rose' } }}
+        speakerSurveyChoices={{}}
+        onSurveyOverlapUpdate={vi.fn()}
+        onPromoteSurveyPrimary={onPromoteSurveyPrimary}
+      />,
+    );
+
+    const badge = screen.getByRole('button', {
+      name: 'Promote survey for nose from KLQ 1.5 to JBIL 34',
+    });
+    expect(badge.textContent).toBe('KLQ 1.5');
+
+    fireEvent.click(badge);
+    expect(onPromoteSurveyPrimary).toHaveBeenCalledWith('527', 'jbil', '34');
+  });
+
 
   it('renders five pickable survey color swatches in a single grid row', () => {
     render(
@@ -287,4 +316,5 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
     expect(screen.queryByRole('button', { name: /Apply selected/i })).toBeNull();
     expect(relinkConceptsByGloss).toHaveBeenCalledTimes(1);
   });
+
 });

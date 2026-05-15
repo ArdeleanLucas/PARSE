@@ -79,6 +79,7 @@ interface ConceptSidebarProps {
   speakerSurveyChoices?: SpeakerSurveyChoices;
   surveyColorCodingEnabled?: boolean;
   onSurveyChoiceChange?: (speaker: string, conceptKey: string, surveyId: string) => void;
+  onPromoteSurveyPrimary?: (conceptId: string, surveyId: string, sourceItem: string) => void | Promise<void>;
   onMergeRequest?: (concept: SidebarConcept) => void;
   onUnmergeConcept?: (concept: SidebarConcept) => void;
   onDuplicateConcept?: (concept: SidebarConcept) => void;
@@ -188,6 +189,7 @@ export function ConceptSidebar({
   speakerSurveyChoices = {},
   surveyColorCodingEnabled = false,
   onSurveyChoiceChange,
+  onPromoteSurveyPrimary,
   onMergeRequest,
   onUnmergeConcept,
   onDuplicateConcept,
@@ -534,13 +536,16 @@ export function ConceptSidebar({
           const hasSpeakerAwareSurveyLinks = Object.keys(conceptSurveyLinks).length > 0 || Object.keys(speakerConceptSurveyLinks).length > 0;
           const speakerBuckets = hasSpeakerAwareSurveyLinks ? bucketsForConcept(surveyConcept, activeSpeaker, conceptSurveyLinks, speakerConceptSurveyLinks) : [];
           const fallbackResolvedSurvey = resolveConceptSurvey(surveyConcept, activeSpeaker, speakerSurveyChoices, surveySettings);
-          const firstSpeakerBucket = speakerBuckets[0];
-          const resolvedSurvey = firstSpeakerBucket ? {
+          const sourceSurvey = normalizeSurveyId(concept.sourceSurvey);
+          const preferredSpeakerBucket = !activeSpeaker && sourceSurvey
+            ? speakerBuckets.find((bucket) => bucket.surveyId === sourceSurvey) ?? speakerBuckets[0]
+            : speakerBuckets[0];
+          const resolvedSurvey = preferredSpeakerBucket ? {
             conceptKey: surveyConcept.key,
-            surveyId: firstSpeakerBucket.surveyId,
-            sourceItem: firstSpeakerBucket.sourceItem,
-            displayLabel: surveyLabelFor(firstSpeakerBucket.surveyId, surveySettings),
-            displayColor: (surveySettings[firstSpeakerBucket.surveyId] ?? defaultSurveySettings(firstSpeakerBucket.surveyId)).display_color,
+            surveyId: preferredSpeakerBucket.surveyId,
+            sourceItem: preferredSpeakerBucket.sourceItem,
+            displayLabel: surveyLabelFor(preferredSpeakerBucket.surveyId, surveySettings),
+            displayColor: (surveySettings[preferredSpeakerBucket.surveyId] ?? defaultSurveySettings(preferredSpeakerBucket.surveyId)).display_color,
             hasOverlap: speakerBuckets.length > 1,
             availableSurveys: Object.fromEntries(speakerBuckets.map((bucket) => [bucket.surveyId, bucket.sourceItem])),
           } : fallbackResolvedSurvey;
@@ -623,6 +628,7 @@ export function ConceptSidebar({
                   activeSpeaker={activeSpeaker ?? null}
                   parentActive={parentActive}
                   onCycle={onSurveyChoiceChange ? (next) => onSurveyChoiceChange(activeSpeaker ?? '', surveyConcept.key, next.surveyId) : undefined}
+                  onPromote={onPromoteSurveyPrimary ? (next) => onPromoteSurveyPrimary(String(concept.id), next.surveyId, next.sourceItem) : undefined}
                 />
               </div>
               {expanded && hasVariants && visibleVariants.map((variant) => {
