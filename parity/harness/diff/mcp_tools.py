@@ -156,6 +156,10 @@ def _ensure_mcp_fixture_inputs(context: McpFixtureContext) -> None:
         + "\n",
         encoding="utf-8",
     )
+    (context.input_root / "cross-survey-reference.csv").write_text(
+        "source,id,lexeme\nKLQ,1.1,ash\nJBIL,11,ash\nKLQ,1.2,bark\nJBIL,12,bark\n",
+        encoding="utf-8",
+    )
 
     processed_wav = context.input_root / "processed" / "Proc01.wav"
     processed_annotation = context.input_root / "processed" / "Proc01.parse.json"

@@ -1,0 +1,5 @@
+{
+  "referencePath": "${INPUT_ROOT}/cross-survey-reference.csv",
+  "dryRun": true,
+  "singleWordOnly": true
+}
