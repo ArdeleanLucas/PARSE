@@ -81,7 +81,7 @@ def test_populate_cross_survey_links_replace_apply_resets_stale_sidecar_entries(
     replaced = json.loads(sidecar_path.read_text(encoding="utf-8"))
 
     assert payload["sidecar_diff"]["replace_mode"] is True
-    assert payload["sidecar_diff"]["added"] == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "5": {"klq": "5.0"}}
-    assert replaced["concept_survey_links"] == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "5": {"klq": "5.0"}}
+    assert payload["sidecar_diff"]["added"] == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "4": {"klq": "5.5"}, "5": {"klq": "5.0"}}
+    assert replaced["concept_survey_links"] == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "4": {"klq": "5.5"}, "5": {"klq": "5.0"}}
     assert replaced["speaker_choices"] == {"speaker-a": {"1": "jbil"}}
     assert replaced["speaker_concept_survey_links"] == {"speaker-a": {"1": {"jbil": "10"}}}

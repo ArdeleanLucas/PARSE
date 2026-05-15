@@ -161,10 +161,119 @@ def test_apply_replace_resets_concept_survey_links_before_write(tmp_path: Path) 
     state = load_survey_overlap_state(workspace)
 
     assert diff["replace_mode"] is True
-    assert diff["added"] == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "5": {"klq": "5.0"}}
-    assert state["concept_survey_links"] == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "5": {"klq": "5.0"}}
+    assert diff["added"] == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "4": {"klq": "5.5"}, "5": {"klq": "5.0"}}
+    assert state["concept_survey_links"] == {"1": {"klq": "1.5"}, "2": {"klq": "2.5"}, "4": {"klq": "5.5"}, "5": {"klq": "5.0"}}
     assert state["speaker_choices"] == {"speaker-a": {"1": "jbil"}}
     assert state["speaker_concept_survey_links"] == {"speaker-a": {"1": {"jbil": "10"}}}
+
+
+def test_apply_replace_writes_full_matched_patch_not_just_would_add(tmp_path: Path) -> None:
+    workspace = write_minimal_workspace(
+        tmp_path,
+        concepts_csv=(
+            "id,concept_en,source_item,source_survey,custom_order\n"
+            "1,nose,10,JBIL,1\n"
+            "2,father,20,JBIL,2\n"
+            "3,hair,30,JBIL,3\n"
+            "4,stone,40,JBIL,4\n"
+            "5,salt,50,JBIL,5\n"
+        ),
+        reference_csv=(
+            "source,id,lexeme\n"
+            "JBIL,10,nose\n"
+            "KLQ,1.5,nose\n"
+            "JBIL,20,father\n"
+            "KLQ,2.5,father\n"
+            "JBIL,30,hair\n"
+            "KLQ,3.5,hair\n"
+            "JBIL,40,stone\n"
+            "KLQ,4.5,stone\n"
+            "JBIL,50,salt\n"
+            "KLQ,5.5,salt\n"
+        ),
+        survey_overlap_json=(
+            '{"concept_survey_links":{"1":{"klq":"1.5"},"2":{"klq":"2.5"},'
+            '"3":{"klq":"3.5"},"4":{"klq":"4.5"},"5":{"klq":"5.5"}}}\n'
+        ),
+    )
+    summary = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
+
+    assert len(summary["matched"]) == 5
+    assert summary["would_add"] == []
+
+    diff = apply_cross_survey_link_patch(workspace, summary, replace=True)
+    state = load_survey_overlap_state(workspace)
+
+    expected = {
+        "1": {"klq": "1.5"},
+        "2": {"klq": "2.5"},
+        "3": {"klq": "3.5"},
+        "4": {"klq": "4.5"},
+        "5": {"klq": "5.5"},
+    }
+    assert diff["replace_mode"] is True
+    assert diff["added"] == expected
+    assert state["concept_survey_links"] == expected
+
+
+def test_apply_replace_strips_legacy_primary_from_full_patch(tmp_path: Path) -> None:
+    workspace = write_minimal_workspace(
+        tmp_path,
+        concepts_csv="id,concept_en,source_item,source_survey,custom_order\n1,father,2.1,KLQ,1\n",
+        reference_csv="source,id,lexeme\nKLQ,2.1,father\nJBIL,72,father\n",
+    )
+    summary = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
+
+    diff = apply_cross_survey_link_patch(workspace, summary, replace=True)
+    state = load_survey_overlap_state(workspace)
+
+    assert diff["added"] == {"1": {"jbil": "72"}}
+    assert state["concept_survey_links"] == {"1": {"jbil": "72"}}
+
+
+def test_apply_replace_skips_concepts_with_empty_post_strip_links(tmp_path: Path) -> None:
+    workspace = write_minimal_workspace(
+        tmp_path,
+        concepts_csv="id,concept_en,source_item,source_survey,custom_order\n1,father,2.1,KLQ,1\n",
+        reference_csv="source,id,lexeme\nKLQ,2.1,father\n",
+        survey_overlap_json='{"concept_survey_links":{"stale":{"jbil":"999"}}}\n',
+    )
+    summary = {
+        "matched": [
+            {
+                "concept_id": "1",
+                "concept_en": "father",
+                "legacy_primary": {"survey": "klq", "source_item": "2.1"},
+                "reference_links": {"klq": "2.1"},
+            }
+        ],
+        "would_add": [],
+        "conflicts": [],
+        "skipped_multiword": [],
+    }
+
+    diff = apply_cross_survey_link_patch(workspace, summary, replace=True)
+    state = load_survey_overlap_state(workspace)
+
+    assert diff["added"] == {}
+    assert state["concept_survey_links"] == {}
+
+
+def test_apply_merge_path_unchanged_after_full_patch_addition(tmp_path: Path) -> None:
+    workspace = copy_workspace(tmp_path)
+    update_survey_overlap_state(workspace, {"concept_survey_links": {"1": {"klq": "1.5"}, "99": {"jbil": "999"}}})
+    summary = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
+
+    assert "1" in by_concept(summary["matched"])
+    assert "1" not in by_concept(summary["would_add"])
+
+    diff = apply_cross_survey_link_patch(workspace, summary, replace=False)
+    state = load_survey_overlap_state(workspace)
+
+    assert diff["replace_mode"] is False
+    assert "1" not in diff["added"]
+    assert state["concept_survey_links"]["1"] == {"klq": "1.5"}
+    assert state["concept_survey_links"]["99"] == {"jbil": "999"}
 
 
 def test_apply_merge_preserves_stale_concept_survey_links(tmp_path: Path) -> None:

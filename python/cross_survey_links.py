@@ -233,24 +233,41 @@ def compute_cross_survey_link_patch(
     return summary
 
 
-def patch_from_cross_survey_link_summary(summary: Mapping[str, object]) -> dict[str, dict[str, str]]:
-    """Return an `update_survey_overlap_state` patch from a computed summary."""
+def patch_from_cross_survey_link_summary(
+    summary: Mapping[str, object],
+    *,
+    full: bool = False,
+) -> dict[str, dict[str, str]]:
+    """Return an `update_survey_overlap_state` patch from a computed summary.
+
+    Merge mode writes only `would_add` deltas. Replace mode must rebuild the
+    sidecar from the full matched set because the current sidecar is cleared
+    before write.
+    """
 
     patch: dict[str, dict[str, str]] = {}
-    would_add = summary.get("would_add") if isinstance(summary, Mapping) else None
-    if not isinstance(would_add, list):
+    entries_key = "matched" if full else "would_add"
+    entries = summary.get(entries_key) if isinstance(summary, Mapping) else None
+    if not isinstance(entries, list):
         return patch
-    for entry in would_add:
+    for entry in entries:
         if not isinstance(entry, Mapping):
             continue
         concept_id = str(entry.get("concept_id") or "").strip()
-        links_raw = entry.get("links")
+        links_raw = entry.get("reference_links" if full else "links")
         if not concept_id or not isinstance(links_raw, Mapping):
             continue
+        legacy_survey = ""
+        if full:
+            legacy_primary = entry.get("legacy_primary")
+            if isinstance(legacy_primary, Mapping):
+                legacy_survey = normalize_survey_id(legacy_primary.get("survey"))
         links = {
-            normalize_survey_id(survey_id): str(source_item or "").strip()
+            normalized_survey: str(source_item or "").strip()
             for survey_id, source_item in links_raw.items()
-            if normalize_survey_id(survey_id) and str(source_item or "").strip()
+            if (normalized_survey := normalize_survey_id(survey_id))
+            and normalized_survey != legacy_survey
+            and str(source_item or "").strip()
         }
         if links:
             patch[concept_id] = _ordered_links(links)
@@ -287,7 +304,7 @@ def apply_cross_survey_link_patch(
     """
 
     workspace_path = Path(workspace).expanduser().resolve()
-    patch = patch_from_cross_survey_link_summary(summary)
+    patch = patch_from_cross_survey_link_summary(summary, full=replace)
     before_state = load_survey_overlap_state(workspace_path)
     before_links = dict(before_state.get("concept_survey_links") or {})
     if patch or replace:
