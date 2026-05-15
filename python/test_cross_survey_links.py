@@ -19,6 +19,22 @@ def by_concept(entries: list[dict[str, object]]) -> dict[str, dict[str, object]]
     return {str(entry["concept_id"]): entry for entry in entries}
 
 
+def write_minimal_workspace(
+    tmp_path: Path,
+    *,
+    concepts_csv: str,
+    reference_csv: str,
+    survey_overlap_json: str | None = None,
+) -> Path:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "concepts.csv").write_text(concepts_csv, encoding="utf-8")
+    (workspace / "reference.csv").write_text(reference_csv, encoding="utf-8")
+    if survey_overlap_json is not None:
+        (workspace / "survey-overlap.json").write_text(survey_overlap_json, encoding="utf-8")
+    return workspace
+
+
 def test_compute_cross_survey_link_patch_adds_single_word_twin(tmp_path: Path) -> None:
     workspace = copy_workspace(tmp_path)
 
@@ -58,6 +74,46 @@ def test_compute_cross_survey_link_patch_does_not_duplicate_existing_sidecar_lin
 
     assert "4" in by_concept(summary["matched"])
     assert "4" not in by_concept(summary["would_add"])
+
+
+def test_compute_cross_survey_link_patch_flags_reference_ambiguous(tmp_path: Path) -> None:
+    workspace = write_minimal_workspace(
+        tmp_path,
+        concepts_csv="id,concept_en,source_item,source_survey,custom_order\n1,stone,50,JBIL,1\n",
+        reference_csv=(
+            "source,id,lexeme\n"
+            "JBIL,50,stone\n"
+            "KLQ,5.0,stone\n"
+            "KLQ,5.1,stone\n"
+        ),
+    )
+
+    summary = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
+
+    conflict = by_concept(summary["conflicts"])["1"]
+    assert conflict["reason"] == "reference_ambiguous"
+    assert conflict["reference_conflicts"] == [
+        {"survey": "klq", "first_source_item": "5.0", "conflicting_source_item": "5.1"}
+    ]
+    assert "1" not in by_concept(summary["would_add"])
+
+
+def test_compute_cross_survey_link_patch_flags_existing_sidecar_mismatch(tmp_path: Path) -> None:
+    workspace = write_minimal_workspace(
+        tmp_path,
+        concepts_csv="id,concept_en,source_item,source_survey,custom_order\n1,stone,50,JBIL,1\n",
+        reference_csv="source,id,lexeme\nJBIL,50,stone\nKLQ,5.0,stone\n",
+        survey_overlap_json='{ "concept_survey_links": { "1": { "klq": "9.9" } } }\n',
+    )
+
+    summary = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
+
+    conflict = by_concept(summary["conflicts"])["1"]
+    assert conflict["reason"] == "existing_sidecar_mismatch"
+    assert conflict["sidecar_mismatches"] == [
+        {"survey": "klq", "existing_source_item": "9.9", "reference_source_item": "5.0"}
+    ]
+    assert "1" not in by_concept(summary["would_add"])
 
 
 def test_compute_cross_survey_link_patch_empty_workspace_returns_empty_lists(tmp_path: Path) -> None:
