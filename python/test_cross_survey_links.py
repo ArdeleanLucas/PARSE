@@ -222,15 +222,35 @@ def test_compute_cross_survey_link_patch_matches_variant_workspace_concept_via_s
     assert by_concept(summary["matched"])["1"]["reference_links"] == {"jbil": "32", "klq": "1.1"}
 
 
-def test_compute_cross_survey_link_patch_rejects_stripped_match_when_within_survey_ambiguous(tmp_path: Path) -> None:
+def test_compute_cross_survey_link_patch_prefers_bare_when_stripped_collides_in_reference(tmp_path: Path) -> None:
     workspace = write_minimal_workspace(
         tmp_path,
-        concepts_csv="id,concept_en,source_item,source_survey,custom_order\n7,father (vocative),2.3,KLQ,1\n",
+        concepts_csv="id,concept_en,source_item,source_survey,custom_order\n136,father (A),72,JBIL,1\n",
         reference_csv=(
             "source,id,lexeme\n"
+            "JBIL,72,father\n"
             "KLQ,2.1,father\n"
             "KLQ,2.3,father (vocative)\n"
-            "JBIL,72,father\n"
+        ),
+    )
+
+    summary = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
+
+    additions = by_concept(summary["would_add"])
+    assert additions["136"]["links"] == {"klq": "2.1"}
+    assert by_concept(summary["matched"])["136"]["reference_links"] == {"jbil": "72", "klq": "2.1"}
+    assert summary["conflicts"] == []
+
+
+def test_compute_cross_survey_link_patch_rejects_when_no_bare_among_collisions(tmp_path: Path) -> None:
+    workspace = write_minimal_workspace(
+        tmp_path,
+        concepts_csv="id,concept_en,source_item,source_survey,custom_order\n7,X (whatever),1,JBIL,1\n",
+        reference_csv=(
+            "source,id,lexeme\n"
+            "JBIL,1,X\n"
+            "KLQ,1.0,X (a)\n"
+            "KLQ,1.1,X (b)\n"
         ),
     )
 
@@ -238,10 +258,35 @@ def test_compute_cross_survey_link_patch_rejects_stripped_match_when_within_surv
 
     conflict = by_concept(summary["conflicts"])["7"]
     assert conflict["reason"] == "stripped_match_ambiguous"
+    assert conflict["stripped_key"] == "x"
     assert "7" not in by_concept(summary["would_add"])
 
 
-def test_compute_cross_survey_link_patch_preserves_exact_match_when_both_present(tmp_path: Path) -> None:
+def test_compute_cross_survey_link_patch_parenthetical_workspace_skipped_when_primary_mismatches_bare_canonical(
+    tmp_path: Path,
+) -> None:
+    workspace = write_minimal_workspace(
+        tmp_path,
+        concepts_csv="id,concept_en,source_item,source_survey,custom_order\n7,father (vocative),2.3,KLQ,1\n",
+        reference_csv=(
+            "source,id,lexeme\n"
+            "JBIL,72,father\n"
+            "KLQ,2.1,father\n"
+            "KLQ,2.3,father (vocative)\n"
+        ),
+    )
+
+    summary = compute_cross_survey_link_patch(workspace, workspace / "reference.csv")
+
+    conflict = by_concept(summary["conflicts"])["7"]
+    assert conflict["reason"] == "legacy_primary_mismatch"
+    assert conflict["legacy_primary"] == {"survey": "klq", "source_item": "2.3"}
+    assert conflict["reference_primary"] == {"survey": "klq", "source_item": "2.1"}
+    assert conflict["reference_links"] == {"jbil": "72", "klq": "2.1"}
+    assert "7" not in by_concept(summary["would_add"])
+
+
+def test_compute_cross_survey_link_patch_preserves_exact_match_when_both_bare_present(tmp_path: Path) -> None:
     workspace = write_minimal_workspace(
         tmp_path,
         concepts_csv="id,concept_en,source_item,source_survey,custom_order\n8,father,2.1,KLQ,1\n",

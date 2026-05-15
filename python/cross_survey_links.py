@@ -70,8 +70,7 @@ def _read_reference_links(
 ]:
     exact_index: dict[str, dict[str, str]] = {}
     exact_conflicts: dict[str, list[dict[str, str]]] = {}
-    stripped_index: dict[str, dict[str, str]] = {}
-    stripped_conflicts: dict[str, list[dict[str, str]]] = {}
+    stripped_entries: dict[str, dict[str, list[tuple[str, str]]]] = {}
     with reference_path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         for row in reader:
@@ -84,8 +83,24 @@ def _read_reference_links(
                 continue
             _add_reference_link(exact_index, exact_conflicts, key, survey_id, source_item)
             if stripped_key:
-                _add_reference_link(stripped_index, stripped_conflicts, stripped_key, survey_id, source_item)
-    return exact_index, exact_conflicts, stripped_index, set(stripped_conflicts)
+                stripped_entries.setdefault(stripped_key, {}).setdefault(survey_id, []).append((label, source_item))
+
+    stripped_index: dict[str, dict[str, str]] = {}
+    stripped_ambiguous_keys: set[str] = set()
+    for stripped_key, survey_entries in stripped_entries.items():
+        for survey_id, entries in survey_entries.items():
+            if len(entries) == 1:
+                source_item = entries[0][1]
+            else:
+                bare_entries = [
+                    source_item for original_label, source_item in entries if concept_label_key(original_label) == stripped_key
+                ]
+                if len(bare_entries) != 1:
+                    stripped_ambiguous_keys.add(stripped_key)
+                    continue
+                source_item = bare_entries[0]
+            stripped_index.setdefault(stripped_key, {})[survey_id] = source_item
+    return exact_index, exact_conflicts, stripped_index, stripped_ambiguous_keys
 
 
 def compute_cross_survey_link_patch(
