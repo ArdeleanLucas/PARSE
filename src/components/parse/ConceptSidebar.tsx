@@ -6,7 +6,8 @@ import { useConfigStore } from '../../stores/configStore';
 import type { ConceptSurveyLinks, ConceptSurveyLinksByConcept, SpeakerConceptSurveyLinks, SpeakerSurveyChoices, SurveySettingsMap } from '../../api/types';
 import { conceptMatchesElicitedKeys } from '../../lib/speakerElicitedConcepts';
 import { resolveSurveyLinksForSpeaker, surveyRowIdsForConcept, type SpeakerSurveyLinkBucket } from '../../lib/surveyLinksForSpeaker';
-import { defaultSurveySettings, normalizeSurveyId, resolveConceptSurvey, SURVEY_BADGE_TEXT_CLASSES, SURVEY_CHIP_CLASSES, surveyChoiceKeysForConcept, surveyLabelFor } from '../../lib/surveyOverlap';
+import { SurveyBadge } from '../shared/SurveyBadge';
+import { defaultSurveySettings, normalizeSurveyId, resolveConceptSurvey, SURVEY_CHIP_CLASSES, surveyChoiceKeysForConcept, surveyLabelFor } from '../../lib/surveyOverlap';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
 export type ConceptSortParent = 'concept' | 'source';
@@ -544,26 +545,18 @@ export function ConceptSidebar({
             availableSurveys: Object.fromEntries(speakerBuckets.map((bucket) => [bucket.surveyId, bucket.sourceItem])),
           } : fallbackResolvedSurvey;
           const resolvedSurveyLabel = surveyLabelFor(resolvedSurvey.surveyId, surveySettings);
-          const sourceLabel = resolvedSurvey.surveyId && resolvedSurvey.sourceItem
+          const fallbackBadge = (concept.sourceSurvey && concept.sourceItem)
+            ? `${concept.sourceSurvey} ${concept.sourceItem}`
+            : concept.sourceItem;
+          const badge = resolvedSurvey.surveyId && resolvedSurvey.sourceItem
             ? `${resolvedSurveyLabel} ${resolvedSurvey.sourceItem}`
-            : resolvedSurvey.sourceItem || (concept.sourceSurvey && concept.sourceItem
-              ? `${concept.sourceSurvey} ${concept.sourceItem}`
-              : concept.sourceItem);
-          const badge = sourceLabel ?? `#${concept.id}`;
+            : (resolvedSurvey.sourceItem || fallbackBadge || `#${concept.id}`);
           const surveyChoices = speakerBuckets.length > 0 ? speakerBuckets.map((bucket) => bucket.surveyId).sort() : surveyChoiceKeysForConcept(surveyConcept);
-          const multiSurveyBadge = surveyChoices.length >= 2;
-          const nextSurveyId = multiSurveyBadge && resolvedSurvey.surveyId
-            ? surveyChoices[((surveyChoices.indexOf(resolvedSurvey.surveyId) >= 0 ? surveyChoices.indexOf(resolvedSurvey.surveyId) : 0) + 1) % surveyChoices.length]
-            : undefined;
-          const nextSurveySourceItem = nextSurveyId ? resolvedSurvey.availableSurveys?.[nextSurveyId] ?? '' : '';
-          const nextSurveyLabel = nextSurveyId ? surveyLabelFor(nextSurveyId, surveySettings) : '';
-          const canFlipSurveyBadge = !!(activeSpeaker && onSurveyChoiceChange && multiSurveyBadge && nextSurveyId);
           const variants = concept.variants ?? [];
           const visibleVariants = isConceptVariantVisibleInSidebar ? variants.filter((variant) => isConceptVariantVisibleInSidebar(concept, variant)) : variants;
           const hasVariants = visibleVariants.length > 1;
           const firstVariantKey = visibleVariants[0]?.conceptKey ?? variants[0]?.conceptKey ?? null;
-          const parentActive = concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey));
-          const surveyBadgeClassName = `font-mono text-[10px] ${surveyColorCodingEnabled && resolvedSurvey.surveyId ? (SURVEY_BADGE_TEXT_CLASSES[resolvedSurvey.displayColor] ?? 'text-slate-400') : parentActive ? 'text-indigo-400' : 'text-slate-300'}`;
+          const parentActive = !!(concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey)));
           const expanded = expandedConceptIds.has(concept.id);
           const parentName = concept.name;
           const noDataSuffix = !isElicited && !scopedToSpeaker && hasElicitedScope ? ' no data' : '';
@@ -617,18 +610,20 @@ export function ConceptSidebar({
                     </span>
                   )}
                 </button>
-                {canFlipSurveyBadge ? (
-                  <button
-                    type="button"
-                    aria-label={`Switch survey for ${concept.name} from ${resolvedSurveyLabel} ${resolvedSurvey.sourceItem} to ${nextSurveyLabel} ${nextSurveySourceItem}`}
-                    onClick={() => onSurveyChoiceChange(activeSpeaker, surveyConcept.key, nextSurveyId)}
-                    className={`mr-2 rounded px-1 py-0.5 hover:bg-slate-100 hover:underline ${surveyBadgeClassName}`}
-                  >
-                    {badge}
-                  </button>
-                ) : (
-                  <span className={`mr-2 px-1 py-0.5 ${surveyBadgeClassName}`}>{badge}</span>
-                )}
+                <SurveyBadge
+                  conceptId={String(concept.id)}
+                  conceptKey={surveyConcept.key}
+                  conceptName={concept.name}
+                  resolvedSurveyId={resolvedSurvey.surveyId}
+                  resolvedSourceItem={resolvedSurvey.sourceItem || fallbackBadge || ''}
+                  resolvedDisplayColor={resolvedSurvey.displayColor}
+                  availableSurveys={resolvedSurvey.availableSurveys}
+                  surveySettings={surveySettings}
+                  surveyColorCodingEnabled={surveyColorCodingEnabled}
+                  activeSpeaker={activeSpeaker ?? null}
+                  parentActive={parentActive}
+                  onCycle={onSurveyChoiceChange ? (next) => onSurveyChoiceChange(activeSpeaker ?? '', surveyConcept.key, next.surveyId) : undefined}
+                />
               </div>
               {expanded && hasVariants && visibleVariants.map((variant) => {
                 const childActive = concept.id === activeConceptId && activeConceptKey === variant.conceptKey;
