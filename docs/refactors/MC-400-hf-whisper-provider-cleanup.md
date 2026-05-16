@@ -2,7 +2,7 @@
 
 **MC Task:** MC-400 — HFWhisperProvider structural cleanup / Lane MC-400-A  
 **PR:** A1 pre-research docs; implementation follows in PR-A2.  
-**Grounding point:** `origin/main` at `ffe7e33cba0ceb4cd55c588273508478c0d3ef1c`.
+**Grounding point:** `origin/main` at `db490238bb52d8d4db5fa5acee8033b4a72d5196`.
 
 ## 1. Problem statement
 
@@ -39,6 +39,8 @@ Current source line ranges from `origin/main`:
 PR-A2 introduces `python/ai/providers/hf_whisper_config.py` with a frozen dataclass API. The dataclass is the canonical runtime shape after either the old flat schema or the new sectioned schema is read.
 
 ```python
+from dataclasses import dataclass, field
+
 @dataclass(frozen=True)
 class OrthoHFGenerationConfig:
     task: Literal["transcribe", "translate"] = "transcribe"
@@ -56,13 +58,12 @@ class OrthoHFGenerationConfig:
 class OrthoHFModelConfig:
     path: str                                    # new key: ortho.model.path
     device: str = "auto"                         # normalized through resolve_compute_device("orth", ...)
-    dtype: Literal["float16", "bfloat16", "float32"] = "float32"
 
 @dataclass(frozen=True)
 class OrthoHFConfig:
     backend: Literal["hf"] = "hf"
-    model: OrthoHFModelConfig = OrthoHFModelConfig(path="razhan/whisper-base-sdh")
-    generation: OrthoHFGenerationConfig = OrthoHFGenerationConfig()
+    model: OrthoHFModelConfig = field(default_factory=lambda: OrthoHFModelConfig(path="razhan/whisper-base-sdh"))
+    generation: OrthoHFGenerationConfig = field(default_factory=OrthoHFGenerationConfig)
     initial_prompt: str | None = None             # retained for explicit callers; public APIs still default to no prompt
     refine_lexemes: bool = False
 ```
@@ -79,8 +80,7 @@ PR-A2 must accept both schemas until Lane C ships the migrator.
     "backend": "hf",
     "model": {
       "path": "razhan/whisper-base-sdh",
-      "device": "cuda",
-      "dtype": "float16"
+      "device": "cuda"
     },
     "generation": {
       "task": "transcribe",
@@ -130,7 +130,6 @@ PR-A2 must accept both schemas until Lane C ships the migrator.
 | `backend` | literal `"hf"` | `"hf"` | Reject non-`hf` in `OrthoHFConfig`; factory-level routing still chooses faster-whisper before this dataclass is used. |
 | `model.path` | non-empty `str` | `"razhan/whisper-base-sdh"` | Reject empty strings and CT2-looking directories with the existing actionable error text. |
 | `model.device` | `str` | `"auto"` | Resolve with `resolve_compute_device("orth", config_device=..., section_default="auto")`, then normalize `cuda` to `cuda:0` for HF `.to()`. |
-| `model.dtype` | `float16` / `bfloat16` / `float32` | `float32` | Legacy `compute_type` maps here. `int8`, `int8_float16`, and CT2-only values raise `ValueError` for HF. |
 | `generation.task` | `transcribe` / `translate` | `transcribe` | Unknown values raise `ValueError`; no silent fallback. |
 | `generation.language` | `str | None` | normalized `fa` when legacy has `sd`/`sdh` | Use shared `_normalize_whisper_language`; empty string becomes `None`/auto. |
 | `generation.return_dict_in_generate` | `bool` | `True` | Must remain true for confidence scoring. |
@@ -144,10 +143,12 @@ PR-A2 must accept both schemas until Lane C ships the migrator.
 | `initial_prompt` | `str | None` | `None` | Empty or whitespace-only string normalizes to `None`; public calls still default to suppressing config prompt unless explicitly supplied. |
 | `refine_lexemes` | `bool` | `False` | Existing provider behavior retained. |
 
+Legacy-only compatibility keys (`compute_type`, `vad_filter`, `vad_parameters`, `provider`) are accepted by the reader for existing `config/ai_config.json` files but are not canonical fields. PR-A2 must ignore them at runtime and emit at most one deprecation line per key. In particular, `compute_type: "float16"` remains a faster-whisper-era compatibility knob, not a request to pass `torch_dtype=torch.float16` to the HF loader.
+
 ### 3.3 Unknown-key policy
 
 - New sectioned schema: unknown top-level keys under `ortho`, unknown `model.*`, and unknown `generation.*` raise `ValueError` with the offending dotted key.
-- Legacy reader compatibility: known legacy keys map to canonical fields. `vad_filter`, `vad_parameters`, and `provider` are accepted only as deprecated compatibility keys and are ignored with a one-time deprecation log per key. They do not enter `HFWhisperProvider.ignored_legacy_options`, because that attribute is removed.
+- Legacy reader compatibility: known legacy keys such as `model_path`, `language`, and `condition_on_previous_text` map to canonical fields. `compute_type`, `vad_filter`, `vad_parameters`, and `provider` are accepted only as deprecated compatibility keys and are ignored with a one-time deprecation log per key. They do not enter `HFWhisperProvider.ignored_legacy_options`, because that attribute is removed.
 - Any other legacy flat key raises `ValueError`.
 
 ## 4. Module split and ownership plan
@@ -155,8 +156,8 @@ PR-A2 must accept both schemas until Lane C ships the migrator.
 | Target module | New / changed | Responsibility | Predicted LoC delta |
 | --- | --- | --- | ---: |
 | `python/ai/providers/_whisper_shared.py` | new | Razhan SDH language aliases and `_normalize_whisper_language`; optionally shared CT2/HF path messages if useful. | +35 |
-| `python/ai/providers/hf_whisper_config.py` | new | Frozen config dataclasses, legacy-to-canonical loader, unknown-key validation, CT2 path rejection, dtype parsing, one-time deprecation logging. | +220 |
-| `python/ai/providers/hf_whisper_loader.py` | new | Lazy import Transformers/Torch, select `torch_dtype`, instantiate processor/model, move/eval model, set `model.generation_config` exactly once. | +150 |
+| `python/ai/providers/hf_whisper_config.py` | new | Frozen config dataclasses, legacy-to-canonical loader, unknown-key validation, CT2 path rejection, and one-time deprecation logging for compat-ignored faster-whisper keys. | +220 |
+| `python/ai/providers/hf_whisper_loader.py` | new | Lazy import Transformers/Torch, instantiate processor/model, move/eval model, set `model.generation_config` exactly once. Runtime dtype remains the Transformers/model default (`float32`) in Lane A. | +150 |
 | `python/ai/providers/hf_whisper_probe.py` | new | 0.1s silence compatibility probe that asserts non-empty `generated.scores` and reports Transformers/model version context on failure. | +90 |
 | `python/ai/providers/hf_whisper.py` | changed | Provider orchestration only: config consumption, model cache, public transcription APIs, audio payload conversion, per-call `generate()` inputs. | -120 |
 | `python/ai/providers/local_whisper.py` | changed | Import/re-export shared normalizer; faster-whisper behavior unchanged. | -20 |
@@ -187,7 +188,7 @@ The loader owns decode policy. PR-A2 should set the following on `model.generati
 - `prompt_ids` only when the caller explicitly supplies a prompt (including the existing config-prompt sentinel path),
 - `max_new_tokens` when the public caller passes it.
 
-The following must not appear in per-call kwargs after PR-A2: `output_scores`, `return_dict_in_generate`, `compression_ratio_threshold`, `no_repeat_ngram_size`, `repetition_penalty`, `condition_on_prev_tokens`, `temperature`, `do_sample`, `task`, `language`.
+The following must not appear in per-call kwargs after PR-A2: `output_scores`, `return_dict_in_generate`, `compression_ratio_threshold`, `no_repeat_ngram_size`, `repetition_penalty`, `condition_on_prev_tokens`, `temperature`, `do_sample`, `task`, `language`. With single-owner `model.generation_config` and zero per-call generation-policy kwargs, the model's own `generation_config.json` is the sole source of `suppress_tokens` / `begin_suppress_tokens`, so Transformers builds those logits processors exactly once and duplicate `SuppressTokensLogitsProcessor` warnings are eliminated by construction.
 
 ## 6. Attention-mask contract
 
@@ -221,7 +222,7 @@ Then the returned `attention_mask`, if present, must be forwarded to `model.gene
 | empty scores tuple/list | Decode path returned no score steps. | Raise `RuntimeError`; include decoded sequence shape if available. |
 | processor/generate exception | Model stack incompatible with the probe call. | Raise `RuntimeError` chained from original exception, with model path and Transformers version. |
 
-The probe should be cheap and deterministic: a zero-valued `float32` numpy array with `1600` samples at `16000 Hz` is enough.
+The probe should be cheap and deterministic: a zero-valued `float32` numpy array with `1600` samples at `16000 Hz` is enough. Tested version range remains to be confirmed against the pinned `transformers` version; Lane C (MC-400-C) owns optional pin tightening.
 
 ## 8. ai_config migration table
 
@@ -232,7 +233,7 @@ Lane C owns the migrator, but PR-A2 owns a backwards-compatible reader. Mapping 
 | `ortho.backend` | `ortho.backend` | Must be `hf` for `OrthoHFConfig`; factory routes other backends elsewhere. |
 | `ortho.model_path` | `ortho.model.path` | Accepted and mapped. |
 | `ortho.device` | `ortho.model.device` | Accepted and mapped. |
-| `ortho.compute_type` | `ortho.model.dtype` | Accepted for `float16`, `bfloat16`, `float32`; CT2-only compute types rejected for HF. |
+| `ortho.compute_type` | Lane C removes | PR-A2 accepts as compat-ignored; runtime stays fp32. |
 | `ortho.language` | `ortho.generation.language` | Accepted and normalized through shared Whisper language helper. |
 | `ortho.task` | `ortho.generation.task` | Accepted and validated. |
 | `ortho.condition_on_previous_text` | `ortho.generation.condition_on_prev_tokens` | Accepted and mapped. |
@@ -253,8 +254,7 @@ All new tests should extend `python/test_hf_whisper_provider.py` unless a small 
 | --- | --- |
 | `test_unknown_ortho_key_raises_at_load` | Unknown canonical schema key raises `ValueError` and names the offending key. |
 | `test_legacy_vad_and_provider_keys_are_compat_ignored_once` | Legacy `vad_filter`, `vad_parameters`, and `provider` do not reach provider state and emit one-time deprecation lines instead of per-load faster-whisper warning spam. |
-| `test_compute_type_float16_sets_model_dtype` | Legacy `compute_type: "float16"` maps to loader dtype and calls `from_pretrained(..., torch_dtype=torch.float16)` / yields `model.dtype == torch.float16` on CUDA-capable test stubs. |
-| `test_unsupported_hf_compute_type_rejected` | CT2-only compute types such as `int8_float16` fail early for HF. |
+| `test_legacy_compute_type_is_compat_ignored_once` | Legacy `compute_type` does not reach loader dtype/model state and emits one-time deprecation output alongside the existing compat-ignored VAD/provider keys. |
 | `test_generation_config_owner_is_model_not_per_call` | `model.generation_config` receives decode policy; `generate()` per-call kwargs are limited to input tensors, optional prompt ids, and optional max tokens. |
 | `test_compatibility_probe_passes_on_silence_clip` | Probe runs through processor/generate and observes non-empty scores. |
 | `test_compatibility_probe_raises_when_scores_path_broken` | Probe fails loudly when scores are missing/empty, preventing constant confidence. |
@@ -279,7 +279,7 @@ PR-A2 should use RED→GREEN for the new contract tests, then run at minimum:
 ```bash
 PYTHONPATH=python python3 -m pytest python/test_hf_whisper_provider.py python/test_orth_no_parrot_regression.py python/test_compute_speaker_ortho.py -v
 PYTHONPATH=python python3 -m pytest python/server_routes/ -q
-PYTHONPATH=python python3 -m pytest -q -k 'not test_ortho_section_defaults_cascade_guard and not test_ortho_explicit_override_beats_defaults'
+PYTHONPATH=python python3 -m pytest -q
 uvx ruff check python/ --select E9,F63,F7,F82
 git diff --check
 ```
@@ -303,7 +303,12 @@ Live smoke must be isolated:
 ## 11. Out-of-scope guardrails
 
 - Do not introduce the Lane B typed `ConfidenceScore` dataclass.
-- Do not write the Lane C ai_config migrator or remove `vad_filter`, `vad_parameters`, or `provider` from live config compatibility.
+- Do not write the Lane C ai_config migrator or remove `compute_type`, `vad_filter`, `vad_parameters`, or `provider` from live config compatibility.
+- Do not honor `compute_type`/dtype in the HF backend; Lane A keeps the empirical fp32 runtime baseline unchanged.
 - Do not delete `local_whisper.py`.
 - Do not change frontend contracts, OpenAPI, or MCP tool schema.
 - Do not weaken or bypass the prompt-suppression/no-parrot regression behavior.
+
+## 12. Future work
+
+Honoring HF model dtype is future MC work, contingent on an explicit fp16-vs-fp32 quality A/B against the established Southern Kurdish empirical baseline: Saha01 milk / two / that plus Khan02 `cid=4`. Until that evidence exists, Lane A keeps the current fp32 HF runtime behavior and treats legacy `compute_type` as compat-ignored.
