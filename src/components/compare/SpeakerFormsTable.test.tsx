@@ -266,9 +266,10 @@ describe('SpeakerFormsTable row expansion', () => {
     );
 
     const header = screen.getByTestId('variant-card-header-Fail01-1');
-    expect(header.textContent).toContain('1');
+    expect(within(header).queryByText('1')).toBeNull();
     expect(header.textContent).toContain('A');
     expect(header.textContent).toContain('/mo/');
+    expect(header.textContent).toContain('·');
     expect(header.textContent).not.toContain('hair');
 
     const metadataTimestamp = screen.getByTestId('metadata-timestamp-Fail01');
@@ -276,6 +277,57 @@ describe('SpeakerFormsTable row expansion', () => {
     const variantCard = screen.getByTestId('variant-card-Fail01-1');
     expect(variantCard.textContent).not.toContain('1524.74s');
     expect(variantCard.textContent).not.toContain('1525.58s');
+  });
+
+  it('renders Saha01 variant rows as variant chip plus IPA and ORTH without gloss or csv row id', () => {
+    const hairBundle = makeBundle({
+      bundle_id: 'hair',
+      label: 'hair',
+      row_ids: ['1'],
+      buckets: [
+        {
+          bucket_key: 'klq\u00001',
+          survey_id: 'klq',
+          source_item: '1',
+          variants: [{ csv_row_id: '1', concept_en: 'hair (A)', variant_label: 'A', label: 'hair (A)' }],
+        },
+      ],
+      candidates: {
+        Saha01: {
+          '1': {
+            csv_row_id: '1',
+            ipa: 'muːsɛr',
+            ortho: '<orth value>',
+            start_sec: 10,
+            end_sec: 11,
+            source_wav: 'audio/working/Saha01.wav',
+            realization_index: 0,
+          },
+        },
+      },
+      canonical: { Saha01: null },
+    });
+
+    render(
+      <SpeakerFormsTable
+        bundle={hairBundle}
+        speakers={['Saha01']}
+        speakerForms={[makeForm({ speaker: 'Saha01', ipa: 'muːsɛr', ortho: '<orth value>' })]}
+        primaryContactCodes={PRIMARY_CODES}
+        contactLanguageNames={CONTACT_NAMES}
+        conceptKey="hair"
+        initialExpandedSpeaker="Saha01"
+      />,
+    );
+
+    const header = screen.getByTestId('variant-card-header-Saha01-1');
+    expect(header.textContent).toContain('A');
+    expect(header.textContent).toContain('/muːsɛr/');
+    expect(header.textContent).toContain('<orth value>');
+    expect(header.textContent).toContain('·');
+    expect(within(header).queryByText('1')).toBeNull();
+    expect(header.textContent).not.toContain('hair (A)');
+    expect(header.querySelector('[dir="rtl"]')).toBeNull();
   });
 
   it('clicking a row toggles its expansion', () => {
