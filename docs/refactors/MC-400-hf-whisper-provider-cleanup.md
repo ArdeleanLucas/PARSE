@@ -56,13 +56,13 @@ class OrthoHFGenerationConfig:
 
 @dataclass(frozen=True)
 class OrthoHFModelConfig:
-    path: str                                    # new key: ortho.model.path
+    repo_id: str                                 # new key: ortho.model.repo_id
     device: str = "auto"                         # normalized through resolve_compute_device("orth", ...)
 
 @dataclass(frozen=True)
 class OrthoHFConfig:
     backend: Literal["hf"] = "hf"
-    model: OrthoHFModelConfig = field(default_factory=lambda: OrthoHFModelConfig(path="razhan/whisper-base-sdh"))
+    model: OrthoHFModelConfig = field(default_factory=lambda: OrthoHFModelConfig(repo_id="razhan/whisper-base-sdh"))
     generation: OrthoHFGenerationConfig = field(default_factory=OrthoHFGenerationConfig)
     initial_prompt: str | None = None             # retained for explicit callers; public APIs still default to no prompt
     refine_lexemes: bool = False
@@ -79,7 +79,7 @@ PR-A2 must accept both schemas until Lane C ships the migrator.
   "ortho": {
     "backend": "hf",
     "model": {
-      "path": "razhan/whisper-base-sdh",
+      "repo_id": "razhan/whisper-base-sdh",
       "device": "cuda"
     },
     "generation": {
@@ -128,7 +128,7 @@ PR-A2 must accept both schemas until Lane C ships the migrator.
 | Canonical field | Type | Default | Validation |
 | --- | --- | --- | --- |
 | `backend` | literal `"hf"` | `"hf"` | Reject non-`hf` in `OrthoHFConfig`; factory-level routing still chooses faster-whisper before this dataclass is used. |
-| `model.path` | non-empty `str` | `"razhan/whisper-base-sdh"` | Reject empty strings and CT2-looking directories with the existing actionable error text. |
+| `model.repo_id` | non-empty `str` | `"razhan/whisper-base-sdh"` | Reject empty strings and CT2-looking directories with the existing actionable error text. |
 | `model.device` | `str` | `"auto"` | Resolve with `resolve_compute_device("orth", config_device=..., section_default="auto")`, then normalize `cuda` to `cuda:0` for HF `.to()`. |
 | `generation.task` | `transcribe` / `translate` | `transcribe` | Unknown values raise `ValueError`; no silent fallback. |
 | `generation.language` | `str | None` | normalized `fa` when legacy has `sd`/`sdh` | Use shared `_normalize_whisper_language`; empty string becomes `None`/auto. |
@@ -156,7 +156,7 @@ Legacy-only compatibility keys (`compute_type`, `vad_filter`, `vad_parameters`, 
 | Target module | New / changed | Responsibility | Predicted LoC delta |
 | --- | --- | --- | ---: |
 | `python/ai/providers/_whisper_shared.py` | new | Razhan SDH language aliases and `_normalize_whisper_language`; optionally shared CT2/HF path messages if useful. | +35 |
-| `python/ai/providers/hf_whisper_config.py` | new | Frozen config dataclasses, legacy-to-canonical loader, unknown-key validation, CT2 path rejection, and one-time deprecation logging for compat-ignored faster-whisper keys. | +220 |
+| `python/ai/providers/hf_whisper_config.py` | new | Frozen config dataclasses, strict sectioned-schema validation, CT2 path rejection, and actionable legacy-schema migration errors. | +220 |
 | `python/ai/providers/hf_whisper_loader.py` | new | Lazy import Transformers/Torch, instantiate processor/model, move/eval model, set `model.generation_config` exactly once. Runtime dtype remains the Transformers/model default (`float32`) in Lane A. | +150 |
 | `python/ai/providers/hf_whisper_probe.py` | new | 0.1s silence compatibility probe that asserts non-empty `generated.scores` and reports Transformers/model version context on failure. | +90 |
 | `python/ai/providers/hf_whisper.py` | changed | Provider orchestration only: config consumption, model cache, public transcription APIs, audio payload conversion, per-call `generate()` inputs. | -120 |
@@ -231,20 +231,20 @@ Lane C owns the migrator, but PR-A2 owns a backwards-compatible reader. Mapping 
 | Old key | New key | PR-A2 behavior |
 | --- | --- | --- |
 | `ortho.backend` | `ortho.backend` | Must be `hf` for `OrthoHFConfig`; factory routes other backends elsewhere. |
-| `ortho.model_path` | `ortho.model.path` | Accepted and mapped. |
-| `ortho.device` | `ortho.model.device` | Accepted and mapped. |
-| `ortho.compute_type` | Lane C removes | PR-A2 accepts as compat-ignored; runtime stays fp32. |
-| `ortho.language` | `ortho.generation.language` | Accepted and normalized through shared Whisper language helper. |
-| `ortho.task` | `ortho.generation.task` | Accepted and validated. |
-| `ortho.condition_on_previous_text` | `ortho.generation.condition_on_prev_tokens` | Accepted and mapped. |
-| `ortho.compression_ratio_threshold` | `ortho.generation.compression_ratio_threshold` | Accepted and mapped. |
-| `ortho.no_repeat_ngram_size` | `ortho.generation.no_repeat_ngram_size` | Accepted and mapped. |
-| `ortho.repetition_penalty` | `ortho.generation.repetition_penalty` | Accepted and mapped. |
-| `ortho.initial_prompt` | `ortho.initial_prompt` | Accepted; public calls still control whether the config prompt is used. |
-| `ortho.refine_lexemes` | `ortho.refine_lexemes` | Accepted and mapped. |
-| `ortho.vad_filter` | Lane C removes | Accepted as deprecated compatibility key; ignored with one-time log. |
-| `ortho.vad_parameters` | Lane C removes | Accepted as deprecated compatibility key; ignored with one-time log. |
-| `ortho.provider` | Lane C removes | Accepted as deprecated compatibility key; ignored with one-time log. |
+| `ortho.model_path` | `ortho.model.repo_id` | Lane C migrator maps; strict runtime rejects the flat key with an actionable command. |
+| `ortho.device` | `ortho.model.device` | Lane C migrator maps; strict runtime rejects the flat key with an actionable command. |
+| `ortho.compute_type` | **dropped** | Lane C migrator removes it because HF runtime never honored it; runtime stays fp32. |
+| `ortho.language` | `ortho.generation.language` | Lane C migrator maps; strict runtime rejects the flat key with an actionable command. |
+| `ortho.task` | `ortho.generation.task` | Lane C migrator maps; strict runtime validates the sectioned field. |
+| `ortho.condition_on_previous_text` | `ortho.generation.condition_on_prev_tokens` | Lane C migrator maps; strict runtime rejects the flat key with an actionable command. |
+| `ortho.compression_ratio_threshold` | `ortho.generation.compression_ratio_threshold` | Lane C migrator maps; strict runtime rejects the flat key with an actionable command. |
+| `ortho.no_repeat_ngram_size` | `ortho.generation.no_repeat_ngram_size` | Lane C migrator maps; strict runtime rejects the flat key with an actionable command. |
+| `ortho.repetition_penalty` | `ortho.generation.repetition_penalty` | Lane C migrator maps; strict runtime rejects the flat key with an actionable command. |
+| `ortho.initial_prompt` | `ortho.decoding.initial_prompt` | Lane C migrator maps; public calls still control whether the config prompt is used. |
+| `ortho.refine_lexemes` | `ortho.decoding.refine_lexemes` | Lane C migrator maps; strict runtime rejects the flat key with an actionable command. |
+| `ortho.vad_filter` | **dropped** | Lane C migrator removes it; VAD belongs upstream in the interval pipeline if reintroduced. |
+| `ortho.vad_parameters` | **dropped** | Lane C migrator removes it; VAD belongs upstream in the interval pipeline if reintroduced. |
+| `ortho.provider` | **dropped** | Lane C migrator removes it as redundant with `ortho.backend`. |
 
 ## 9. Contract test list for PR-A2
 
@@ -253,8 +253,8 @@ All new tests should extend `python/test_hf_whisper_provider.py` unless a small 
 | Test name | Contract pinned |
 | --- | --- |
 | `test_unknown_ortho_key_raises_at_load` | Unknown canonical schema key raises `ValueError` and names the offending key. |
-| `test_legacy_vad_and_provider_keys_are_compat_ignored_once` | Legacy `vad_filter`, `vad_parameters`, and `provider` do not reach provider state and emit one-time deprecation lines instead of per-load faster-whisper warning spam. |
-| `test_legacy_compute_type_is_compat_ignored_once` | Legacy `compute_type` does not reach loader dtype/model state and emits one-time deprecation output alongside the existing compat-ignored VAD/provider keys. |
+| `test_strict_reader_rejects_legacy_flat_schema_with_actionable_message` | Legacy flat keys such as `vad_filter`, `vad_parameters`, `provider`, and `compute_type` fail fast with the migrator command. |
+| `test_migrator_drops_compute_type_and_logs_reason` | The migrator drops `compute_type` and records that the HF backend never honored it. |
 | `test_generation_config_owner_is_model_not_per_call` | `model.generation_config` receives decode policy; `generate()` per-call kwargs are limited to input tensors, optional prompt ids, and optional max tokens. |
 | `test_compatibility_probe_passes_on_silence_clip` | Probe runs through processor/generate and observes non-empty scores. |
 | `test_compatibility_probe_raises_when_scores_path_broken` | Probe fails loudly when scores are missing/empty, preventing constant confidence. |
@@ -303,7 +303,7 @@ Live smoke must be isolated:
 ## 11. Out-of-scope guardrails
 
 - Do not introduce the Lane B typed `ConfidenceScore` dataclass.
-- Do not write the Lane C ai_config migrator or remove `compute_type`, `vad_filter`, `vad_parameters`, or `provider` from live config compatibility.
+- Lane C now writes the ai_config migrator and removes `compute_type`, `vad_filter`, `vad_parameters`, and `provider` from HF ORTH runtime compatibility; live workspaces must be migrated explicitly.
 - Do not honor `compute_type`/dtype in the HF backend; Lane A keeps the empirical fp32 runtime baseline unchanged.
 - Do not delete `local_whisper.py`.
 - Do not change frontend contracts, OpenAPI, or MCP tool schema.
@@ -311,4 +311,51 @@ Live smoke must be isolated:
 
 ## 12. Future work
 
-Honoring HF model dtype is future MC work, contingent on an explicit fp16-vs-fp32 quality A/B against the established Southern Kurdish empirical baseline: Saha01 milk / two / that plus Khan02 `cid=4`. Until that evidence exists, Lane A keeps the current fp32 HF runtime behavior and treats legacy `compute_type` as compat-ignored.
+Honoring HF model dtype is future MC work, contingent on an explicit fp16-vs-fp32 quality A/B against the established Southern Kurdish empirical baseline: Saha01 milk / two / that plus Khan02 `cid=4`. Until that evidence exists, PARSE keeps the current fp32 HF runtime behavior and the Lane C migrator removes legacy `compute_type`.
+
+
+## 13. Migration guide (MC-400-C)
+
+Lane C makes the HF ORTH reader strict. Existing `config/ai_config.json` files that still use the flat `ortho` schema must be migrated before starting PARSE:
+
+```bash
+# Dry-run first; prints the target `ortho` shape and does not write.
+python python/tools/migrate_ai_config_ortho.py --workspace <path>
+
+# Apply when the dry-run looks right; writes config/ai_config.json.bak-YYYY-MM-DDTHH-MM-SS first.
+python python/tools/migrate_ai_config_ortho.py --workspace <path> --apply
+```
+
+Lucas will run this against `/home/lucas/parse-workspace` after merge. Agents must not migrate that live workspace on Lucas's behalf.
+
+### Old → new mapping
+
+| Old flat key | New sectioned location | Notes |
+| --- | --- | --- |
+| `backend` | `ortho.backend` | unchanged; must be `hf` for the HF reader |
+| `model_path` | `ortho.model.repo_id` | renamed to make HF repo/local-HF-directory semantics explicit |
+| `language` | `ortho.generation.language` | preserves the configured code; runtime still normalizes `sd`/`sdh` to `fa` |
+| `device` | `ortho.model.device` | still resolved through the PARSE compute-device resolver |
+| `condition_on_previous_text` | `ortho.generation.condition_on_prev_tokens` | renamed to the Transformers generation-config spelling |
+| `compression_ratio_threshold` | `ortho.generation.compression_ratio_threshold` | unchanged value, sectioned owner |
+| `no_repeat_ngram_size` | `ortho.generation.no_repeat_ngram_size` | unchanged value, sectioned owner |
+| `repetition_penalty` | `ortho.generation.repetition_penalty` | unchanged value, sectioned owner |
+| `initial_prompt` | `ortho.decoding.initial_prompt` | prompt remains caller-controlled at runtime |
+| `refine_lexemes` | `ortho.decoding.refine_lexemes` | unchanged value, sectioned owner |
+| `task` | `ortho.generation.task` | optional; validates to `transcribe` or `translate` |
+| `vad_filter` | **dropped** | removed; VAD lives upstream in the interval pipeline |
+| `vad_parameters` | **dropped** | removed; VAD lives upstream in the interval pipeline |
+| `provider` | **dropped** | removed; redundant with `ortho.backend` |
+| `compute_type` | **dropped** | removed; the HF backend never honored it and stayed fp32 |
+
+### Why VAD was removed
+
+The HF ORTH provider receives lexeme/concept intervals that have already been sliced by PARSE's upstream interval/cue pipeline. A provider-level VAD knob was therefore a faster-whisper long-form transcription leftover: useful for trimming mid-clip silence in a continuous decode path, but not a faithful control for lexeme-level ORTH. If VAD becomes necessary again, it belongs in the upstream interval pipeline where slices are selected, not inside `HFWhisperProvider`.
+
+### Why `compute_type` was dropped
+
+`compute_type` was a CT2/faster-whisper option. In the HF Transformers backend it did not change model dtype; empirical PRs #298–302 established the current fp32 HF path as the baseline. Reintroducing fp16 must be a future measured change with explicit quality A/B evidence against the Southern Kurdish baseline (Saha01 milk/two/that plus Khan02 `cid=4`).
+
+### Custom local edits
+
+If your local `ai_config.json` contains hand-edited ORTH keys, run the migrator without `--apply` first and inspect the dry-run output. Unknown legacy flat keys are refused rather than silently dropped, so preserve or port any custom edits manually before applying. The `--apply` mode always writes a timestamped backup next to `ai_config.json` before replacing the file.

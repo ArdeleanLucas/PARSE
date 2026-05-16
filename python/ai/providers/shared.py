@@ -53,28 +53,25 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
         # ORTH defaults to the original HF Transformers Razhan SDH model. The
         # legacy CT2/faster-whisper backend remains selectable via
         # ortho.backend="faster-whisper" with a CT2 directory model_path.
-        "model_path": "razhan/whisper-base-sdh",
-        "language": "sd",
-        "device": "cuda",
-        # HF ORTH applies the decode-level repetition guards below. The legacy
-        # CT2/faster-whisper backend also consumes the compatible keys where
-        # supported; compute_type/VAD remain CT2-specific.
-        "compute_type": "float16",
-        "vad_filter": True,
-        "vad_parameters": {
-            "min_silence_duration_ms": 500,
-            "threshold": 0.35,
+        "model": {
+            "repo_id": "razhan/whisper-base-sdh",
+            "device": "cuda",
         },
-        "condition_on_previous_text": False,
-        "compression_ratio_threshold": 1.8,
-        "no_repeat_ngram_size": 3,
-        "repetition_penalty": 1.2,
-        "initial_prompt": _ORTH_DEFAULT_INITIAL_PROMPT,
-        # When True the ORTH compute runner will also do a short-clip
-        # Whisper pass per concept after Tier-2 forced alignment. Off by
-        # default — opt in per speaker via the compute payload or per
-        # machine via ai_config.json.
-        "refine_lexemes": False,
+        "generation": {
+            "language": "sd",
+            "condition_on_prev_tokens": False,
+            "compression_ratio_threshold": 1.8,
+            "no_repeat_ngram_size": 3,
+            "repetition_penalty": 1.2,
+        },
+        "decoding": {
+            "initial_prompt": _ORTH_DEFAULT_INITIAL_PROMPT,
+            # When True the ORTH compute runner will also do a short-clip
+            # Whisper pass per concept after Tier-2 forced alignment. Off by
+            # default — opt in per speaker via the compute payload or per
+            # machine via ai_config.json.
+            "refine_lexemes": False,
+        },
     },
     "llm": {
         "provider": "openai",

@@ -254,12 +254,13 @@ def test_compression_ratio_threshold_null_disables_it(tmp_path, monkeypatch):
     assert "compression_ratio_threshold" not in _StubWhisperModel.last_call
 
 
-def test_legacy_ortho_faster_whisper_rejects_hf_default_model_path(tmp_path, monkeypatch):
+def test_legacy_ortho_faster_whisper_requires_explicit_ct2_model_path(tmp_path, monkeypatch):
+    """With HF ORTH now sectioned, faster-whisper opt-back has no flat HF default to inherit."""
     monkeypatch.setattr(
         provider_module, "_register_cuda_dll_directories", lambda: None, raising=False
     )
 
-    with pytest.raises(ValueError, match=r"looks like a HuggingFace repo id"):
+    with pytest.raises(ValueError, match=r"ortho\.model_path is empty"):
         LocalWhisperProvider(
             config={"ortho": {"language": "sd"}},
             config_path=tmp_path / "ai_config.json",

@@ -187,7 +187,7 @@ def test_hf_ortho_uses_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(device_module, "_torch_cuda_available", lambda: False)
     monkeypatch.setattr(device_module, "_resolve_auto", lambda: "cpu")
-    provider = HFWhisperProvider(config={"ortho": {"model_path": "razhan/whisper-base-sdh"}})
+    provider = HFWhisperProvider(config={"ortho": {"model": {"repo_id": "razhan/whisper-base-sdh"}}})
 
     assert provider.device == "cpu"
     assert provider._effective_device == "cpu"

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional,
 import ai.provider as provider_module
 from ai.device import _torch_cuda_available, resolve_compute_device
 
+from .hf_whisper_config import OrthoHFConfig
 from .local_whisper import _normalize_whisper_language
 
 if TYPE_CHECKING:
@@ -18,7 +19,6 @@ HF_TRANSFORMERS_IMPORT_ERROR = (
     "'pip install transformers' or set ortho.backend='faster-whisper' in ai_config.json"
 )
 
-_CT2_REQUIRED_FILES = frozenset({"model.bin", "config.json", "tokenizer.json"})
 _HF_WHISPER_SAMPLE_RATE = 16000
 _HF_WHISPER_CHUNK_SECONDS = 30.0
 _USE_CONFIG_PROMPT = object()
@@ -26,30 +26,6 @@ _USE_CONFIG_PROMPT = object()
 # averaging generated-token logprobs so confidence reflects lexical content.
 _WHISPER_SPECIAL_TOKEN_MIN_ID = 50257
 
-
-def _looks_like_ct2_whisper_directory(path: Path) -> bool:
-    if not path.is_dir():
-        return False
-    children = {child.name for child in path.iterdir()}
-    if not _CT2_REQUIRED_FILES.issubset(children):
-        return False
-    has_hf_weights = any(
-        child.name == "pytorch_model.bin"
-        or child.name == "model.safetensors"
-        or child.name.startswith("pytorch_model-")
-        or child.name.endswith(".safetensors")
-        for child in path.iterdir()
-    )
-    return not has_hf_weights
-
-
-def _ct2_model_path_error(model_path: str) -> str:
-    return (
-        "[ORTH config error] ortho.model_path expected HuggingFace repo id like "
-        "`razhan/whisper-base-sdh` or a local HF-format directory; got CT2 "
-        "directory `{0}` — either change ortho.model_path to the HF id, or "
-        "revert ortho.backend='faster-whisper'"
-    ).format(model_path)
 
 
 def _normalize_pipeline_device(device: str) -> str:
@@ -155,71 +131,26 @@ class HFWhisperProvider(provider_module.AIProvider):
         super().__init__(config=config, config_path=config_path)
         self.config_section = str(config_section or "ortho").strip() or "ortho"
         section_config = self.config.get(self.config_section, {})
-        if not isinstance(section_config, dict):
-            section_config = {}
+        cfg = OrthoHFConfig.from_dict(section_config if isinstance(section_config, dict) else {})
 
-        self.model_path = str(section_config.get("model_path", "")).strip()
-        if not self.model_path:
-            raise ValueError(
-                "[ORTH config error] ortho.model_path expected HuggingFace repo id "
-                "like `razhan/whisper-base-sdh` or a local HF-format directory; got empty value"
-            )
-        self._reject_ct2_model_path_if_present()
-
-        self.language = str(section_config.get("language", "")).strip() or None
+        self.model_path = cfg.model.repo_id
+        self.language = cfg.generation.language
         self.device = resolve_compute_device(
             "orth",
-            config_device=section_config.get("device"),
+            config_device=cfg.model.device,
             section_default="auto",
         )
-        task_raw = str(section_config.get("task", "transcribe") or "transcribe").strip().lower()
-        self.task = task_raw if task_raw in {"transcribe", "translate"} else "transcribe"
-        self.refine_lexemes: bool = provider_module._coerce_bool(
-            section_config.get("refine_lexemes", False), default=False
-        )
-        self.compression_ratio_threshold = provider_module._coerce_float(
-            section_config.get("compression_ratio_threshold", 1.8), 1.8
-        )
-        self.no_repeat_ngram_size = provider_module._coerce_int(
-            section_config.get("no_repeat_ngram_size", 3), 3, minimum=0
-        )
-        self.repetition_penalty = provider_module._coerce_float(
-            section_config.get("repetition_penalty", 1.2), 1.2
-        )
-        self.condition_on_prev_tokens = provider_module._coerce_bool(
-            section_config.get("condition_on_previous_text", False), default=False
-        )
-        initial_prompt = section_config.get("initial_prompt", "")
-        self.initial_prompt = str(initial_prompt).strip() if isinstance(initial_prompt, str) else None
-        self.initial_prompt = self.initial_prompt or None
-        self.ignored_legacy_options: Dict[str, Any] = {
-            key: section_config.get(key)
-            for key in (
-                "compute_type",
-                "vad_filter",
-                "vad_parameters",
-            )
-            if key in section_config
-        }
+        self.task = cfg.generation.task
+        self.refine_lexemes = cfg.decoding.refine_lexemes
+        self.compression_ratio_threshold = cfg.generation.compression_ratio_threshold
+        self.no_repeat_ngram_size = cfg.generation.no_repeat_ngram_size
+        self.repetition_penalty = cfg.generation.repetition_penalty
+        self.condition_on_prev_tokens = cfg.generation.condition_on_prev_tokens
+        self.initial_prompt = cfg.decoding.initial_prompt
 
         self._processor: Optional[Any] = None
         self._model: Optional[Any] = None
         self._effective_device = _normalize_pipeline_device(self.device)
-
-    def _reject_ct2_model_path_if_present(self) -> None:
-        candidate = Path(self.model_path).expanduser()
-        try:
-            exists = candidate.exists()
-        except OSError:
-            exists = False
-        if not exists:
-            return
-        try:
-            resolved = candidate.resolve()
-        except OSError:
-            resolved = candidate
-        if _looks_like_ct2_whisper_directory(resolved):
-            raise ValueError(_ct2_model_path_error(str(resolved)))
 
     def warm_up(self) -> None:
         """Eagerly load the HF Whisper processor/model pair."""
@@ -271,14 +202,6 @@ class HFWhisperProvider(provider_module.AIProvider):
 
         self._processor = processor
         self._model = model
-        if self.ignored_legacy_options:
-            print(
-                "[ORTH] HFWhisperProvider ignoring legacy faster-whisper options: {0}".format(
-                    ", ".join(sorted(self.ignored_legacy_options.keys()))
-                ),
-                file=sys.stderr,
-                flush=True,
-            )
         print(
             "[ORTH] HFWhisperProvider loaded: model={0} device={1} language={2}".format(
                 self.model_path,

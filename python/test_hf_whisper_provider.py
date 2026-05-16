@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from ai.providers.hf_whisper import HF_TRANSFORMERS_IMPORT_ERROR, HFWhisperProvider
+from ai.providers.hf_whisper_config import OrthoHFConfig
 from ai.providers.shared import _confidence_from_logprob
 
 
@@ -139,15 +140,55 @@ def _install_torch_cuda_stub(monkeypatch: pytest.MonkeyPatch, *, available: bool
 def _config(**overrides: Any) -> dict[str, Any]:
     section = {
         "backend": "hf",
+        "model": {"repo_id": "razhan/whisper-base-sdh", "device": "cuda"},
+        "generation": {
+            "language": "sd",
+            "condition_on_prev_tokens": False,
+            "compression_ratio_threshold": 1.8,
+            "no_repeat_ngram_size": 3,
+            "repetition_penalty": 1.2,
+        },
+        "decoding": {"initial_prompt": "ignored by hf", "refine_lexemes": False},
+    }
+    for key, value in overrides.items():
+        if key in {"repo_id", "model_path"}:
+            section["model"]["repo_id"] = value
+        elif key == "device":
+            section["model"]["device"] = value
+        elif key in {
+            "language",
+            "task",
+            "condition_on_prev_tokens",
+            "condition_on_previous_text",
+            "compression_ratio_threshold",
+            "no_repeat_ngram_size",
+            "repetition_penalty",
+        }:
+            mapped = "condition_on_prev_tokens" if key == "condition_on_previous_text" else key
+            section["generation"][mapped] = value
+        elif key in {"initial_prompt", "refine_lexemes"}:
+            section["decoding"][key] = value
+        else:
+            section[key] = value
+    return {"ortho": section}
+
+
+def _legacy_config(**overrides: Any) -> dict[str, Any]:
+    section = {
+        "backend": "hf",
         "model_path": "razhan/whisper-base-sdh",
         "language": "sd",
         "device": "cuda",
         "compute_type": "float16",
         "vad_filter": True,
+        "vad_parameters": {"threshold": 0.35},
         "condition_on_previous_text": False,
         "compression_ratio_threshold": 1.8,
+        "no_repeat_ngram_size": 3,
+        "repetition_penalty": 1.2,
         "initial_prompt": "ignored by hf",
         "refine_lexemes": False,
+        "provider": "faster-whisper",
     }
     section.update(overrides)
     return {"ortho": section}
@@ -263,11 +304,11 @@ def test_ct2_directory_is_rejected_with_actionable_message(tmp_path: Path) -> No
         (ct2_dir / name).write_text("{}", encoding="utf-8")
 
     with pytest.raises(ValueError, match="expected HuggingFace repo id") as excinfo:
-        HFWhisperProvider(config=_config(model_path=str(ct2_dir)))
+        HFWhisperProvider(config=_config(repo_id=str(ct2_dir)))
 
     message = str(excinfo.value)
     assert str(ct2_dir) in message
-    assert "ortho.model_path" in message
+    assert "ortho.model.repo_id" in message
     assert "ortho.backend='faster-whisper'" in message
 
 
@@ -398,13 +439,21 @@ def test_initial_prompt_empty_skips_prompt_ids(monkeypatch: pytest.MonkeyPatch) 
     assert "prompt_ids" not in model.generate_calls[0]
 
 
-def test_legacy_config_keys_still_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    _processor, model = _install_transformers_stub(monkeypatch, processor=_RecordingProcessor(texts=["یەک"]))
-    provider = HFWhisperProvider(config=_config(initial_prompt="", condition_on_previous_text=False))
+def test_strict_reader_rejects_legacy_flat_schema_with_actionable_message() -> None:
+    with pytest.raises(ValueError) as excinfo:
+        OrthoHFConfig.from_dict(_legacy_config()["ortho"])
 
-    provider.transcribe_clip(np.zeros(16000, dtype=np.float32))
+    message = str(excinfo.value)
+    assert "Detected legacy flat ortho schema" in message
+    assert "python python/tools/migrate_ai_config_ortho.py --workspace <path> --apply" in message
 
-    assert model.generate_calls[0]["condition_on_prev_tokens"] is False
+
+def test_strict_reader_rejects_unknown_section_key() -> None:
+    section = _config()["ortho"]
+    section["typo_key"] = True
+
+    with pytest.raises(ValueError, match="typo_key"):
+        OrthoHFConfig.from_dict(section)
 
 
 def test_transcribe_breaks_on_should_cancel_chunked_full_file(
