@@ -1954,6 +1954,7 @@ export function ParseUI() {
           actionFeedback={actionFeedback}
           onDismissActionFeedback={dismissActionFeedback}
           isConceptVariantVisibleInSidebar={sidebarVariantVisibilityPredicate}
+          hideVariantPills={currentMode === 'compare'}
           onMergeRequest={(sidebarConcept) => {
             const target = concepts.find((concept) => concept.id === sidebarConcept.id) ?? null;
             setMergePickerPrimary(target);

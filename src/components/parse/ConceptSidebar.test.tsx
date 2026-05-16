@@ -97,6 +97,52 @@ describe('ConceptSidebar', () => {
     expect(screen.getByTestId('concept-variant-pill-dot-628').className).toContain('bg-rose-500');
   });
 
+  it('suppresses the variant pill strip when hideVariantPills is true (compare-mode flood guard)', () => {
+    const onConceptSelect = vi.fn();
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={[{
+          id: 79,
+          key: 'source:JBIL:79',
+          name: 'dog',
+          tag: 'problematic' as const,
+          sourceItem: '79',
+          sourceSurvey: 'JBIL',
+          variants: [
+            { conceptKey: '298', conceptEn: 'dog (A)', variantLabel: 'A', tag: 'confirmed' as const },
+            { conceptKey: '628', conceptEn: 'dog (B)', variantLabel: 'B', tag: 'problematic' as const },
+          ],
+        }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={79}
+        activeConceptKey="298"
+        onConceptSelect={onConceptSelect}
+        hideVariantPills
+      />,
+    );
+
+    expect(screen.queryByTestId('concept-variant-pill-298')).toBeNull();
+    expect(screen.queryByTestId('concept-variant-pill-628')).toBeNull();
+    const parentLabel = screen.getByTestId('concept-parent-button-79').getAttribute('aria-label') ?? '';
+    expect(parentLabel.toLowerCase()).not.toContain('variants a b');
+
+    fireEvent.click(screen.getByTestId('concept-parent-button-79'));
+    expect(onConceptSelect).toHaveBeenCalledWith(79, '298');
+  });
+
   it("clicking flat variant B selects variant B's conceptKey instead of the parent group key", () => {
     const onConceptSelect = vi.fn();
     render(
