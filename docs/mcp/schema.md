@@ -178,7 +178,7 @@ Full-file STT (`stt_start`, `stt_word_level_start`, or full-pipeline STT) return
 
 Cache rule: `coarse_transcripts/<speaker>.json` stores the merged flat `segments[]` only. `chunks[]` is a job-result diagnostic envelope and is intentionally not cached.
 
-![Cache versus job result behavior: merged STT segments are saved in the persistent cache, while chunk diagnostics remain in job results and reports.](user-guides/assets/cache-vs-job-result-behavior.png)
+![Cache versus job result behavior: merged STT segments are saved in the persistent cache, while chunk diagnostics remain in job results and reports.](../user-guides/assets/cache-vs-job-result-behavior.png)
 
 *Figure: The cache stays backward-compatible for normal STT readers. Chunk rows are diagnostic evidence for the just-run job, so agents and power users should read job results/reports when they need per-chunk recovery details.*
 
