@@ -12,6 +12,7 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Callable
 
+from ai.provider import ConfidenceScore
 from app.http.job_observability_handlers import JsonResponseSpec
 from app.http.lexeme_rerun_handlers import LexemeRerunHandlerError, build_post_run_ortho_response
 from app.http.tag_filtered_rerun_handlers import build_post_lexemes_rerun_by_tag_response
@@ -179,6 +180,43 @@ def _split_words(_audio_path: Path, rows: list[dict[str, Any]]) -> list[dict[str
                 }
             )
     return out
+
+
+def test_rerun_by_tag_response_forwards_typed_confidence_triplet(tmp_path: Path) -> None:
+    _seed_concepts_csv(tmp_path)
+    audio_path = _seed_audio(tmp_path)
+    _annotation_path, _legacy_path = _seed_annotation(tmp_path)
+
+    response = build_post_lexemes_rerun_by_tag_response(
+        {
+            "speakers": ["Saha01"],
+            "tagLabels": ["Thesis"],
+            "field": "ortho",
+            "pad": 0.2,
+            "async": False,
+        },
+        project_root=tmp_path,
+        load_tags_vocab=_vocab,
+        normalize_speaker_id=_normalize_speaker,
+        annotation_read_path_for_speaker=_annotation_read_path(tmp_path),
+        read_json_any_file=_read_json_any,
+        normalize_annotation_record=_normalize_record,
+        resolve_audio_path_for_speaker=lambda speaker: audio_path,
+        run_ortho_interval=lambda **kwargs: {
+            "text": f"RERUN_TEXT_{kwargs['start'] + 0.2:.1f}_{kwargs['end'] - 0.2:.1f}",
+            "confidence": ConfidenceScore(value=0.42, source="constant_fallback", n_tokens=0),
+        },
+        run_ipa_interval=lambda **kwargs: "",
+        build_post_run_ortho_response=build_post_run_ortho_response,
+        build_post_run_ipa_response=lambda *a, **kw: None,
+        locks_dir=tmp_path / ".parse-locks",
+    )
+
+    assert response.status == HTTPStatus.OK
+    first = response.payload["results"][0]
+    assert first["confidence"] == 0.42
+    assert first["confidence_source"] == "constant_fallback"
+    assert first["confidence_n_tokens"] == 0
 
 
 def test_rerun_by_tag_rebuilds_ortho_words_for_successful_windows(tmp_path: Path) -> None:

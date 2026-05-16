@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 import pytest
 
+from ai.provider import ConfidenceScore
 from ai.speaker_locks import SpeakerLockError
 from app.http.lexeme_rerun_handlers import (
     LexemeRerunHandlerError,
@@ -159,6 +160,28 @@ def test_run_ipa_happy_path(tmp_path: Path) -> None:
         "interval": {"start": 2795.918, "end": 2796.698},
         "source": "rerun",
         "jobId": None,
+    }
+
+
+def test_run_ortho_sync_response_forwards_typed_confidence_triplet(tmp_path: Path) -> None:
+    response = _ortho_response(
+        tmp_path,
+        {"speaker": "Saha01", "concept_key": "root", "start": 2795.918, "end": 2796.698},
+        runner=lambda **kwargs: {
+            "text": "ریشەم",
+            "confidence": ConfidenceScore(value=0.42, source="constant_fallback", n_tokens=0),
+        },
+    )
+
+    assert response.status == HTTPStatus.OK
+    assert response.payload == {
+        "ortho": "ریشەم",
+        "interval": {"start": 2795.918, "end": 2796.698},
+        "source": "rerun",
+        "jobId": None,
+        "confidence": 0.42,
+        "confidence_source": "constant_fallback",
+        "confidence_n_tokens": 0,
     }
 
 

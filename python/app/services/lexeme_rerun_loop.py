@@ -30,7 +30,7 @@ AnnotationPathResolver = Callable[[str], Path]
 JsonAnyReader = Callable[[Path], Any]
 AnnotationNormalizer = Callable[[Any, str], dict]
 AudioPathResolver = Callable[[str], Path]
-IntervalRunner = Callable[..., str]
+IntervalRunner = Callable[..., Any]
 PerIntervalHandler = Callable[..., Any]
 
 
@@ -110,6 +110,9 @@ def per_concept_rerun(
                 value = payload.get(tier_field)
                 if isinstance(value, str):
                     entry["text"] = value
+                for confidence_key in ("confidence", "confidence_source", "confidence_n_tokens"):
+                    if confidence_key in payload:
+                        entry[confidence_key] = payload[confidence_key]
         except lexeme_rerun_handler_error as exc:
             # Preserve the per-interval handler's HTTP status so callers
             # can distinguish "concept not found" (404) from "speaker

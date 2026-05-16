@@ -8,9 +8,11 @@ implementations into ``ai.providers`` modules.
 from __future__ import annotations
 
 import abc
+import math
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TypedDict
+from typing import Any, Callable, Dict, List, Literal, Optional, TypedDict, cast
 
 from .providers.shared import (
     _CHAT_CONTEXT_WINDOW_DEFAULT,
@@ -51,19 +53,100 @@ class WordSpan(TypedDict, total=False):
     prob: float
 
 
+ConfidenceSource = Literal["avg_logprob", "constant_fallback"]
+
+
+@dataclass(frozen=True)
+class ConfidenceScore:
+    """Typed ASR confidence plus provenance for wire-safe downstream serialization."""
+
+    value: float
+    source: ConfidenceSource
+    n_tokens: int
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.value) or self.value < 0.0 or self.value > 1.0:
+            raise ValueError("ConfidenceScore.value must be finite and within [0.0, 1.0]")
+        if self.n_tokens < 0:
+            raise ValueError("ConfidenceScore.n_tokens must be non-negative")
+
+    def __float__(self) -> float:
+        return self.value
+
+
+def confidence_value(confidence: Any, default: float = 0.0) -> float:
+    """Return the legacy float confidence value from typed or raw confidence inputs."""
+
+    if isinstance(confidence, ConfidenceScore):
+        return confidence.value
+    if confidence is None:
+        return default
+    try:
+        return _coerce_confidence(confidence)
+    except (TypeError, ValueError):
+        return default
+
+
+def confidence_source(confidence: Any) -> Optional[ConfidenceSource]:
+    if isinstance(confidence, ConfidenceScore):
+        return confidence.source
+    return None
+
+
+def confidence_n_tokens(confidence: Any) -> Optional[int]:
+    if isinstance(confidence, ConfidenceScore):
+        return confidence.n_tokens
+    return None
+
+
+def confidence_wire_fields(confidence: Any, *, include_confidence: bool = True) -> Dict[str, Any]:
+    """Serialize confidence as legacy float plus optional typed provenance siblings."""
+
+    payload: Dict[str, Any] = {}
+    if include_confidence:
+        payload["confidence"] = confidence_value(confidence)
+    source = confidence_source(confidence)
+    n_tokens = confidence_n_tokens(confidence)
+    if source is not None:
+        payload["confidence_source"] = source
+    if n_tokens is not None:
+        payload["confidence_n_tokens"] = n_tokens
+    return payload
+
+
+def confidence_score_from_legacy(
+    confidence: Any,
+    *,
+    source: ConfidenceSource = "constant_fallback",
+    n_tokens: int = 0,
+) -> ConfidenceScore:
+    """Coerce legacy confidence into a typed score when a caller must emit typed metadata."""
+
+    return ConfidenceScore(value=confidence_value(confidence), source=source, n_tokens=n_tokens)
+
+
 class Segment(TypedDict):
     """Timestamped STT segment. Always has start/end/text/confidence."""
 
     start: float
     end: float
     text: str
-    confidence: float
+    confidence: ConfidenceScore
+
+
+SegmentLike = Segment | Dict[str, Any]
 
 
 class SegmentWithWords(Segment, total=False):
     """Segment enriched with per-word spans (Tier 1 acoustic alignment)."""
 
     words: List[WordSpan]
+
+
+def as_segment(segment: SegmentLike) -> Segment:
+    """Cast a runtime segment to the typed provider shape for typed consumers."""
+
+    return cast(Segment, segment)
 
 
 def get_chat_config(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

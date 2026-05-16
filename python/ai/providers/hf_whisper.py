@@ -80,21 +80,21 @@ def _logprob_for_token(score_row: Iterable[Any], token_id: int) -> Optional[floa
     return row[token_id] - log_denom
 
 
-def _avg_logprob_from_scores(scores: Any, sequences: Any) -> float:
-    """Mean log-softmax probability of each generated token's selected id.
+def _avg_logprob_from_scores(scores: Any, sequences: Any) -> Tuple[Optional[float], int]:
+    """Mean log-softmax probability and token count for generated lexical ids.
 
     ``scores`` is the tuple returned by ``generate(output_scores=True)`` — one
     tensor per generation step, shape ``(batch, vocab_size)``. ``sequences`` is
     the ``(batch, seq_len)`` tensor of token ids. The decoder prefix is skipped
     by aligning scores against the trailing generated ids, and Whisper special
-    token ids are ignored. Returns ``0.0`` if no real tokens were generated.
+    token ids are ignored. Returns ``(None, 0)`` when no real tokens contributed.
     """
     if not scores:
-        return 0.0
+        return None, 0
     score_steps = list(scores)
     token_ids = [int(token_id) for token_id in _first_row(sequences)]
     if not token_ids:
-        return 0.0
+        return None, 0
 
     aligned_tokens = token_ids[-len(score_steps):]
     aligned_scores = score_steps[-len(aligned_tokens):]
@@ -106,8 +106,30 @@ def _avg_logprob_from_scores(scores: Any, sequences: Any) -> float:
         if logprob is not None:
             logprobs.append(logprob)
     if not logprobs:
-        return 0.0
-    return sum(logprobs) / float(len(logprobs))
+        return None, 0
+    return sum(logprobs) / float(len(logprobs)), len(logprobs)
+
+
+def _fallback_confidence(value: float = 0.0) -> provider_module.ConfidenceScore:
+    return provider_module.ConfidenceScore(
+        value=provider_module.confidence_value(value),
+        source="constant_fallback",
+        n_tokens=0,
+    )
+
+
+def _confidence_from_generation(generated: Any) -> provider_module.ConfidenceScore:
+    avg_logprob, n_tokens = _avg_logprob_from_scores(
+        getattr(generated, "scores", None),
+        getattr(generated, "sequences", None),
+    )
+    if avg_logprob is None:
+        return _fallback_confidence(provider_module._confidence_from_logprob(0.0))
+    return provider_module.ConfidenceScore(
+        value=provider_module._confidence_from_logprob(avg_logprob),
+        source="avg_logprob",
+        n_tokens=n_tokens,
+    )
 
 
 class HFWhisperProvider(provider_module.AIProvider):
@@ -310,7 +332,7 @@ class HFWhisperProvider(provider_module.AIProvider):
         language: Optional[str] = None,
         initial_prompt: Any = _USE_CONFIG_PROMPT,
         max_new_tokens: Optional[int] = None,
-    ) -> Tuple[str, float]:
+    ) -> Tuple[str, provider_module.ConfidenceScore]:
         processor, model = self._load_model()
         sample_rate = int(audio_payload.get("sampling_rate") or _HF_WHISPER_SAMPLE_RATE)
         raw_audio = audio_payload.get("raw")
@@ -350,12 +372,8 @@ class HFWhisperProvider(provider_module.AIProvider):
         )
         text = str(decoded[0] if decoded else "").strip()
         if not text:
-            return "", 0.0
-        avg_logprob = _avg_logprob_from_scores(
-            getattr(generated, "scores", None),
-            getattr(generated, "sequences", None),
-        )
-        confidence = provider_module._confidence_from_logprob(avg_logprob)
+            return "", _fallback_confidence(0.0)
+        confidence = _confidence_from_generation(generated)
         return text, confidence
 
     def transcribe(
@@ -538,14 +556,14 @@ class HFWhisperProvider(provider_module.AIProvider):
         initial_prompt: Optional[str] = None,
         language: Optional[str] = None,
         max_new_tokens: Optional[int] = None,
-    ) -> Tuple[str, float]:
+    ) -> Tuple[str, provider_module.ConfidenceScore]:
         if audio_array is None:
-            return ("", 0.0)
+            return ("", _fallback_confidence(0.0))
         payload = self._audio_payload(audio_array)
         audio_np = payload["raw"]
         total_samples = int(audio_np.shape[0]) if getattr(audio_np, "ndim", 0) else 0
         if total_samples <= 0:
-            return ("", 0.0)
+            return ("", _fallback_confidence(0.0))
         try:
             return self._transcribe_audio_payload(
                 payload,
@@ -558,7 +576,7 @@ class HFWhisperProvider(provider_module.AIProvider):
                 "[WARN] HF transcribe_clip failed: {0}: {1}".format(type(exc).__name__, exc),
                 file=sys.stderr,
             )
-            return ("", 0.0)
+            return ("", _fallback_confidence(0.0))
 
 
 __all__ = ["HFWhisperProvider", "HF_TRANSFORMERS_IMPORT_ERROR"]

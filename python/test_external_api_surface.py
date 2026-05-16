@@ -361,6 +361,12 @@ def test_build_openapi_document_covers_lexemes_rerun_by_tag_contract() -> None:
     ]
     assert components["LexemeRerunByTagResultEntry"]["properties"]["status"]["enum"] == ["ok", "error"]
     assert components["LexemeRerunByTagResultEntry"]["properties"]["field"]["enum"] == ["ipa", "ortho"]
+    assert components["LexemeRerunByTagResultEntry"]["properties"]["confidence"] == {"type": "number"}
+    assert components["LexemeRerunByTagResultEntry"]["properties"]["confidence_source"] == {
+        "type": "string",
+        "enum": ["avg_logprob", "constant_fallback"],
+    }
+    assert components["LexemeRerunByTagResultEntry"]["properties"]["confidence_n_tokens"] == {"type": "integer", "minimum": 0}
 
 
 def test_build_openapi_document_covers_survey_overlap_read_write_contract() -> None:

@@ -10,7 +10,8 @@ from typing import Any
 import numpy as np
 import pytest
 
-from ai.providers.hf_whisper import HF_TRANSFORMERS_IMPORT_ERROR, HFWhisperProvider
+from ai.provider import ConfidenceScore
+from ai.providers.hf_whisper import HF_TRANSFORMERS_IMPORT_ERROR, HFWhisperProvider, _avg_logprob_from_scores
 from ai.providers.hf_whisper_config import OrthoHFConfig
 from ai.providers.shared import _confidence_from_logprob
 
@@ -349,14 +350,13 @@ def test_transcribe_uses_hf_processor_model_with_resolved_language(
             "task": "transcribe",
         }
     ]
-    assert result == [
-        {
-            "start": 0.0,
-            "end": 1.0,
-            "text": "یەک",
-            "confidence": pytest.approx(_expected_confidence([0.0, 1.0], 1)),
-        }
-    ]
+    assert result[0]["start"] == pytest.approx(0.0)
+    assert result[0]["end"] == pytest.approx(1.0)
+    assert result[0]["text"] == "یەک"
+    assert isinstance(result[0]["confidence"], ConfidenceScore)
+    assert result[0]["confidence"].value == pytest.approx(_expected_confidence([0.0, 1.0], 1))
+    assert result[0]["confidence"].source == "avg_logprob"
+    assert result[0]["confidence"].n_tokens == 1
     assert "[ORTH] HFWhisperProvider loaded: model=razhan/whisper-base-sdh device=cuda:0 language=fa" in capsys.readouterr().err
 
 
@@ -385,11 +385,21 @@ def test_transcribe_emits_multi_segment_for_long_audio(
 
     assert [call["audio"].shape for call in processor.calls] == [(16000 * 30,), (16000 * 30,), (16000 * 30,)]
     assert len(model.generate_calls) == 3
-    assert result == [
-        {"start": 0.0, "end": 30.0, "text": "first chunk", "confidence": pytest.approx(_expected_confidence([0.0, 1.0], 1))},
-        {"start": 30.0, "end": 60.0, "text": "second chunk", "confidence": pytest.approx(_expected_confidence([0.0, 0.0], 1))},
-        {"start": 60.0, "end": 90.0, "text": "third chunk", "confidence": pytest.approx(_expected_confidence([2.0, 0.0], 0))},
+    assert [(segment["start"], segment["end"], segment["text"]) for segment in result] == [
+        (0.0, 30.0, "first chunk"),
+        (30.0, 60.0, "second chunk"),
+        (60.0, 90.0, "third chunk"),
     ]
+    expected_values = [
+        _expected_confidence([0.0, 1.0], 1),
+        _expected_confidence([0.0, 0.0], 1),
+        _expected_confidence([2.0, 0.0], 0),
+    ]
+    for segment, expected in zip(result, expected_values):
+        assert isinstance(segment["confidence"], ConfidenceScore)
+        assert segment["confidence"].value == pytest.approx(expected)
+        assert segment["confidence"].source == "avg_logprob"
+        assert segment["confidence"].n_tokens == 1
     assert progress == [(pytest.approx(100.0 / 3.0), 1), (pytest.approx(200.0 / 3.0), 2), (100.0, 3)]
 
 
@@ -738,8 +748,63 @@ def test_transcribe_clip_returns_real_confidence_not_placeholder(
     text, confidence = provider.transcribe_clip(np.zeros(16000, dtype=np.float32))
 
     assert text == "سێ"
-    assert confidence == pytest.approx(_expected_confidence([0.0, 1.0], 0))
-    assert confidence != 1.0
+    assert isinstance(confidence, ConfidenceScore)
+    assert confidence.value == pytest.approx(_expected_confidence([0.0, 1.0], 0))
+    assert confidence.source == "avg_logprob"
+    assert confidence.n_tokens == 1
+    assert confidence.value != 1.0
+
+
+def test_confidence_source_constant_fallback_when_scores_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    _processor, _model = _install_transformers_stub(
+        monkeypatch,
+        processor=_RecordingProcessor(texts=[" سێ "]),
+        model=_RecordingModel(generated=[types.SimpleNamespace(
+            sequences=np.asarray([[0, 1]], dtype=np.int64),
+            scores=(),
+        )]),
+    )
+    provider = HFWhisperProvider(config=_config(language="fa"))
+
+    text, confidence = provider.transcribe_clip(np.zeros(16000, dtype=np.float32))
+
+    assert text == "سێ"
+    assert isinstance(confidence, ConfidenceScore)
+    assert confidence.value == pytest.approx(_confidence_from_logprob(0.0))
+    assert confidence.source == "constant_fallback"
+    assert confidence.n_tokens == 0
+
+
+def test_confidence_n_tokens_excludes_special_tokens() -> None:
+    scores = (
+        np.asarray([[0.0, 3.0, -1.0]], dtype=np.float32),
+        np.asarray([[4.0, 0.0, -1.0]], dtype=np.float32),
+        np.asarray([[0.0, -1.0, 2.0]], dtype=np.float32),
+    )
+    sequences = np.asarray([[0, 1, 50257, 2]], dtype=np.int64)
+
+    avg_logprob, n_tokens = _avg_logprob_from_scores(scores, sequences)
+
+    assert avg_logprob is not None
+    assert n_tokens == 2
+
+
+def test_segment_typed_dict_uses_confidence_score(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    audio_path = tmp_path / "clip.wav"
+    audio_path.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfake")
+    _install_soundfile_stub(monkeypatch, samples=16000, sample_rate=16000)
+    _install_transformers_stub(
+        monkeypatch,
+        processor=_RecordingProcessor(texts=[" یەک "]),
+        model=_RecordingModel(generated=[_generated_result(selected_token=1, score_row=[0.0, 1.0])]),
+    )
+    provider = HFWhisperProvider(config=_config(language="sdh"))
+
+    result = provider.transcribe(audio_path)
+
+    assert isinstance(result[0]["confidence"], ConfidenceScore)
+    assert result[0]["confidence"].source == "avg_logprob"
+    assert result[0]["confidence"].n_tokens == 1
 
 
 def test_transcribe_clip_initial_prompt_none_suppresses_config(monkeypatch: pytest.MonkeyPatch) -> None:
