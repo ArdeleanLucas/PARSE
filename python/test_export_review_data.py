@@ -430,6 +430,125 @@ class AnalyticalFieldsTests(unittest.TestCase):
         self.assertEqual(concept["arabic"], {"form": "", "ipa": ""})
         self.assertEqual(concept["persian"], {"form": "", "ipa": ""})
 
+    def test_id_keyed_enrichments_resolved(self) -> None:
+        # Matches the current python/compare/cognate_compute.py output, which
+        # writes ``cognate_sets[concept_id]`` / ``similarity[concept_id]``.
+        # Regression guard against PR #497 review finding (id vs label).
+        enrichments = {
+            "cognate_sets": {"1": {"A": ["Fail01"], "B": ["Khan01"]}},
+            "similarity": {
+                "1": {
+                    "Fail01": {
+                        "ar": {"score": 0.81, "has_reference_data": True},
+                        "fa": {"score": 0.40, "has_reference_data": True},
+                    }
+                }
+            },
+            "borrowing_flags": {"1": {"Fail01": True}},
+        }
+        with TemporaryDirectory() as tmp:
+            workspace = self._two_speaker_ash_workspace(tmp, enrichments=enrichments)
+            review_data, _ = build_review_data(workspace=workspace)
+
+        forms = {f["speaker"]: f for f in review_data["concepts"][0]["forms"]}
+        self.assertEqual(forms["Fail01"]["cognate_class"], "A")
+        self.assertAlmostEqual(forms["Fail01"]["arabic_similarity"], 0.81)
+        self.assertAlmostEqual(forms["Fail01"]["persian_similarity"], 0.40)
+        self.assertIs(forms["Fail01"]["borrowing_flag"], True)
+        self.assertEqual(forms["Khan01"]["cognate_class"], "B")
+
+    def test_variant_suffixed_label_resolved_in_either_key(self) -> None:
+        # Concept_en = "ear (A)" — exercise both keying conventions independently.
+        ear_concepts = [
+            {"id": "7", "concept_en": "ear (A)", "source_item": "31", "source_survey": "JBIL"},
+        ]
+        ear_speakers = {
+            "Fail01": {
+                "concept_intervals": [
+                    {"concept_id": "7", "start": 0.0, "end": 0.3, "ipa": "gəɫ", "ortho": "gel"}
+                ],
+                "tagged_ids": ["7"],
+            },
+        }
+        # First: enrichments keyed by concept_id (matches cognate_compute today).
+        with TemporaryDirectory() as tmp:
+            ws = _make_workspace(
+                Path(tmp),
+                concepts=ear_concepts,
+                speakers=ear_speakers,
+                enrichments={"cognate_sets": {"7": {"A": ["Fail01"]}}},
+            )
+            data_id, _ = build_review_data(workspace=ws)
+        self.assertEqual(data_id["concepts"][0]["forms"][0]["cognate_class"], "A")
+
+        # Second: enrichments keyed by label (matches the 2026-04-30 backup format).
+        with TemporaryDirectory() as tmp:
+            ws = _make_workspace(
+                Path(tmp),
+                concepts=ear_concepts,
+                speakers=ear_speakers,
+                enrichments={"cognate_sets": {"ear (A)": {"A": ["Fail01"]}}},
+            )
+            data_lbl, _ = build_review_data(workspace=ws)
+        self.assertEqual(data_lbl["concepts"][0]["forms"][0]["cognate_class"], "A")
+
+    def test_malformed_enrichments_falls_back_safely(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = self._two_speaker_ash_workspace(tmp)
+            # Overwrite the file with non-JSON garbage.
+            (workspace / "parse-enrichments.json").write_text("{not-json", encoding="utf-8")
+            review_data, _ = build_review_data(workspace=workspace)
+
+        forms = {f["speaker"]: f for f in review_data["concepts"][0]["forms"]}
+        for speaker in ("Fail01", "Khan01"):
+            self.assertEqual(forms[speaker]["cognate_class"], "?")
+            self.assertEqual(forms[speaker]["arabic_similarity"], 0.0)
+            self.assertIsNone(forms[speaker]["borrowing_flag"])
+
+    def test_contact_config_meta_keys_skipped(self) -> None:
+        # ``_meta`` and other underscore-prefixed top-level keys are metadata,
+        # not language codes — mirrors contact_lexeme_fetcher's own filter.
+        with TemporaryDirectory() as tmp:
+            workspace = self._two_speaker_ash_workspace(tmp)
+            contact_config = _write_contact_config(
+                Path(tmp),
+                {
+                    "_meta": {"primary_contact_languages": ["ar"]},
+                    "ar": {"name": "Arabic", "concepts": {"ash": [{"form": "رماد", "sources": []}]}},
+                },
+            )
+            review_data, _ = build_review_data(
+                workspace=workspace,
+                contact_config=contact_config,
+            )
+
+        concept = review_data["concepts"][0]
+        self.assertEqual(concept["arabic"]["form"], "رماد")
+        # ``_meta`` must not surface as a fake language — assert persian stays empty.
+        self.assertEqual(concept["persian"], {"form": "", "ipa": ""})
+
+    def test_similarity_score_none_treated_as_zero(self) -> None:
+        # cognate_compute.SimilarityScore["score"] is Optional[float]; PARSE
+        # writes ``None`` when refs are missing. Our exporter must treat that
+        # as 0.0, not crash, not emit ``None``.
+        enrichments = {
+            "similarity": {
+                "1": {
+                    "Fail01": {
+                        "ar": {"score": None, "has_reference_data": False},
+                        "fa": {"score": 0.5, "has_reference_data": True},
+                    }
+                }
+            },
+        }
+        with TemporaryDirectory() as tmp:
+            workspace = self._two_speaker_ash_workspace(tmp, enrichments=enrichments)
+            review_data, _ = build_review_data(workspace=workspace)
+
+        form = next(f for f in review_data["concepts"][0]["forms"] if f["speaker"] == "Fail01")
+        self.assertEqual(form["arabic_similarity"], 0.0)
+        self.assertAlmostEqual(form["persian_similarity"], 0.5)
+
     def test_summary_carries_analytical_coverage_counts(self) -> None:
         enrichments = {
             "cognate_sets": {"ash": {"A": ["Fail01"]}},

@@ -29,9 +29,6 @@ Usage::
 
     # Schema-only run (no ffmpeg, for fast iteration / CI):
     python python/export_review_data.py --workspace ... --out ... --skip-audio
-
-    # Probe for pre-generated spectrograms next to source audio:
-    python python/export_review_data.py --workspace ... --out ... --include-spectrograms
 """
 
 from __future__ import annotations
@@ -58,11 +55,15 @@ LEGACY_SCHEMA_VERSION = 4.1
 EXCLUDED_ANNOTATION_NAMES = {"manifest.json", "parse-enrichments.json"}
 ENRICHMENTS_FILENAME = "parse-enrichments.json"
 DEFAULT_CONTACT_CONFIG_RELATIVE = "config/sil_contact_languages.json"
-EMPTY_ENRICHMENTS: dict[str, dict[str, Any]] = {
-    "cognate_sets": {},
-    "similarity": {},
-    "borrowing_flags": {},
-}
+
+
+def _empty_enrichments() -> dict[str, dict[str, Any]]:
+    """Fresh, mutation-safe shape for ``_load_enrichments`` fallbacks.
+
+    Returns a new dict on every call so concurrent / sequential callers can
+    write through their copy without aliasing a module-level constant.
+    """
+    return {"cognate_sets": {}, "similarity": {}, "borrowing_flags": {}}
 
 _VARIANT_SUFFIX_RE = re.compile(r"\s*\(([A-Za-z0-9]+)\)\s*$")
 _FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -174,10 +175,11 @@ def _load_enrichments(workspace: Path) -> dict[str, Any]:
     consults (``cognate_sets``, ``similarity``, ``borrowing_flags``) so callers
     can index without guarding each access. The live workspace currently emits
     only ``lexeme_notes`` post-CSV-re-import; this function bridges that gap.
+    Each call returns a fresh dict, so callers can mutate without aliasing.
     """
     path = workspace / ENRICHMENTS_FILENAME
     if not path.exists():
-        return dict(EMPTY_ENRICHMENTS)
+        return _empty_enrichments()
     try:
         with path.open(encoding="utf-8") as handle:
             data = json.load(handle)
@@ -186,10 +188,10 @@ def _load_enrichments(workspace: Path) -> dict[str, Any]:
             f"warning: failed to read {path}: {exc}; treating as empty enrichments",
             file=sys.stderr,
         )
-        return dict(EMPTY_ENRICHMENTS)
+        return _empty_enrichments()
     if not isinstance(data, Mapping):
-        return dict(EMPTY_ENRICHMENTS)
-    out: dict[str, Any] = dict(EMPTY_ENRICHMENTS)
+        return _empty_enrichments()
+    out = _empty_enrichments()
     for key in ("cognate_sets", "similarity", "borrowing_flags"):
         value = data.get(key)
         if isinstance(value, Mapping):
@@ -291,90 +293,111 @@ def _contact_forms_for_concept(
     return out
 
 
+def _enrichment_keys(concept_id: str, label: str) -> tuple[str, ...]:
+    """Ordered candidate keys for enrichment lookups.
+
+    Two conventions exist in the wild:
+
+    - The current ``python/compare/cognate_compute.py`` writes ``cognate_sets``
+      and ``similarity`` keyed by normalized **concept_id** (line 815 / 889 of
+      ``cognate_compute.py``: ``output[concept_id] = groups``).
+    - Older workspace backups (e.g. ``parse-workspace/annotations/backups/
+      20260430T201917Z-*``) store keys as the full concept **label** with any
+      variant suffix included (``"ear (A)"``).
+
+    Try ``concept_id`` first to match current compute output, then fall back to
+    ``label`` for backup compatibility. Empty / duplicate values are filtered.
+    """
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for candidate in (concept_id, label):
+        key = str(candidate or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        ordered.append(key)
+    return tuple(ordered)
+
+
 def _cognate_class_for(
     cognate_sets: Mapping[str, Any],
+    concept_id: str,
     label: str,
     speaker: str,
 ) -> str:
-    """Return the group letter (A/B/C/…) the speaker is in for this concept label.
+    """Return the group letter (A/B/C/…) the speaker is in for this concept.
 
     ``cognate_sets`` shape per ``python/compare/cognate_compute.py``:
-    ``{concept_label: {group_letter: [speaker_or_row_id, ...]}}``. Keys are
-    concept labels including any variant suffix (e.g. ``"ear (A)"``), not
-    numeric ids. Returns ``"?"`` when the concept is not in the map or the
-    speaker is not in any group.
+    ``{<concept_id_or_label>: {group_letter: [speaker_or_row_id, ...]}}``.
+    Tries ``concept_id`` first (matching current cognate_compute output),
+    falls back to ``label`` (backup-compatibility). Returns ``"?"`` when the
+    concept is not in the map or the speaker is not in any group.
     """
-    if not label or not speaker:
+    if not speaker:
         return "?"
-    groups = cognate_sets.get(label)
-    if not isinstance(groups, Mapping):
-        return "?"
-    for group_letter, members in groups.items():
-        if not isinstance(members, list):
+    for key in _enrichment_keys(concept_id, label):
+        groups = cognate_sets.get(key)
+        if not isinstance(groups, Mapping):
             continue
-        if speaker in {str(m) for m in members if m is not None}:
-            return str(group_letter)
+        for group_letter, members in groups.items():
+            if not isinstance(members, list):
+                continue
+            if speaker in {str(m) for m in members if m is not None}:
+                return str(group_letter)
     return "?"
 
 
 def _similarity_score(
     similarity: Mapping[str, Any],
+    concept_id: str,
     label: str,
     speaker: str,
     lang_code: str,
 ) -> float:
     """Return the per-(concept, speaker, lang) similarity score, or 0.0 if missing.
 
-    Shape: ``similarity[label][speaker][lang_code] = {"score": float, "has_reference_data": bool}``.
+    Shape: ``similarity[<concept_id_or_label>][speaker][lang_code] =
+    {"score": Optional[float], "has_reference_data": bool}``. ``score`` may be
+    ``None`` when PARSE has no reference data for the pair (see
+    ``python/compare/cognate_compute.py:SimilarityScore``); treat that as 0.0.
     """
-    if not label or not speaker or not lang_code:
+    if not speaker or not lang_code:
         return 0.0
-    by_speaker = similarity.get(label)
-    if not isinstance(by_speaker, Mapping):
-        return 0.0
-    by_lang = by_speaker.get(speaker)
-    if not isinstance(by_lang, Mapping):
-        return 0.0
-    entry = by_lang.get(lang_code)
-    if not isinstance(entry, Mapping):
-        return 0.0
-    try:
-        return float(entry.get("score") or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
+    for key in _enrichment_keys(concept_id, label):
+        by_speaker = similarity.get(key)
+        if not isinstance(by_speaker, Mapping):
+            continue
+        by_lang = by_speaker.get(speaker)
+        if not isinstance(by_lang, Mapping):
+            continue
+        entry = by_lang.get(lang_code)
+        if not isinstance(entry, Mapping):
+            continue
+        raw = entry.get("score")
+        if raw is None:
+            return 0.0
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return 0.0
+    return 0.0
 
 
 def _borrowing_flag_for(
     borrowing_flags: Mapping[str, Any],
+    concept_id: str,
     label: str,
     speaker: str,
 ) -> Any:
-    """Return the borrowing flag value for the (concept_label, speaker), or None."""
-    if not label or not speaker:
+    """Return the borrowing flag value for the (concept, speaker), or None."""
+    if not speaker:
         return None
-    by_speaker = borrowing_flags.get(label)
-    if not isinstance(by_speaker, Mapping):
-        return None
-    return by_speaker.get(speaker)
-
-
-def _spectrogram_relpath_for(
-    workspace: Path,
-    speaker: str,
-    audio_filename: str,
-) -> str | None:
-    """If a pre-generated spectrogram exists, return its workspace-relative path.
-
-    Convention checked: ``Audio_Processed/<Speaker>_process/spectrograms/<basename>.png``
-    (relative to the workspace root), where ``<basename>`` is the clip filename
-    with ``.wav`` swapped for ``.png``. Returns ``None`` when not found.
-    """
-    if not audio_filename.endswith(".wav"):
-        return None
-    png_name = audio_filename[: -len(".wav")] + ".png"
-    rel = f"Audio_Processed/{speaker}_process/spectrograms/{png_name}"
-    if (workspace / rel).exists():
-        return rel
+    for key in _enrichment_keys(concept_id, label):
+        by_speaker = borrowing_flags.get(key)
+        if not isinstance(by_speaker, Mapping):
+            continue
+        if speaker in by_speaker:
+            return by_speaker.get(speaker)
     return None
 
 
@@ -459,6 +482,7 @@ def _clip_wav(
 def _empty_form(
     speaker: str,
     *,
+    concept_id: str = "",
     label: str = "",
     cognate_sets: Mapping[str, Any] | None = None,
     similarity: Mapping[str, Any] | None = None,
@@ -472,14 +496,17 @@ def _empty_form(
     the lookups when available, fall back to the legacy null/zero/"?"
     defaults otherwise.
     """
+    cs = cognate_sets or {}
+    sim = similarity or {}
+    bf = borrowing_flags or {}
     return {
         "speaker": speaker,
         "ipa": "?",
         "ortho": "",
-        "cognate_class": _cognate_class_for(cognate_sets or {}, label, speaker),
-        "arabic_similarity": _similarity_score(similarity or {}, label, speaker, "ar"),
-        "persian_similarity": _similarity_score(similarity or {}, label, speaker, "fa"),
-        "borrowing_flag": _borrowing_flag_for(borrowing_flags or {}, label, speaker),
+        "cognate_class": _cognate_class_for(cs, concept_id, label, speaker),
+        "arabic_similarity": _similarity_score(sim, concept_id, label, speaker, "ar"),
+        "persian_similarity": _similarity_score(sim, concept_id, label, speaker, "fa"),
+        "borrowing_flag": _borrowing_flag_for(bf, concept_id, label, speaker),
         "audio_path": None,
         "spectrogram_path": None,
         "variants": None,
@@ -496,24 +523,27 @@ def _form_from_interval(
     audio_relpath: str | None,
     start_sec: float,
     duration_sec: float,
+    concept_id: str = "",
     label: str = "",
     cognate_sets: Mapping[str, Any] | None = None,
     similarity: Mapping[str, Any] | None = None,
     borrowing_flags: Mapping[str, Any] | None = None,
-    spectrogram_relpath: str | None = None,
 ) -> dict[str, Any]:
     ipa = _interval_field(interval, "ipa", "ipa_text")
     ortho = _interval_field(interval, "ortho", "orthography", "text")
+    cs = cognate_sets or {}
+    sim = similarity or {}
+    bf = borrowing_flags or {}
     return {
         "speaker": speaker,
         "ipa": "" if ipa is None else str(ipa),
         "ortho": "" if ortho is None else str(ortho),
-        "cognate_class": _cognate_class_for(cognate_sets or {}, label, speaker),
-        "arabic_similarity": _similarity_score(similarity or {}, label, speaker, "ar"),
-        "persian_similarity": _similarity_score(similarity or {}, label, speaker, "fa"),
-        "borrowing_flag": _borrowing_flag_for(borrowing_flags or {}, label, speaker),
+        "cognate_class": _cognate_class_for(cs, concept_id, label, speaker),
+        "arabic_similarity": _similarity_score(sim, concept_id, label, speaker, "ar"),
+        "persian_similarity": _similarity_score(sim, concept_id, label, speaker, "fa"),
+        "borrowing_flag": _borrowing_flag_for(bf, concept_id, label, speaker),
         "audio_path": audio_relpath,
-        "spectrogram_path": spectrogram_relpath,
+        "spectrogram_path": None,
         "variants": None,
         "source": row_value(concept_row, "source_survey") or None,
         "verification": None,
@@ -551,7 +581,6 @@ def build_review_data(
     workspace: Path,
     tag_id: str = DEFAULT_TAG_ID,
     contact_config: Path | None = None,
-    include_spectrograms: bool = False,
 ) -> tuple[dict[str, Any], list[tuple[str, dict[str, Any]]]]:
     """Return ``(review_data_payload, clip_plan)``.
 
@@ -635,6 +664,7 @@ def build_review_data(
                 forms.append(
                     _empty_form(
                         speaker,
+                        concept_id=concept_id,
                         label=full_label,
                         cognate_sets=cognate_sets,
                         similarity=similarity,
@@ -650,11 +680,6 @@ def build_review_data(
 
             filename = _audio_filename(survey, source_item, variant, gloss, speaker)
             audio_relpath = f"audio/{speaker}/{filename}"
-            spectrogram_relpath = (
-                _spectrogram_relpath_for(workspace, speaker, filename)
-                if include_spectrograms
-                else None
-            )
 
             source_wav_rel = _source_wav_relative(payload, speaker)
             form = _form_from_interval(
@@ -664,11 +689,11 @@ def build_review_data(
                 audio_relpath=audio_relpath,
                 start_sec=start_sec,
                 duration_sec=duration_sec,
+                concept_id=concept_id,
                 label=full_label,
                 cognate_sets=cognate_sets,
                 similarity=similarity,
                 borrowing_flags=borrowing_flags,
-                spectrogram_relpath=spectrogram_relpath,
             )
             forms.append(form)
 
@@ -887,15 +912,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "to this script. Pass an explicit path or set to /dev/null to skip."
         ),
     )
-    parser.add_argument(
-        "--include-spectrograms",
-        action="store_true",
-        help=(
-            "Probe for pre-generated spectrograms at "
-            "<workspace>/Audio_Processed/<Speaker>_process/spectrograms/*.png and "
-            "set form.spectrogram_path when present. Off by default."
-        ),
-    )
     return parser.parse_args(argv)
 
 
@@ -917,7 +933,6 @@ def main(argv: list[str] | None = None) -> int:
         workspace=workspace,
         tag_id=args.tag_id,
         contact_config=contact_config,
-        include_spectrograms=args.include_spectrograms,
     )
     summary = write_outputs(
         workspace=workspace,
