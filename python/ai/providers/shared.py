@@ -50,9 +50,7 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
     },
     "ortho": {
         "backend": "hf",
-        # ORTH defaults to the original HF Transformers Razhan SDH model. The
-        # legacy CT2/faster-whisper backend remains selectable via
-        # ortho.backend="faster-whisper" with a CT2 directory model_path.
+        # HF sectioned schema (read by HFWhisperProvider):
         "model": {
             "repo_id": "razhan/whisper-base-sdh",
             "device": "cuda",
@@ -72,6 +70,22 @@ _DEFAULT_AI_CONFIG: Dict[str, Any] = {
             # machine via ai_config.json.
             "refine_lexemes": False,
         },
+        # Faster-whisper compatibility defaults (consumed only by
+        # LocalWhisperProvider when ortho.backend="faster-whisper"). Keep
+        # these flat siblings so clean installs and fixtures retain the
+        # empirically critical ORTH cascade guard from PRs #298–302.
+        "model_path": "razhan/whisper-base-sdh",
+        "language": "sd",
+        "device": "cuda",
+        "compute_type": "float16",
+        "vad_filter": True,
+        "vad_parameters": {"min_silence_duration_ms": 500, "threshold": 0.35},
+        "condition_on_previous_text": False,
+        "compression_ratio_threshold": 1.8,
+        "no_repeat_ngram_size": 3,
+        "repetition_penalty": 1.2,
+        "initial_prompt": _ORTH_DEFAULT_INITIAL_PROMPT,
+        "refine_lexemes": False,
     },
     "llm": {
         "provider": "openai",

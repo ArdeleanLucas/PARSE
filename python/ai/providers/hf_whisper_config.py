@@ -185,9 +185,18 @@ class OrthoHFConfig:
     @classmethod
     def from_dict(cls, raw: Any) -> "OrthoHFConfig":
         section = _as_mapping(raw, field_name="ortho")
-        if set(section).intersection(_LEGACY_FLAT_KEYS):
+        section_keys = set(section)
+        has_sectioned = any(key in section for key in _TOP_LEVEL_KEYS - {"backend"})
+        has_legacy = bool(section_keys.intersection(_LEGACY_FLAT_KEYS))
+        if has_legacy and not has_sectioned:
             raise ValueError(_LEGACY_SCHEMA_MESSAGE)
-        _unknown("ortho", set(section) - _TOP_LEVEL_KEYS)
+        # Built-in defaults intentionally carry sectioned HF config plus flat
+        # faster-whisper compatibility siblings. In that mixed shape, consume
+        # only the sectioned keys and ignore legacy siblings here.
+        unknown_top_keys = section_keys - _TOP_LEVEL_KEYS
+        if has_sectioned:
+            unknown_top_keys -= _LEGACY_FLAT_KEYS
+        _unknown("ortho", unknown_top_keys)
 
         backend = str(section.get("backend", "hf") or "hf").strip().lower()
         if backend != "hf":

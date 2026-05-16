@@ -254,18 +254,23 @@ def test_compression_ratio_threshold_null_disables_it(tmp_path, monkeypatch):
     assert "compression_ratio_threshold" not in _StubWhisperModel.last_call
 
 
-def test_legacy_ortho_faster_whisper_requires_explicit_ct2_model_path(tmp_path, monkeypatch):
-    """With HF ORTH now sectioned, faster-whisper opt-back has no flat HF default to inherit."""
+def test_default_ortho_faster_whisper_flat_model_path_is_hf_and_requires_ct2_override(tmp_path, monkeypatch):
+    """Flat defaults preserve faster-whisper ORTH knobs, but the model still must be CT2."""
     monkeypatch.setattr(
         provider_module, "_register_cuda_dll_directories", lambda: None, raising=False
     )
 
-    with pytest.raises(ValueError, match=r"ortho\.model_path is empty"):
+    with pytest.raises(ValueError, match=r"looks like a HuggingFace repo id") as excinfo:
         LocalWhisperProvider(
             config={"ortho": {"language": "sd"}},
             config_path=tmp_path / "ai_config.json",
             config_section="ortho",
         )
+
+    message = str(excinfo.value)
+    assert "razhan/whisper-base-sdh" in message
+    assert "CTranslate2" in message
+    assert "ct2-transformers-converter" in message
 
 
 def test_ortho_section_defaults_cascade_guard(tmp_path, monkeypatch):

@@ -439,6 +439,49 @@ def test_initial_prompt_empty_skips_prompt_ids(monkeypatch: pytest.MonkeyPatch) 
     assert "prompt_ids" not in model.generate_calls[0]
 
 
+def test_mixed_shape_defaults_accept_sectioned_and_ignore_flat_siblings() -> None:
+    section = _config(repo_id="sectioned/hf-model")["ortho"]
+    section.update(
+        {
+            "model_path": "legacy/flat-model-ignored",
+            "language": "legacy-sd-ignored",
+            "device": "cpu",
+            "compute_type": "int8",
+            "vad_filter": False,
+            "vad_parameters": {"threshold": 0.99},
+            "condition_on_previous_text": True,
+            "compression_ratio_threshold": 2.4,
+            "no_repeat_ngram_size": 0,
+            "repetition_penalty": 1.0,
+            "initial_prompt": "legacy prompt ignored",
+            "refine_lexemes": True,
+        }
+    )
+
+    cfg = OrthoHFConfig.from_dict(section)
+    provider = HFWhisperProvider(config={"ortho": section})
+
+    assert cfg.model.repo_id == "sectioned/hf-model"
+    assert cfg.model.device == "cuda"
+    assert provider.model_path == "sectioned/hf-model"
+    assert provider.language == "sd"
+    assert provider.condition_on_prev_tokens is False
+    assert provider.compression_ratio_threshold == 1.8
+    assert provider.no_repeat_ngram_size == 3
+    assert provider.repetition_penalty == 1.2
+    assert provider.initial_prompt == "ignored by hf"
+    assert provider.refine_lexemes is False
+
+
+def test_pure_legacy_flat_schema_still_rejected_with_migration_command() -> None:
+    with pytest.raises(ValueError) as excinfo:
+        OrthoHFConfig.from_dict(_legacy_config()["ortho"])
+
+    message = str(excinfo.value)
+    assert "Detected legacy flat ortho schema" in message
+    assert "python python/tools/migrate_ai_config_ortho.py --workspace <path> --apply" in message
+
+
 def test_strict_reader_rejects_legacy_flat_schema_with_actionable_message() -> None:
     with pytest.raises(ValueError) as excinfo:
         OrthoHFConfig.from_dict(_legacy_config()["ortho"])
