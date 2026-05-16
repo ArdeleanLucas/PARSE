@@ -1520,7 +1520,7 @@ describe("ParseUI", () => {
     expect(screen.getByTestId("concept-sort-source-row").className).toContain("bg-sky-600");
   });
 
-  it("groups source_item sibling rows into one sidebar entry while leaving singleton concepts visible", () => {
+  it("groups source_item sibling rows into one sidebar entry while leaving singleton concepts visible", async () => {
     mockConfig = {
       project_name: "PARSE",
       language_code: "ku",
@@ -1537,6 +1537,10 @@ describe("ParseUI", () => {
 
     render(<ParseUI />);
 
+    // Compare mode hides the variant pill strip to prevent flood (MC-402);
+    // grouped-variant rendering is asserted in annotate mode where the strip is on.
+    await switchToAnnotateMode();
+
     const sidebar = screen.getByTestId("concept-sidebar");
     expect(within(sidebar).getByText("3 concepts")).toBeTruthy();
     expect(within(sidebar).getByText("brother of husband")).toBeTruthy();
@@ -1545,6 +1549,28 @@ describe("ParseUI", () => {
     expect(within(sidebar).getByText("sister of husband")).toBeTruthy();
     expect(within(sidebar).getByText("water")).toBeTruthy();
     expect(within(sidebar).getByRole("button", { name: /brother of husband.*KLQ 2\.15/i })).toBeTruthy();
+  });
+
+  it("hides concept variant pills in compare mode to prevent flood (MC-402)", () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "concept-a", label: "brother of husband A", source_item: "2.15", source_survey: "KLQ", custom_order: 1 },
+        { id: "concept-b", label: "brother of husband B", source_item: "2.15", source_survey: "KLQ", custom_order: 2 },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+
+    render(<ParseUI />);
+
+    const sidebar = screen.getByTestId("concept-sidebar");
+    // Default mount lands in compare mode (ParseUI.tsx default).
+    expect(within(sidebar).getByText("brother of husband")).toBeTruthy();
+    expect(within(sidebar).queryByTestId("concept-variant-pill-concept-a")).toBeNull();
+    expect(within(sidebar).queryByTestId("concept-variant-pill-concept-b")).toBeNull();
   });
 
   it("pre-populates annotate fields from stored intervals and shows Complete badge", async () => {
