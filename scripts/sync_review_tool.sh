@@ -9,7 +9,6 @@
 #
 # Flags forwarded to export_review_data.py (env-gated):
 #   SKIP_AUDIO=1            → --skip-audio
-#   INCLUDE_SPECTROGRAMS=1  → --include-spectrograms (only if export script supports it)
 #
 # Does NOT auto-push. Prints next steps on success.
 
@@ -44,10 +43,6 @@ fi
 
 if [[ "${SKIP_AUDIO:-0}" == "1" ]]; then
   EXPORT_ARGS+=(--skip-audio)
-fi
-
-if [[ "${INCLUDE_SPECTROGRAMS:-0}" == "1" ]] && grep -q -- '--include-spectrograms' <<<"$EXPORT_HELP"; then
-  EXPORT_ARGS+=(--include-spectrograms)
 fi
 
 echo "Running: python3 $REPO_ROOT/python/export_review_data.py ${EXPORT_ARGS[*]}"
