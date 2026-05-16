@@ -19,7 +19,7 @@ function mergeSurveyOverlapProjection(config: ProjectConfig, state: SurveyOverla
     ...config,
     concepts: config.concepts.map((concept) => ({
       ...concept,
-      surveys: conceptLinks[concept.id] ?? concept.surveys,
+      surveys: conceptLinks[concept.id] ? { ...(concept.surveys ?? {}), ...conceptLinks[concept.id] } : concept.surveys,
     })),
     survey_settings: state.surveys,
     survey_color_coding_enabled: state.color_coding_enabled,

@@ -1,16 +1,18 @@
 // @vitest-environment jsdom
 import { render, screen, fireEvent, cleanup, waitFor, act, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { AnnotationRecord, AnnotationInterval, ProjectConfig, Tag } from "./api/types";
+import type { AnnotationRecord, AnnotationInterval, ProjectConfig, SurveyOverlapState, Tag } from "./api/types";
 import type { ActiveJobSnapshot } from "./api/contracts/job-observability";
 import { useTranscriptionLanesStore } from "./stores/transcriptionLanesStore";
 import { useCompareReturnStore } from "./stores/compareReturnStore";
 import { usePlaybackStore } from "./stores/playbackStore";
 
-const { mockGetAuthStatus, mockPollAuth, mockStartAuthFlow } = vi.hoisted(() => ({
+const { mockGetAuthStatus, mockPollAuth, mockStartAuthFlow, mockGetConfig, mockGetSurveyOverlap } = vi.hoisted(() => ({
   mockGetAuthStatus: vi.fn(),
   mockPollAuth: vi.fn(),
   mockStartAuthFlow: vi.fn(),
+  mockGetConfig: vi.fn(),
+  mockGetSurveyOverlap: vi.fn(),
 }));
 
 let mockConfig: ProjectConfig | null = null;
@@ -366,6 +368,8 @@ let mockSourcesReport = {
 };
 
 vi.mock("./api/client", () => ({
+  getConfig: mockGetConfig,
+  getSurveyOverlap: mockGetSurveyOverlap,
   getLingPyExport: vi.fn().mockResolvedValue(''),
   getCompareBundles: (...args: unknown[]) => mockGetCompareBundles(...args),
   putCanonicalLexeme: vi.fn().mockResolvedValue({ bundle: { bundle_id: 'water', label: 'water', row_ids: [], buckets: [] } }),
@@ -549,6 +553,18 @@ function configureBigCompareWorkspace(concepts = [
   };
 }
 
+
+async function hydrateMockConfigThroughRealConfigStore(config: ProjectConfig, overlap: SurveyOverlapState): Promise<void> {
+  mockGetConfig.mockResolvedValueOnce(structuredClone(config));
+  mockGetSurveyOverlap.mockResolvedValueOnce(structuredClone(overlap));
+  const actualConfigStore = await vi.importActual<typeof import("./stores/configStore")>("./stores/configStore");
+  actualConfigStore.useConfigStore.setState({ config: null, loading: false, error: null });
+
+  await actualConfigStore.useConfigStore.getState().load();
+
+  mockConfig = actualConfigStore.useConfigStore.getState().config;
+}
+
 async function switchToAnnotateMode() {
   fireEvent.click(screen.getByRole("button", { name: "Compare" }));
   fireEvent.click(await screen.findByRole("button", { name: /Annotate\s*A/i }));
@@ -710,6 +726,8 @@ beforeEach(() => {
   vi.mocked(apiClient.listActiveJobs).mockResolvedValue([]);
 
   mockLoadConfig.mockClear();
+  mockGetConfig.mockReset();
+  mockGetSurveyOverlap.mockReset();
   mockReloadConfig.mockClear();
   mockUpdateSurveyOverlap.mockClear();
   mockHydrateTags.mockClear();
@@ -854,6 +872,47 @@ describe("ParseUI", () => {
     expect(within(chipRow).getAllByRole('button')).toHaveLength(2);
     expect(screen.getByRole('button', { name: 'Switch four to JBIL 4' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Current survey KLQ 13.4' })).toBeTruthy();
+  });
+
+
+  it('renders survey chips from configStore.load-merged canonical and sidecar surveys for hair', async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    await hydrateMockConfigThroughRealConfigStore(
+      {
+        ...mockConfig!,
+        speakers: ["Fail01"],
+        concepts: [
+          { id: "249", label: "hair (men)", source_item: "32", source_survey: "JBIL", surveys: { jbil: "32" } },
+          { id: "250", label: "hair (women)", source_item: "32", source_survey: "JBIL", surveys: { jbil: "32" } },
+        ],
+      },
+      {
+        version: 1,
+        color_coding_enabled: true,
+        surveys: {
+          jbil: { display_label: "JBIL", display_color: "violet" },
+          klq: { display_label: "KLQ", display_color: "emerald" },
+        },
+        concept_survey_links: {
+          "249": { klq: "1.1" },
+          "250": { klq: "1.1" },
+        },
+        speaker_choices: {},
+        speaker_concept_survey_links: {},
+      },
+    );
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "hair (men)", conceptId: "249", ipa: "prʧ", ortho: "hair", start: 1, end: 2 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    const chipRow = await screen.findByTestId('annotate-survey-chip-row');
+    expect(within(chipRow).getAllByRole('button')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Switch hair (men) to JBIL 32' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Current survey KLQ 1.1' })).toBeTruthy();
   });
 
   function seedSingleSpeakerProject() {
