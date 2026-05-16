@@ -11,14 +11,16 @@ import numpy as np
 import pytest
 
 from ai.provider import ConfidenceScore
+import ai.providers.hf_whisper as hf_whisper_module
 from ai.providers.hf_whisper import HF_TRANSFORMERS_IMPORT_ERROR, HFWhisperProvider, _avg_logprob_from_scores
+from ai.providers.hf_whisper_probe import compatibility_probe
 from ai.providers.hf_whisper_config import OrthoHFConfig
 from ai.providers.shared import _confidence_from_logprob
 
 
 class _RecordingInputs(dict):
     def __init__(self, call_index: int) -> None:
-        super().__init__({"input_features": f"features-{call_index}"})
+        super().__init__({"input_features": f"features-{call_index}", "attention_mask": f"mask-{call_index}"})
         self.to_devices: list[str] = []
 
     def to(self, device: str) -> "_RecordingInputs":
@@ -72,6 +74,8 @@ class _RecordingModel:
         self.to_devices: list[str] = []
         self.eval_calls = 0
         self.generate_calls: list[dict[str, Any]] = []
+        self.generation_config = types.SimpleNamespace()
+        self.config = types.SimpleNamespace(name_or_path="razhan/whisper-base-sdh")
 
     def to(self, device: str) -> "_RecordingModel":
         self.to_devices.append(device)
@@ -200,6 +204,7 @@ def _install_transformers_stub(
     *,
     processor: _RecordingProcessor | None = None,
     model: _RecordingModel | None = None,
+    run_probe: bool = False,
 ) -> tuple[_RecordingProcessor, _RecordingModel]:
     processor = processor or _RecordingProcessor()
     model = model or _RecordingModel()
@@ -220,10 +225,13 @@ def _install_transformers_stub(
         sys.modules,
         "transformers",
         types.SimpleNamespace(
+            __version__="test-transformers",
             WhisperProcessor=WhisperProcessor,
             WhisperForConditionalGeneration=WhisperForConditionalGeneration,
         ),
     )
+    if not run_probe:
+        monkeypatch.setattr(hf_whisper_module, "compatibility_probe", lambda *args, **kwargs: None, raising=False)
     return processor, model
 
 
@@ -336,20 +344,15 @@ def test_transcribe_uses_hf_processor_model_with_resolved_language(
     assert model.to_devices == ["cuda:0"]
     assert model.eval_calls == 1
     assert len(processor.calls) == 1
-    assert processor.calls[0]["kwargs"] == {"sampling_rate": 16000, "return_tensors": "pt"}
+    assert processor.calls[0]["kwargs"] == {"sampling_rate": 16000, "return_tensors": "pt", "return_attention_mask": True}
     assert processor.calls[0]["audio"].shape == (16000,)
     assert processor.inputs[0].to_devices == ["cuda:0"]
     assert processor.prompt_ids_calls == []
-    assert model.generate_calls == [
-        {
-            "input_features": "features-1",
-            "return_dict_in_generate": True,
-            "output_scores": True,
-            **_guard_kwargs(),
-            "language": "fa",
-            "task": "transcribe",
-        }
-    ]
+    assert model.generate_calls == [{"input_features": "features-1", "attention_mask": "mask-1"}]
+    assert model.generation_config.return_dict_in_generate is True
+    assert model.generation_config.output_scores is True
+    assert model.generation_config.language == "fa"
+    assert model.generation_config.task == "transcribe"
     assert result[0]["start"] == pytest.approx(0.0)
     assert result[0]["end"] == pytest.approx(1.0)
     assert result[0]["text"] == "یەک"
@@ -422,21 +425,13 @@ def test_repetition_guards_passed_to_generate(monkeypatch: pytest.MonkeyPatch) -
     assert len(processor.prompt_ids) == 1
     assert processor.prompt_ids[0].to_devices == ["cuda:0"]
     assert model.generate_calls == [
-        {
-            "input_features": "features-1",
-            "return_dict_in_generate": True,
-            "output_scores": True,
-            **_guard_kwargs(
-                compression_ratio_threshold=2.0,
-                no_repeat_ngram_size=4,
-                repetition_penalty=1.35,
-                condition_on_prev_tokens=True,
-            ),
-            "prompt_ids": processor.prompt_ids[0],
-            "language": "fa",
-            "task": "transcribe",
-        }
+        {"input_features": "features-1", "attention_mask": "mask-1", "prompt_ids": processor.prompt_ids[0]}
     ]
+    assert model.generation_config.compression_ratio_threshold == 2.0
+    assert model.generation_config.no_repeat_ngram_size == 4
+    assert model.generation_config.repetition_penalty == 1.35
+    assert model.generation_config.condition_on_prev_tokens is True
+    assert model.generation_config.do_sample is False
 
 
 def test_initial_prompt_empty_skips_prompt_ids(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -509,6 +504,147 @@ def test_strict_reader_rejects_unknown_section_key() -> None:
         OrthoHFConfig.from_dict(section)
 
 
+def test_generation_config_owner_is_model_not_per_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    _processor, model = _install_transformers_stub(monkeypatch, processor=_RecordingProcessor(texts=["یەک"]))
+    provider = HFWhisperProvider(
+        config=_config(
+            language="sdh",
+            compression_ratio_threshold=2.1,
+            no_repeat_ngram_size=4,
+            repetition_penalty=1.4,
+            condition_on_prev_tokens=True,
+        )
+    )
+
+    provider.transcribe_clip(np.zeros(16000, dtype=np.float32))
+
+    assert model.generation_config.return_dict_in_generate is True
+    assert model.generation_config.output_scores is True
+    assert model.generation_config.compression_ratio_threshold == 2.1
+    assert model.generation_config.no_repeat_ngram_size == 4
+    assert model.generation_config.repetition_penalty == 1.4
+    assert model.generation_config.condition_on_prev_tokens is True
+    assert model.generation_config.do_sample is False
+    assert model.generation_config.task == "transcribe"
+    assert model.generation_config.language == "fa"
+    forbidden = {
+        "return_dict_in_generate",
+        "output_scores",
+        "compression_ratio_threshold",
+        "no_repeat_ngram_size",
+        "repetition_penalty",
+        "condition_on_prev_tokens",
+        "temperature",
+        "do_sample",
+        "task",
+        "language",
+    }
+    assert forbidden.isdisjoint(model.generate_calls[0])
+
+
+def test_processor_called_with_return_attention_mask_true(monkeypatch: pytest.MonkeyPatch) -> None:
+    processor, model = _install_transformers_stub(monkeypatch, processor=_RecordingProcessor(texts=["یەک"]))
+    provider = HFWhisperProvider(config=_config())
+
+    provider.transcribe_clip(np.zeros(16000, dtype=np.float32))
+
+    assert processor.calls[0]["kwargs"]["return_attention_mask"] is True
+    assert model.generate_calls[0]["attention_mask"] == "mask-1"
+
+
+def test_prompt_ids_branch_preserves_encoder_attention_mask(monkeypatch: pytest.MonkeyPatch) -> None:
+    processor, model = _install_transformers_stub(monkeypatch, processor=_RecordingProcessor(texts=["یەک"]))
+    provider = HFWhisperProvider(config=_config(initial_prompt="CONFIG"))
+
+    provider.transcribe_clip(np.zeros(16000, dtype=np.float32), initial_prompt="custom prompt")
+
+    assert model.generate_calls[0]["attention_mask"] == "mask-1"
+    assert model.generate_calls[0]["prompt_ids"] is processor.prompt_ids[0]
+
+
+def test_compatibility_probe_passes_on_silence_clip(monkeypatch: pytest.MonkeyPatch) -> None:
+    processor = _RecordingProcessor()
+    model = _RecordingModel(generated=[_generated_result(selected_token=1, score_row=[0.0, 1.0])])
+    monkeypatch.setitem(sys.modules, "transformers", types.SimpleNamespace(__version__="probe-test"))
+
+    compatibility_probe(model, processor, language="fa")
+
+    assert processor.calls[0]["audio"].shape == (1600,)
+    assert processor.calls[0]["kwargs"] == {
+        "sampling_rate": 16000,
+        "return_tensors": "pt",
+        "return_attention_mask": True,
+    }
+    assert model.generate_calls == [{"input_features": "features-1", "attention_mask": "mask-1"}]
+
+
+def test_compatibility_probe_raises_when_scores_path_broken(monkeypatch: pytest.MonkeyPatch) -> None:
+    processor = _RecordingProcessor()
+    model = _RecordingModel(generated=[types.SimpleNamespace(sequences=np.asarray([[0, 1]]), scores=None)])
+    monkeypatch.setitem(sys.modules, "transformers", types.SimpleNamespace(__version__="probe-test"))
+
+    with pytest.raises(RuntimeError, match="scores is None") as excinfo:
+        compatibility_probe(model, processor, language="fa")
+
+    assert "razhan/whisper-base-sdh" in str(excinfo.value)
+    assert "probe-test" in str(excinfo.value)
+
+
+def test_compatibility_probe_raises_when_scores_empty_tuple(monkeypatch: pytest.MonkeyPatch) -> None:
+    processor = _RecordingProcessor()
+    model = _RecordingModel(generated=[types.SimpleNamespace(sequences=np.asarray([[0, 1]]), scores=())])
+    monkeypatch.setitem(sys.modules, "transformers", types.SimpleNamespace(__version__="probe-test"))
+
+    with pytest.raises(RuntimeError, match="scores is empty"):
+        compatibility_probe(model, processor, language="fa")
+
+
+def test_compatibility_probe_runs_at_load_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_transformers_stub(monkeypatch, processor=_RecordingProcessor(texts=["یەک"]), run_probe=True)
+
+    def fail_probe(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("synthetic probe failure")
+
+    monkeypatch.setattr(hf_whisper_module, "compatibility_probe", fail_probe)
+    provider = HFWhisperProvider(config=_config())
+
+    with pytest.raises(RuntimeError, match="synthetic probe failure"):
+        provider.warm_up()
+
+    assert provider._processor is None
+    assert provider._model is None
+
+
+def test_real_generation_produces_avg_logprob_source_not_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_transformers_stub(
+        monkeypatch,
+        processor=_RecordingProcessor(texts=[" سێ "]),
+        model=_RecordingModel(generated=[_generated_result(selected_token=1, score_row=[0.0, 2.0])]),
+    )
+    provider = HFWhisperProvider(config=_config(language="fa"))
+
+    _text, confidence = provider.transcribe_clip(np.zeros(16000, dtype=np.float32))
+
+    assert confidence.source == "avg_logprob"
+    assert confidence.n_tokens > 0
+
+
+def test_no_transformers_invalid_flag_warning_on_load_or_generate(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _install_transformers_stub(monkeypatch, processor=_RecordingProcessor(texts=["سێ"]))
+    provider = HFWhisperProvider(config=_config())
+
+    provider.warm_up()
+    provider.transcribe_clip(np.zeros(16000, dtype=np.float32))
+
+    stderr = capsys.readouterr().err
+    assert "is not valid" not in stderr
+    assert "attention mask is not set" not in stderr
+    assert "SuppressTokensLogitsProcessor" not in stderr
+
+
 def test_transcribe_breaks_on_should_cancel_chunked_full_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -578,25 +714,11 @@ def test_transcribe_segments_in_memory_slices_audio_and_reports_progress(
     assert isinstance(second_window, np.ndarray)
     assert first_window.shape == (8000,)
     assert second_window.shape == (20000,)
-    assert all(call["kwargs"] == {"sampling_rate": 16000, "return_tensors": "pt"} for call in processor.calls)
+    assert all(call["kwargs"] == {"sampling_rate": 16000, "return_tensors": "pt", "return_attention_mask": True} for call in processor.calls)
     assert processor.prompt_ids_calls == []
     assert _model.generate_calls == [
-        {
-            "input_features": "features-1",
-            "return_dict_in_generate": True,
-            "output_scores": True,
-            **_guard_kwargs(),
-            "language": "fa",
-            "task": "transcribe",
-        },
-        {
-            "input_features": "features-2",
-            "return_dict_in_generate": True,
-            "output_scores": True,
-            **_guard_kwargs(),
-            "language": "fa",
-            "task": "transcribe",
-        },
+        {"input_features": "features-1", "attention_mask": "mask-1"},
+        {"input_features": "features-2", "attention_mask": "mask-2"},
     ]
     assert progress == [(50.0, 1), (100.0, 2)]
 
