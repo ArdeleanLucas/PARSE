@@ -22,11 +22,19 @@ from export_review_data import (
 )
 
 
+def _write_contact_config(tmp_path: Path, payload: dict[str, dict[str, object]]) -> Path:
+    """Write a tmp ``sil_contact_languages.json`` and return its path."""
+    path = tmp_path / "sil_contact_languages.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
 def _make_workspace(
     tmp_path: Path,
     *,
     concepts: list[dict[str, str]],
     speakers: dict[str, dict[str, object]],
+    enrichments: dict[str, object] | None = None,
 ) -> Path:
     """Materialise a minimal PARSE workspace under ``tmp_path``.
 
@@ -80,6 +88,11 @@ def _make_workspace(
         }
         (annotations / f"{speaker}.parse.json").write_text(
             json.dumps(annotation), encoding="utf-8"
+        )
+
+    if enrichments is not None:
+        (workspace / "parse-enrichments.json").write_text(
+            json.dumps(enrichments, ensure_ascii=False), encoding="utf-8"
         )
 
     return workspace
@@ -299,6 +312,162 @@ class WriteOutputsTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["concept_en"], "ash")
             self.assertEqual(rows[0]["ipa"], "aʂ")
+
+
+class AnalyticalFieldsTests(unittest.TestCase):
+    """Cover Lane B — analytical fields from parse-enrichments + contact config."""
+
+    def _two_speaker_ash_workspace(
+        self,
+        tmp: str,
+        *,
+        enrichments: dict[str, object] | None = None,
+    ) -> Path:
+        return _make_workspace(
+            Path(tmp),
+            concepts=[
+                {"id": "1", "concept_en": "ash", "source_item": "1.1", "source_survey": "KLQ"},
+            ],
+            speakers={
+                "Fail01": {
+                    "concept_intervals": [
+                        {"concept_id": "1", "start": 0.0, "end": 0.3, "ipa": "aʂ", "ortho": "aş"}
+                    ],
+                    "tagged_ids": ["1"],
+                },
+                "Khan01": {
+                    "concept_intervals": [],
+                    "tagged_ids": [],
+                },
+            },
+            enrichments=enrichments,
+        )
+
+    def test_analytical_fields_populated_from_enrichments(self) -> None:
+        # Both shapes the legacy and modern schemas key by concept LABEL
+        # (with variant suffix). Here the label is just "ash" (no variant).
+        enrichments = {
+            "cognate_sets": {"ash": {"A": ["Fail01"], "B": ["Khan01"]}},
+            "similarity": {
+                "ash": {
+                    "Fail01": {
+                        "ar": {"score": 0.91, "has_reference_data": True},
+                        "fa": {"score": 0.42, "has_reference_data": True},
+                    },
+                    "Khan01": {
+                        "ar": {"score": 0.0, "has_reference_data": False},
+                        "fa": {"score": 0.10, "has_reference_data": True},
+                    },
+                }
+            },
+            "borrowing_flags": {"ash": {"Fail01": "ar"}},
+            "lexeme_notes": {},
+        }
+        with TemporaryDirectory() as tmp:
+            workspace = self._two_speaker_ash_workspace(tmp, enrichments=enrichments)
+            review_data, _clip_plan = build_review_data(workspace=workspace)
+
+        forms = {f["speaker"]: f for f in review_data["concepts"][0]["forms"]}
+        self.assertEqual(forms["Fail01"]["cognate_class"], "A")
+        self.assertAlmostEqual(forms["Fail01"]["arabic_similarity"], 0.91)
+        self.assertAlmostEqual(forms["Fail01"]["persian_similarity"], 0.42)
+        self.assertEqual(forms["Fail01"]["borrowing_flag"], "ar")
+        # Khan01 is in group B even though it has no interval (empty form).
+        self.assertEqual(forms["Khan01"]["cognate_class"], "B")
+        self.assertAlmostEqual(forms["Khan01"]["arabic_similarity"], 0.0)
+        self.assertAlmostEqual(forms["Khan01"]["persian_similarity"], 0.10)
+        self.assertIsNone(forms["Khan01"]["borrowing_flag"])
+
+    def test_missing_enrichments_falls_back_to_null_defaults(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = self._two_speaker_ash_workspace(tmp)  # no enrichments
+            # Confirm the file actually isn't there — regression guard.
+            self.assertFalse((workspace / "parse-enrichments.json").exists())
+            review_data, _clip_plan = build_review_data(workspace=workspace)
+
+        forms = {f["speaker"]: f for f in review_data["concepts"][0]["forms"]}
+        for speaker in ("Fail01", "Khan01"):
+            self.assertEqual(forms[speaker]["cognate_class"], "?")
+            self.assertEqual(forms[speaker]["arabic_similarity"], 0.0)
+            self.assertEqual(forms[speaker]["persian_similarity"], 0.0)
+            self.assertIsNone(forms[speaker]["borrowing_flag"])
+
+    def test_contact_language_forms_populated_from_config(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = self._two_speaker_ash_workspace(tmp)
+            contact_config = _write_contact_config(
+                Path(tmp),
+                {
+                    "ar": {
+                        "name": "Arabic",
+                        "concepts": {"ash": [{"form": "رماد", "sources": ["test"]}]},
+                    },
+                    "fa": {
+                        "name": "Persian",
+                        # Legacy bare-list shape — exporter must handle it too.
+                        "concepts": {"ash": ["خاکستر"]},
+                    },
+                    "_meta": {"primary_contact_languages": ["ar", "fa"]},
+                },
+            )
+            review_data, _ = build_review_data(
+                workspace=workspace,
+                contact_config=contact_config,
+            )
+
+        concept = review_data["concepts"][0]
+        self.assertEqual(concept["arabic"]["form"], "رماد")
+        self.assertEqual(concept["arabic"]["ipa"], "")
+        self.assertEqual(concept["persian"]["form"], "خاکستر")
+        self.assertEqual(concept["persian"]["ipa"], "")
+
+    def test_missing_contact_config_yields_empty_reference_forms(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = self._two_speaker_ash_workspace(tmp)
+            review_data, _ = build_review_data(workspace=workspace, contact_config=None)
+
+        concept = review_data["concepts"][0]
+        self.assertEqual(concept["arabic"], {"form": "", "ipa": ""})
+        self.assertEqual(concept["persian"], {"form": "", "ipa": ""})
+
+    def test_summary_carries_analytical_coverage_counts(self) -> None:
+        enrichments = {
+            "cognate_sets": {"ash": {"A": ["Fail01"]}},
+            "similarity": {
+                "ash": {
+                    "Fail01": {
+                        "ar": {"score": 0.5, "has_reference_data": True},
+                        # no fa entry — persian_similarity stays 0.0
+                    }
+                }
+            },
+            "borrowing_flags": {},
+        }
+        with TemporaryDirectory() as tmp:
+            workspace = self._two_speaker_ash_workspace(tmp, enrichments=enrichments)
+            contact_config = _write_contact_config(
+                Path(tmp),
+                {"ar": {"concepts": {"ash": [{"form": "رماد", "sources": []}]}}},
+            )
+            review_data, clip_plan = build_review_data(
+                workspace=workspace,
+                contact_config=contact_config,
+            )
+            summary = write_outputs(
+                workspace=workspace,
+                out_dir=Path(tmp) / "out",
+                review_data=review_data,
+                clip_plan=clip_plan,
+                skip_audio=True,
+            )
+
+        coverage = summary["analytical_coverage"]
+        self.assertEqual(coverage["forms_with_cognate_class"], 1)        # Fail01 has class A
+        self.assertEqual(coverage["forms_with_arabic_similarity"], 1)    # Fail01 ar=0.5
+        self.assertEqual(coverage["forms_with_persian_similarity"], 0)
+        self.assertEqual(coverage["forms_with_borrowing_flag"], 0)
+        self.assertEqual(coverage["concepts_with_arabic_ref"], 1)
+        self.assertEqual(coverage["concepts_with_persian_ref"], 0)
 
 
 if __name__ == "__main__":

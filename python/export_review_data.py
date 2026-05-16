@@ -10,10 +10,16 @@ archived ``ArdeleanLucas/review_tool_archived`` HTML expects:
     <out>/audio/<Speaker>/<survey>_<source_item>_<variant>_<gloss>_<Speaker>.wav
     <out>/timestamps/<Speaker>_timestamps.csv
 
-Analytical fields that the legacy schema carried (cognate_class, contact-
-language similarity scores, phonetic_flags) are emitted with the same null
-defaults the legacy importer wrote for unscored forms. The viewer renders
-forms with these fields empty; populating them later is an additive change.
+Analytical fields (``cognate_class``, ``arabic_similarity`` / ``persian_similarity``,
+``borrowing_flag``, plus concept-level ``arabic`` / ``persian`` reference forms)
+are populated from ``<workspace>/parse-enrichments.json`` and
+``<repo>/config/sil_contact_languages.json`` when those data sources have been
+populated by PARSE's compute pipelines. When the enrichments or contact-language
+sources are missing or empty, the exporter falls back to the legacy null / zero
+/ ``"?"`` defaults (matching the legacy importer's shape for unscored forms) so
+the viewer still renders. ``phonetic_flags`` / ``verification`` / ``variants``
+are intentionally NOT populated — they require a separate detector pipeline that
+is explicitly out of scope for this exporter.
 
 Usage::
 
@@ -23,6 +29,9 @@ Usage::
 
     # Schema-only run (no ffmpeg, for fast iteration / CI):
     python python/export_review_data.py --workspace ... --out ... --skip-audio
+
+    # Probe for pre-generated spectrograms next to source audio:
+    python python/export_review_data.py --workspace ... --out ... --include-spectrograms
 """
 
 from __future__ import annotations
@@ -47,6 +56,13 @@ DEFAULT_TAG_ID = "custom-sk-concept-list"
 DEFAULT_PROJECT_AUDIO_ROOT = "audio/working"
 LEGACY_SCHEMA_VERSION = 4.1
 EXCLUDED_ANNOTATION_NAMES = {"manifest.json", "parse-enrichments.json"}
+ENRICHMENTS_FILENAME = "parse-enrichments.json"
+DEFAULT_CONTACT_CONFIG_RELATIVE = "config/sil_contact_languages.json"
+EMPTY_ENRICHMENTS: dict[str, dict[str, Any]] = {
+    "cognate_sets": {},
+    "similarity": {},
+    "borrowing_flags": {},
+}
 
 _VARIANT_SUFFIX_RE = re.compile(r"\s*\(([A-Za-z0-9]+)\)\s*$")
 _FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -151,6 +167,217 @@ def _resolve_source_wav(project_root: Path, relative_or_absolute: str) -> Path:
     return project_root / relative_or_absolute
 
 
+def _load_enrichments(workspace: Path) -> dict[str, Any]:
+    """Read ``<workspace>/parse-enrichments.json``, tolerating missing file or keys.
+
+    Always returns at minimum the three analytical sub-dicts the exporter
+    consults (``cognate_sets``, ``similarity``, ``borrowing_flags``) so callers
+    can index without guarding each access. The live workspace currently emits
+    only ``lexeme_notes`` post-CSV-re-import; this function bridges that gap.
+    """
+    path = workspace / ENRICHMENTS_FILENAME
+    if not path.exists():
+        return dict(EMPTY_ENRICHMENTS)
+    try:
+        with path.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(
+            f"warning: failed to read {path}: {exc}; treating as empty enrichments",
+            file=sys.stderr,
+        )
+        return dict(EMPTY_ENRICHMENTS)
+    if not isinstance(data, Mapping):
+        return dict(EMPTY_ENRICHMENTS)
+    out: dict[str, Any] = dict(EMPTY_ENRICHMENTS)
+    for key in ("cognate_sets", "similarity", "borrowing_flags"):
+        value = data.get(key)
+        if isinstance(value, Mapping):
+            out[key] = value
+    return out
+
+
+def _load_contact_languages(contact_config: Path | None) -> dict[str, dict[str, Any]]:
+    """Read ``sil_contact_languages.json``; return ``{lang_code: {"concepts": {...}}}``.
+
+    Tolerates a missing path, missing file, malformed JSON, and metadata
+    underscore-prefixed top-level keys (these are skipped — they mirror the
+    fetcher's own behaviour). When the file is absent the caller gets an empty
+    dict; lookups then fall through to the empty-form-and-ipa defaults.
+    """
+    if contact_config is None:
+        return {}
+    if not contact_config.exists():
+        print(
+            f"warning: contact-language config not found at {contact_config}; "
+            f"Arabic/Persian reference forms will be empty in the export",
+            file=sys.stderr,
+        )
+        return {}
+    try:
+        with contact_config.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(
+            f"warning: failed to read {contact_config}: {exc}; "
+            f"Arabic/Persian reference forms will be empty",
+            file=sys.stderr,
+        )
+        return {}
+    if not isinstance(data, Mapping):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for code, entry in data.items():
+        if not isinstance(code, str) or code.startswith("_") or not isinstance(entry, Mapping):
+            continue
+        out[code] = {"concepts": entry.get("concepts") if isinstance(entry.get("concepts"), Mapping) else {}}
+    return out
+
+
+def _extract_form_from_contact_entry(entry: Any) -> str:
+    """Pick the orthographic form from a sil_contact_languages concept entry.
+
+    The fetcher writes either a bare list of strings (legacy, ``["ma:ʔ"]``) or a
+    list of provenance dicts (modern, ``[{"form": str, "sources": [...]}]``).
+    Take the first non-empty value, regardless of shape.
+    """
+    if isinstance(entry, list):
+        for item in entry:
+            if isinstance(item, Mapping):
+                form = item.get("form")
+                if form:
+                    return str(form).strip()
+            elif item:
+                return str(item).strip()
+    elif isinstance(entry, str) and entry.strip():
+        return entry.strip()
+    return ""
+
+
+def _contact_forms_for_concept(
+    contact_langs: Mapping[str, Mapping[str, Any]],
+    concept_id: str,
+    label: str,
+) -> dict[str, dict[str, str]]:
+    """Return ``{"arabic": {form, ipa}, "persian": {form, ipa}}`` for the concept.
+
+    PARSE's contact-lexeme fetcher keys ``concepts`` by ``concept_en`` label
+    (confirmed by ``python/compare/contact_lexeme_fetcher.py``'s ``_load_concepts``
+    + merge loop). We still try ``concept_id`` first as a defensive fallback in
+    case a future provider keys by id; label is the authoritative path. PARSE
+    does not currently store a separate IPA for contact-language forms, so
+    ``ipa`` stays empty — populating it is a fetcher-side change, not an export
+    change.
+    """
+    out: dict[str, dict[str, str]] = {
+        "arabic": {"form": "", "ipa": ""},
+        "persian": {"form": "", "ipa": ""},
+    }
+    pairs = (("arabic", "ar"), ("persian", "fa"))
+    for legacy_key, lang_code in pairs:
+        lang_entry = contact_langs.get(lang_code)
+        if not isinstance(lang_entry, Mapping):
+            continue
+        concepts = lang_entry.get("concepts")
+        if not isinstance(concepts, Mapping):
+            continue
+        for key in (concept_id, label):
+            if not key:
+                continue
+            form = _extract_form_from_contact_entry(concepts.get(key))
+            if form:
+                out[legacy_key] = {"form": form, "ipa": ""}
+                break
+    return out
+
+
+def _cognate_class_for(
+    cognate_sets: Mapping[str, Any],
+    label: str,
+    speaker: str,
+) -> str:
+    """Return the group letter (A/B/C/…) the speaker is in for this concept label.
+
+    ``cognate_sets`` shape per ``python/compare/cognate_compute.py``:
+    ``{concept_label: {group_letter: [speaker_or_row_id, ...]}}``. Keys are
+    concept labels including any variant suffix (e.g. ``"ear (A)"``), not
+    numeric ids. Returns ``"?"`` when the concept is not in the map or the
+    speaker is not in any group.
+    """
+    if not label or not speaker:
+        return "?"
+    groups = cognate_sets.get(label)
+    if not isinstance(groups, Mapping):
+        return "?"
+    for group_letter, members in groups.items():
+        if not isinstance(members, list):
+            continue
+        if speaker in {str(m) for m in members if m is not None}:
+            return str(group_letter)
+    return "?"
+
+
+def _similarity_score(
+    similarity: Mapping[str, Any],
+    label: str,
+    speaker: str,
+    lang_code: str,
+) -> float:
+    """Return the per-(concept, speaker, lang) similarity score, or 0.0 if missing.
+
+    Shape: ``similarity[label][speaker][lang_code] = {"score": float, "has_reference_data": bool}``.
+    """
+    if not label or not speaker or not lang_code:
+        return 0.0
+    by_speaker = similarity.get(label)
+    if not isinstance(by_speaker, Mapping):
+        return 0.0
+    by_lang = by_speaker.get(speaker)
+    if not isinstance(by_lang, Mapping):
+        return 0.0
+    entry = by_lang.get(lang_code)
+    if not isinstance(entry, Mapping):
+        return 0.0
+    try:
+        return float(entry.get("score") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _borrowing_flag_for(
+    borrowing_flags: Mapping[str, Any],
+    label: str,
+    speaker: str,
+) -> Any:
+    """Return the borrowing flag value for the (concept_label, speaker), or None."""
+    if not label or not speaker:
+        return None
+    by_speaker = borrowing_flags.get(label)
+    if not isinstance(by_speaker, Mapping):
+        return None
+    return by_speaker.get(speaker)
+
+
+def _spectrogram_relpath_for(
+    workspace: Path,
+    speaker: str,
+    audio_filename: str,
+) -> str | None:
+    """If a pre-generated spectrogram exists, return its workspace-relative path.
+
+    Convention checked: ``Audio_Processed/<Speaker>_process/spectrograms/<basename>.png``
+    (relative to the workspace root), where ``<basename>`` is the clip filename
+    with ``.wav`` swapped for ``.png``. Returns ``None`` when not found.
+    """
+    if not audio_filename.endswith(".wav"):
+        return None
+    png_name = audio_filename[: -len(".wav")] + ".png"
+    rel = f"Audio_Processed/{speaker}_process/spectrograms/{png_name}"
+    if (workspace / rel).exists():
+        return rel
+    return None
+
+
 def _concept_intervals_by_id(payload: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
     tiers = payload.get("tiers")
     if not isinstance(tiers, Mapping):
@@ -229,16 +456,30 @@ def _clip_wav(
     subprocess.run(cmd, check=True)
 
 
-def _empty_form(speaker: str) -> dict[str, Any]:
-    """Form record for a speaker that did not produce the concept (matches legacy nulls)."""
+def _empty_form(
+    speaker: str,
+    *,
+    label: str = "",
+    cognate_sets: Mapping[str, Any] | None = None,
+    similarity: Mapping[str, Any] | None = None,
+    borrowing_flags: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Form record for a speaker that did not produce the concept.
+
+    Even when the speaker has no interval for the concept, PARSE's compute
+    pipelines may still have an opinion (e.g. cognate_class via shared
+    reconstruction; similarity from a no-form sentinel). Populate those from
+    the lookups when available, fall back to the legacy null/zero/"?"
+    defaults otherwise.
+    """
     return {
         "speaker": speaker,
         "ipa": "?",
         "ortho": "",
-        "cognate_class": "?",
-        "arabic_similarity": 0.0,
-        "persian_similarity": 0.0,
-        "borrowing_flag": None,
+        "cognate_class": _cognate_class_for(cognate_sets or {}, label, speaker),
+        "arabic_similarity": _similarity_score(similarity or {}, label, speaker, "ar"),
+        "persian_similarity": _similarity_score(similarity or {}, label, speaker, "fa"),
+        "borrowing_flag": _borrowing_flag_for(borrowing_flags or {}, label, speaker),
         "audio_path": None,
         "spectrogram_path": None,
         "variants": None,
@@ -255,6 +496,11 @@ def _form_from_interval(
     audio_relpath: str | None,
     start_sec: float,
     duration_sec: float,
+    label: str = "",
+    cognate_sets: Mapping[str, Any] | None = None,
+    similarity: Mapping[str, Any] | None = None,
+    borrowing_flags: Mapping[str, Any] | None = None,
+    spectrogram_relpath: str | None = None,
 ) -> dict[str, Any]:
     ipa = _interval_field(interval, "ipa", "ipa_text")
     ortho = _interval_field(interval, "ortho", "orthography", "text")
@@ -262,12 +508,12 @@ def _form_from_interval(
         "speaker": speaker,
         "ipa": "" if ipa is None else str(ipa),
         "ortho": "" if ortho is None else str(ortho),
-        "cognate_class": "?",
-        "arabic_similarity": 0.0,
-        "persian_similarity": 0.0,
-        "borrowing_flag": None,
+        "cognate_class": _cognate_class_for(cognate_sets or {}, label, speaker),
+        "arabic_similarity": _similarity_score(similarity or {}, label, speaker, "ar"),
+        "persian_similarity": _similarity_score(similarity or {}, label, speaker, "fa"),
+        "borrowing_flag": _borrowing_flag_for(borrowing_flags or {}, label, speaker),
         "audio_path": audio_relpath,
-        "spectrogram_path": None,
+        "spectrogram_path": spectrogram_relpath,
         "variants": None,
         "source": row_value(concept_row, "source_survey") or None,
         "verification": None,
@@ -304,6 +550,8 @@ def build_review_data(
     *,
     workspace: Path,
     tag_id: str = DEFAULT_TAG_ID,
+    contact_config: Path | None = None,
+    include_spectrograms: bool = False,
 ) -> tuple[dict[str, Any], list[tuple[str, dict[str, Any]]]]:
     """Return ``(review_data_payload, clip_plan)``.
 
@@ -311,6 +559,12 @@ def build_review_data(
     ``clip_spec`` carries the keys ``speaker``, ``audio_path``, ``start_sec``,
     ``duration_sec``, plus the timestamps-CSV row fields. The caller decides
     whether to materialize the clips via ffmpeg.
+
+    Analytical fields (cognate_class, arabic/persian similarity, borrowing_flag,
+    concept-level arabic/persian reference forms) are populated from
+    ``<workspace>/parse-enrichments.json`` and ``contact_config`` when those
+    sources carry data; otherwise the exporter falls back to the legacy
+    null / zero / "?" defaults.
     """
     speakers = _project_speakers(workspace)
     concepts_csv = workspace / "concepts.csv"
@@ -318,6 +572,12 @@ def build_review_data(
         raise FileNotFoundError(f"concepts.csv not found at {concepts_csv}")
     concept_rows = read_concepts_csv_rows(concepts_csv)
     concept_by_id = {str(row.get("id") or "").strip(): row for row in concept_rows}
+
+    enrichments = _load_enrichments(workspace)
+    cognate_sets = enrichments.get("cognate_sets", {})
+    similarity = enrichments.get("similarity", {})
+    borrowing_flags = enrichments.get("borrowing_flags", {})
+    contact_langs = _load_contact_languages(contact_config)
 
     annotations_dir = workspace / "annotations"
     annotation_payloads: dict[str, dict[str, Any]] = {}
@@ -372,7 +632,15 @@ def build_review_data(
             intervals = _concept_intervals_by_id(payload).get(concept_id, [])
 
             if concept_id not in tagged_for_speaker or not intervals:
-                forms.append(_empty_form(speaker))
+                forms.append(
+                    _empty_form(
+                        speaker,
+                        label=full_label,
+                        cognate_sets=cognate_sets,
+                        similarity=similarity,
+                        borrowing_flags=borrowing_flags,
+                    )
+                )
                 continue
 
             interval = intervals[0]
@@ -382,6 +650,11 @@ def build_review_data(
 
             filename = _audio_filename(survey, source_item, variant, gloss, speaker)
             audio_relpath = f"audio/{speaker}/{filename}"
+            spectrogram_relpath = (
+                _spectrogram_relpath_for(workspace, speaker, filename)
+                if include_spectrograms
+                else None
+            )
 
             source_wav_rel = _source_wav_relative(payload, speaker)
             form = _form_from_interval(
@@ -391,6 +664,11 @@ def build_review_data(
                 audio_relpath=audio_relpath,
                 start_sec=start_sec,
                 duration_sec=duration_sec,
+                label=full_label,
+                cognate_sets=cognate_sets,
+                similarity=similarity,
+                borrowing_flags=borrowing_flags,
+                spectrogram_relpath=spectrogram_relpath,
             )
             forms.append(form)
 
@@ -410,12 +688,13 @@ def build_review_data(
                 )
             )
 
+        contact_forms = _contact_forms_for_concept(contact_langs, concept_id, full_label)
         concept_entries.append(
             {
                 "concept_id": source_item or concept_id,
                 "concept_en": gloss,
-                "arabic": {"form": "", "ipa": ""},
-                "persian": {"form": "", "ipa": ""},
+                "arabic": contact_forms["arabic"],
+                "persian": contact_forms["persian"],
                 "forms": forms,
             }
         )
@@ -472,6 +751,52 @@ def materialize_clips(
     return clipped, errors
 
 
+def _analytical_coverage(review_data: Mapping[str, Any]) -> dict[str, int]:
+    """Count how many emitted forms/concepts actually carry analytical data.
+
+    "Populated" = not equal to the legacy null/zero/``"?"`` default. Callers
+    use this to tell whether PARSE's compute pipelines have been run — a
+    summary with all-zero counts means the export is structurally correct but
+    the analytical sources (parse-enrichments.json + sil_contact_languages.json)
+    have not been populated yet.
+    """
+    counts = {
+        "forms_with_cognate_class": 0,
+        "forms_with_arabic_similarity": 0,
+        "forms_with_persian_similarity": 0,
+        "forms_with_borrowing_flag": 0,
+        "concepts_with_arabic_ref": 0,
+        "concepts_with_persian_ref": 0,
+    }
+    for concept in review_data.get("concepts", []) or []:
+        if not isinstance(concept, Mapping):
+            continue
+        arabic = concept.get("arabic") if isinstance(concept.get("arabic"), Mapping) else {}
+        if str(arabic.get("form") or "").strip():
+            counts["concepts_with_arabic_ref"] += 1
+        persian = concept.get("persian") if isinstance(concept.get("persian"), Mapping) else {}
+        if str(persian.get("form") or "").strip():
+            counts["concepts_with_persian_ref"] += 1
+        for form in concept.get("forms", []) or []:
+            if not isinstance(form, Mapping):
+                continue
+            if str(form.get("cognate_class") or "").strip() not in {"", "?"}:
+                counts["forms_with_cognate_class"] += 1
+            try:
+                if float(form.get("arabic_similarity") or 0.0) > 0.0:
+                    counts["forms_with_arabic_similarity"] += 1
+            except (TypeError, ValueError):
+                pass
+            try:
+                if float(form.get("persian_similarity") or 0.0) > 0.0:
+                    counts["forms_with_persian_similarity"] += 1
+            except (TypeError, ValueError):
+                pass
+            if form.get("borrowing_flag") is not None:
+                counts["forms_with_borrowing_flag"] += 1
+    return counts
+
+
 def write_outputs(
     *,
     workspace: Path,
@@ -505,6 +830,7 @@ def write_outputs(
         "audio_clipped": 0,
         "audio_errors": [],
         "skipped_audio": bool(skip_audio),
+        "analytical_coverage": _analytical_coverage(review_data),
     }
 
     if not skip_audio and clip_plan:
@@ -551,19 +877,48 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="ffmpeg",
         help="ffmpeg binary path (default: %(default)s).",
     )
+    parser.add_argument(
+        "--contact-config",
+        type=Path,
+        default=None,
+        help=(
+            "Path to sil_contact_languages.json (Arabic/Persian reference forms). "
+            "Defaults to <repo>/config/sil_contact_languages.json resolved relative "
+            "to this script. Pass an explicit path or set to /dev/null to skip."
+        ),
+    )
+    parser.add_argument(
+        "--include-spectrograms",
+        action="store_true",
+        help=(
+            "Probe for pre-generated spectrograms at "
+            "<workspace>/Audio_Processed/<Speaker>_process/spectrograms/*.png and "
+            "set form.spectrogram_path when present. Off by default."
+        ),
+    )
     return parser.parse_args(argv)
+
+
+def _default_contact_config() -> Path:
+    return Path(__file__).resolve().parent.parent / DEFAULT_CONTACT_CONFIG_RELATIVE
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     workspace = args.workspace.resolve()
     out_dir = args.out.resolve()
+    contact_config = args.contact_config.resolve() if args.contact_config else _default_contact_config()
 
     if not workspace.exists():
         print(f"error: workspace not found: {workspace}", file=sys.stderr)
         return 2
 
-    review_data, clip_plan = build_review_data(workspace=workspace, tag_id=args.tag_id)
+    review_data, clip_plan = build_review_data(
+        workspace=workspace,
+        tag_id=args.tag_id,
+        contact_config=contact_config,
+        include_spectrograms=args.include_spectrograms,
+    )
     summary = write_outputs(
         workspace=workspace,
         out_dir=out_dir,
