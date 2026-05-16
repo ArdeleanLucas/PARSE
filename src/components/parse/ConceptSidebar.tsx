@@ -7,7 +7,7 @@ import type { ConceptSurveyLinks, ConceptSurveyLinksByConcept, SpeakerConceptSur
 import { conceptMatchesElicitedKeys } from '../../lib/speakerElicitedConcepts';
 import { resolveSurveyLinksForSpeaker, surveyRowIdsForConcept, type SpeakerSurveyLinkBucket } from '../../lib/surveyLinksForSpeaker';
 import { SurveyBadge } from '../shared/SurveyBadge';
-import { defaultSurveySettings, normalizeSurveyId, resolveConceptSurvey, SURVEY_CHIP_CLASSES, surveyChoiceKeysForConcept, surveyLabelFor } from '../../lib/surveyOverlap';
+import { defaultSurveySettings, normalizeSurveyId, resolveConceptSurvey, surveyLabelFor } from '../../lib/surveyOverlap';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
 export type ConceptSortParent = 'concept' | 'source';
@@ -34,6 +34,7 @@ export interface SidebarConcept {
 }
 
 type SidebarVariant = NonNullable<SidebarConcept['variants']>[number];
+const BUCKET_KEY_SEPARATOR = String.fromCharCode(0);
 type SurveyLinkEditorMode = 'edit' | 'add';
 
 interface SurveyLinkEditorState {
@@ -570,7 +571,6 @@ export function ConceptSidebar({
           const badge = resolvedSurvey.surveyId && resolvedSurvey.sourceItem
             ? `${resolvedSurveyLabel} ${resolvedSurvey.sourceItem}`
             : (resolvedSurvey.sourceItem || fallbackBadge || `#${concept.id}`);
-          const surveyChoices = speakerBuckets.length > 0 ? speakerBuckets.map((bucket) => bucket.surveyId).sort() : surveyChoiceKeysForConcept(surveyConcept);
           const variants = concept.variants ?? [];
           const visibleVariants = isConceptVariantVisibleInSidebar ? variants.filter((variant) => isConceptVariantVisibleInSidebar(concept, variant)) : variants;
           const hasVariants = visibleVariants.length > 1;
@@ -665,27 +665,6 @@ export function ConceptSidebar({
                   onPromote={onPromoteSurveyPrimary ? (next) => onPromoteSurveyPrimary(String(concept.id), next.surveyId, next.sourceItem) : undefined}
                 />
               </div>
-              {surveyChoices.length > 1 && activeSpeaker && onSurveyChoiceChange && (
-                <div className="flex flex-wrap gap-1 px-7 pb-1.5">
-                  {surveyChoices.map((surveyId) => {
-                    const sourceItem = resolvedSurvey.availableSurveys?.[surveyId] ?? '';
-                    const label = surveyLabelFor(surveyId, surveySettings);
-                    const selected = resolvedSurvey.surveyId === surveyId;
-                    const displayColor = (surveySettings[surveyId] ?? defaultSurveySettings(surveyId)).display_color;
-                    return (
-                      <button
-                        key={surveyId}
-                        type="button"
-                        aria-label={selected ? `Current survey ${label} ${sourceItem}` : `Switch ${concept.name} to ${label} ${sourceItem}`}
-                        onClick={() => onSurveyChoiceChange(activeSpeaker, surveyConcept.key, surveyId)}
-                        className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold ring-1 ${selected ? (surveyColorCodingEnabled ? (SURVEY_CHIP_CLASSES[displayColor] ?? SURVEY_CHIP_CLASSES.slate) : 'bg-slate-900 text-white ring-slate-900') : 'bg-white text-slate-500 ring-slate-200 hover:bg-slate-50'}`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
             </div>
           );
         })}
@@ -746,7 +725,7 @@ export function ConceptSidebar({
           )}
           {surveyLinkEditor && surveyLinkEditor.concept.id === contextMenu.concept.id && (() => {
             const buckets = bucketsForConcept(surveyLinkEditor.concept, activeSpeaker, conceptSurveyLinks, speakerConceptSurveyLinks);
-            const selectedBucketKey = surveyLinkEditor.bucket ? `${surveyLinkEditor.bucket.surveyId} ${surveyLinkEditor.bucket.sourceItem}` : '';
+            const selectedBucketKey = surveyLinkEditor.bucket ? `${surveyLinkEditor.bucket.surveyId}${BUCKET_KEY_SEPARATOR}${surveyLinkEditor.bucket.sourceItem}` : '';
             const usedSurveyIds = new Set(buckets.map((bucket) => bucket.surveyId));
             const selectableSurveyIds = surveyLinkEditor.mode === 'add'
               ? surveyLinkChoiceIds(surveyLinkEditor.concept, surveySettings, buckets).filter((surveyId) => !usedSurveyIds.has(surveyId) || surveyId === surveyLinkEditor.surveyId)
@@ -758,7 +737,7 @@ export function ConceptSidebar({
               <div className="text-[10px] font-semibold text-slate-500">Current buckets</div>
               <div className="space-y-1">
                 {buckets.map((bucket) => {
-                  const bucketKey = `${bucket.surveyId} ${bucket.sourceItem}`;
+                  const bucketKey = `${bucket.surveyId}${BUCKET_KEY_SEPARATOR}${bucket.sourceItem}`;
                   const selected = surveyLinkEditor.mode === 'edit' && selectedBucketKey === bucketKey;
                   return (
                     <button

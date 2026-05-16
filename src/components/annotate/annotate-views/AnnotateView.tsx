@@ -78,6 +78,14 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   peaksUrl,
   surveyLabel,
   surveySourceItem,
+  surveyChoices,
+  resolvedSurveyId,
+  availableSurveys,
+  surveySettings,
+  surveyColorCodingEnabled,
+  activeSpeaker,
+  conceptSurveyKey,
+  onSurveyChoiceChange,
 }) => {
   const record = useAnnotationStore((s) => s.records[speaker] ?? null);
   const moveIntervalAcrossTiers = useAnnotationStore((s) => s.moveIntervalAcrossTiers);
@@ -1047,6 +1055,14 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
         totalConcepts={totalConcepts}
         surveyLabel={surveyLabel}
         surveySourceItem={surveySourceItem}
+        surveyChoices={surveyChoices}
+        resolvedSurveyId={resolvedSurveyId}
+        availableSurveys={availableSurveys}
+        surveySettings={surveySettings}
+        surveyColorCodingEnabled={surveyColorCodingEnabled}
+        activeSpeaker={activeSpeaker}
+        conceptSurveyKey={conceptSurveyKey}
+        onSurveyChoiceChange={onSurveyChoiceChange}
         onPrev={onPrev}
         onNext={onNext}
       />

@@ -1,4 +1,4 @@
-import type { AnnotationInterval, AnnotationRecord } from "../../../api/types";
+import type { AnnotationInterval, AnnotationRecord, SurveySettingsMap } from "../../../api/types";
 
 export interface ConceptVariantIdentity {
   conceptKey: string;
@@ -25,6 +25,14 @@ export interface AnnotateViewProps {
   peaksUrl?: string;
   surveyLabel?: string;
   surveySourceItem?: string;
+  surveyChoices?: string[];
+  resolvedSurveyId?: string;
+  availableSurveys?: Record<string, string>;
+  surveySettings?: SurveySettingsMap;
+  surveyColorCodingEnabled?: boolean;
+  activeSpeaker?: string;
+  conceptSurveyKey?: string;
+  onSurveyChoiceChange?: (speaker: string, conceptKey: string, surveyId: string) => void;
 }
 
 export interface AnnotationPanelProps {

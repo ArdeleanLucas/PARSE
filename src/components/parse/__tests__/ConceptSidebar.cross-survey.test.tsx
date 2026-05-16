@@ -202,8 +202,8 @@ describe('ConceptSidebar cross-survey linking', () => {
 
     expect(row.textContent).toContain('KLQ 4.2');
     expect(row.textContent).not.toContain('JBIL 170');
-    const selectedKlqChip = within(row).getByRole('button', { name: /Current survey KLQ 4\.2/i });
-    expect(selectedKlqChip.className).toContain('bg-slate-900');
+    expect(within(row).getByRole('button', { name: /Switch survey for small from KLQ 4\.2 to JBIL 170/i })).toBeTruthy();
+    expect(within(row).queryByRole('button', { name: /Current survey KLQ 4\.2/i })).toBeNull();
   });
 
   it('opens a bucket-aware Change survey ID editor from the row context menu', () => {
@@ -351,8 +351,7 @@ describe('ConceptSidebar cross-survey linking', () => {
     expect(screen.getByText('KLQ 4.9')).toBeTruthy();
   });
 
-  it('renders cycle chips when a single-row concept has a sidecar entry and a legacy primary', () => {
-    const onSurveyChoiceChange = vi.fn();
+  it('keeps the inline SurveyBadge but omits cycle chips when a single-row concept has a sidecar entry and a legacy primary', () => {
     render(
       <ConceptSidebar
         {...baseProps}
@@ -372,17 +371,17 @@ describe('ConceptSidebar cross-survey linking', () => {
         conceptSurveyLinks={{ '44': { jbil: '124' } }}
         speakerConceptSurveyLinks={{}}
         speakerSurveyChoices={{}}
-        onSurveyChoiceChange={onSurveyChoiceChange}
+        onSurveyChoiceChange={vi.fn()}
       />,
     );
 
     const row = screen.getByTestId('concept-row-44');
+    expect(within(row).getByRole('button', { name: /Switch survey for snow from JBIL 124 to KLQ 3\.4/i })).toBeTruthy();
     const chipLabels = within(row)
       .getAllByRole('button')
       .map((button) => button.textContent?.trim())
       .filter((text) => text === 'JBIL' || text === 'KLQ');
-    expect(chipLabels.sort()).toEqual(['JBIL', 'KLQ']);
-    expect(within(row).getByRole('button', { name: /Switch survey for snow from JBIL 124 to KLQ 3\.4/i })).toBeTruthy();
+    expect(chipLabels).toEqual([]);
   });
 
 });
