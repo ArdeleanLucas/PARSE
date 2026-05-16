@@ -1,4 +1,5 @@
 import type { AnnotationInterval, AnnotationRecord } from "../../../api/types";
+import type { SurveyBadgeProps } from "../../shared/SurveyBadge";
 
 export interface ConceptVariantIdentity {
   conceptKey: string;
@@ -15,6 +16,8 @@ export interface Concept {
   mergedVariants?: ConceptVariantIdentity[];
 }
 
+export type AnnotateSurveyBadge = Omit<SurveyBadgeProps, 'conceptId' | 'conceptKey' | 'conceptName' | 'parentActive' | 'variant'>;
+
 export interface AnnotateViewProps {
   concept: Concept;
   speaker: string;
@@ -25,6 +28,7 @@ export interface AnnotateViewProps {
   peaksUrl?: string;
   surveyLabel?: string;
   surveySourceItem?: string;
+  surveyBadge?: AnnotateSurveyBadge;
 }
 
 export interface AnnotationPanelProps {
