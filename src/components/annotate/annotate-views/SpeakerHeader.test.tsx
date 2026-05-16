@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SpeakerHeader } from './SpeakerHeader';
@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 describe('SpeakerHeader survey chips', () => {
-  it('renders one chip per linked survey under the plain survey line', () => {
+  it('renders rich survey chips with source items instead of the plain survey line for multi-survey concepts', () => {
     render(
       <SpeakerHeader
         annotated={false}
@@ -37,9 +37,15 @@ describe('SpeakerHeader survey chips', () => {
       />,
     );
 
-    expect(screen.getByText('Survey').parentElement?.textContent).toContain('Jbil ModalJBIL_100');
-    expect(screen.getByRole('button', { name: 'Current survey Jbil Modal JBIL_100' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Switch rain to Kurdish List KLQ_1.10' })).toBeTruthy();
+    const chipRow = screen.getByTestId('annotate-survey-chip-row');
+    expect(within(chipRow).getByText('Survey')).toBeTruthy();
+    const current = screen.getByRole('button', { name: 'Current survey Jbil Modal JBIL_100' });
+    const alternate = screen.getByRole('button', { name: 'Switch rain to Kurdish List KLQ_1.10' });
+    expect(current.textContent).toContain('Jbil Modal');
+    expect(current.textContent).toContain('JBIL_100');
+    expect(alternate.textContent).toContain('Kurdish List');
+    expect(alternate.textContent).toContain('KLQ_1.10');
+    expect(screen.queryByText('Jbil Modal', { selector: 'span.text-slate-600' })).toBeNull();
   });
 
   it('clicking a non-selected chip fires onSurveyChoiceChange with speaker, concept key, and survey id', () => {
