@@ -14,9 +14,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 
 try:
-    from .provider import Segment, WordSpan, get_ortho_provider, get_provider, load_ai_config
+    from .provider import Segment, WordSpan, confidence_value, get_ortho_provider, get_provider, load_ai_config
 except ImportError:
-    from provider import Segment, WordSpan, get_ortho_provider, get_provider, load_ai_config  # type: ignore
+    from provider import Segment, WordSpan, confidence_value, get_ortho_provider, get_provider, load_ai_config  # type: ignore
 
 try:
     from .ipa_transcribe import MIN_TRANSCRIBE_SLICE_SEC
@@ -214,7 +214,7 @@ def run_stt_pipeline(
         start = float(segment.get("start", 0.0) or 0.0)
         end = float(segment.get("end", start) or start)
         text = str(segment.get("text", "") or "").strip()
-        confidence = clamp_confidence(float(segment.get("confidence", 0.0) or 0.0))
+        confidence = clamp_confidence(confidence_value(segment.get("confidence"), 0.0))
 
         out_segment: STTOutputSegment = {
             "start": start,
@@ -244,6 +244,14 @@ def run_stt_pipeline(
 
 def _join_segment_text(segments: List[Segment]) -> str:
     return " ".join(str(segment.get("text", "") or "").strip() for segment in segments if str(segment.get("text", "") or "").strip()).strip()
+
+
+def _interval_result_from_segments(segments: List[Segment]) -> dict[str, Any]:
+    text = _join_segment_text(segments)
+    for segment in segments:
+        if str(segment.get("text", "") or "").strip() and segment.get("confidence") is not None:
+            return {"text": text, "confidence": segment.get("confidence")}
+    return {"text": text}
 
 
 def _slice_audio_to_temp_wav(audio_path: Path, start: float, end: float) -> Path:
@@ -278,7 +286,7 @@ def run_ortho_on_interval(
     provider: Optional[Any] = None,
     device: Optional[str] = None,
     allow_wsl_cuda: bool = False,
-) -> str:
+) -> Any:
     """Run orthographic transcription on one bounded [start, end] interval.
 
     The helper prefers PARSE's ORTH provider and its in-memory segmented API
@@ -319,7 +327,7 @@ def run_ortho_on_interval(
             sample_rate=DEFAULT_SAMPLE_RATE,
             initial_prompt=None,
         )
-        return _join_segment_text(segments)
+        return _interval_result_from_segments(segments)
 
     try:
         segments = provider_obj.transcribe(
@@ -330,7 +338,7 @@ def run_ortho_on_interval(
             end_sec=end_f,
             initial_prompt=None,
         )
-        return _join_segment_text(segments)
+        return _interval_result_from_segments(segments)
     except TypeError as exc:
         if "start_sec" not in str(exc) and "end_sec" not in str(exc) and "unexpected" not in str(exc):
             raise
@@ -338,7 +346,7 @@ def run_ortho_on_interval(
     temp_path: Optional[Path] = None
     try:
         temp_path = _slice_audio_to_temp_wav(path, start_f, end_f)
-        return _join_segment_text(
+        return _interval_result_from_segments(
             provider_obj.transcribe(
                 audio_path=temp_path,
                 language=language,

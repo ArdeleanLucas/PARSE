@@ -6,6 +6,10 @@ export interface LaneInterval {
   start: number;
   end: number;
   text: string;
+  confidence_source?: "avg_logprob" | "constant_fallback";
+  confidence_n_tokens?: number;
+  confidenceSource?: "avg_logprob" | "constant_fallback";
+  confidenceNTokens?: number;
   manuallyAdjusted?: boolean;
 }
 
@@ -148,6 +152,9 @@ export function TranscriptionLaneRow({
               const isEditing =
                 isEditable && editing?.kind === strip.kind && editing?.index === sourceIdx;
               const ivColor = strip.intervalColors?.[absIdx] ?? color;
+              const confidenceSource = iv.confidence_source ?? iv.confidenceSource;
+              const confidenceNTokens = iv.confidence_n_tokens ?? iv.confidenceNTokens;
+              const isFallbackConfidence = confidenceSource === "constant_fallback";
 
               const baseStyle: React.CSSProperties = {
                 left,
@@ -222,9 +229,18 @@ export function TranscriptionLaneRow({
                         }`
                       : `${iv.start.toFixed(3)}–${iv.end.toFixed(3)} s · ${iv.text}`
                   }
-                  aria-label={`${strip.label} ${iv.start.toFixed(2)}s${iv.text ? `: ${iv.text}` : ""}`}
+                  aria-label={`${strip.label} ${iv.start.toFixed(2)}s${iv.text ? `: ${iv.text}` : ""}${isFallbackConfidence ? " fallback confidence" : ""}`}
                 >
                   {showLabel ? <span className="truncate">{iv.text}</span> : null}
+                  {isFallbackConfidence ? (
+                    <span
+                      data-testid="confidence-fallback-marker"
+                      className="ml-1 rounded bg-amber-100 px-1 text-[8px] font-semibold text-amber-800 ring-1 ring-amber-300"
+                      title={`Confidence fell back to a constant; generated-token count ${confidenceNTokens ?? 0}`}
+                    >
+                      fallback confidence
+                    </span>
+                  ) : null}
                   {iv.manuallyAdjusted && (
                     <span
                       aria-hidden

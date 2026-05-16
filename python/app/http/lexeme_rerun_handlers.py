@@ -16,6 +16,7 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
+from ai.provider import confidence_wire_fields
 from ai.speaker_locks import SpeakerLockError, acquire_speaker_lock as _acquire_speaker_lock, release_speaker_lock as _release_speaker_lock
 from ai.ipa_transcribe import MIN_TRANSCRIBE_SLICE_SEC
 from concept_registry import concept_label_key, load_concept_registry
@@ -60,7 +61,7 @@ AnnotationPathResolver = Callable[[str], Path]
 JsonAnyReader = Callable[[Path], Any]
 AnnotationNormalizer = Callable[[Any, str], dict[str, Any]]
 AudioPathResolver = Callable[[str], Path]
-IntervalRunner = Callable[..., str]
+IntervalRunner = Callable[..., Any]
 LockAcquire = Callable[[str, Path], Path]
 LockRelease = Callable[[str, Path], None]
 JobCreator = Callable[[str, dict[str, Any]], str]
@@ -313,7 +314,7 @@ def _run_lexeme_rerun_plan_sync(
     started = time.monotonic()
     try:
         audio_path = resolve_audio_path_for_speaker(plan.speaker)
-        text = runner(audio_path=audio_path, start=plan.padded_start, end=plan.padded_end, language=plan.language)
+        runner_result = runner(audio_path=audio_path, start=plan.padded_start, end=plan.padded_end, language=plan.language)
     except LexemeRerunSubprocessError as exc:
         if not subprocess_errors_as_response:
             details = _subprocess_error_payload(exc)
@@ -331,17 +332,25 @@ def _run_lexeme_rerun_plan_sync(
             except Exception:
                 logger.warning("failed to release lexeme rerun speaker lock for %s", plan.speaker, exc_info=True)
 
+    if isinstance(runner_result, Mapping):
+        text_raw = runner_result.get("text") or runner_result.get(plan.tier_key) or runner_result.get("transcript") or ""
+        confidence_raw = runner_result.get("confidence")
+    else:
+        text_raw = runner_result
+        confidence_raw = None
+
+    payload: dict[str, Any] = {
+        plan.tier_key: str(text_raw or "").strip(),
+        "interval": {"start": plan.start, "end": plan.end},
+        "source": "rerun",
+        "jobId": None,
+    }
+    if confidence_raw is not None:
+        payload.update(confidence_wire_fields(confidence_raw))
+
     elapsed_ms = (time.monotonic() - started) * 1000.0
     logger.info("lexeme %s rerun completed in %.1f ms", plan.tier_key, elapsed_ms)
-    return JsonResponseSpec(
-        status=HTTPStatus.OK,
-        payload={
-            plan.tier_key: str(text or "").strip(),
-            "interval": {"start": plan.start, "end": plan.end},
-            "source": "rerun",
-            "jobId": None,
-        },
-    )
+    return JsonResponseSpec(status=HTTPStatus.OK, payload=payload)
 
 
 def _build_lexeme_rerun_job_response(

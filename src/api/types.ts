@@ -3,10 +3,15 @@
 // No component may import from the Python backend directly — always use client.ts.
 import type { KnownErrorCode } from "./contracts/project-config-and-pipeline-state";
 
+export type ConfidenceSource = "avg_logprob" | "constant_fallback";
+
 export interface AnnotationInterval {
   start: number; // seconds — IMMUTABLE once written
   end: number; // seconds — IMMUTABLE once written
   text: string;
+  confidence?: number;
+  confidence_source?: ConfidenceSource;
+  confidence_n_tokens?: number;
   concept_id?: string;
   import_index?: number;
   audition_prefix?: string;
@@ -110,6 +115,9 @@ export interface LexemeRerunOrthoResponse {
   ortho: string;
   interval: LexemeRerunInterval;
   source: "rerun";
+  confidence?: number;
+  confidence_source?: ConfidenceSource;
+  confidence_n_tokens?: number;
 }
 
 export interface AnnotationRecord {

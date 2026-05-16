@@ -113,6 +113,18 @@ describe("TranscriptionLaneRow", () => {
     expect(screen.getByText("Run forced-align first")).toBeTruthy();
   });
 
+  it("surfaces constant-fallback confidence provenance on intervals", () => {
+    renderLaneRow({
+      strip: makeStrip({
+        intervals: [{ start: 1, end: 2, text: "fallback", confidenceSource: "constant_fallback", confidenceNTokens: 0 }],
+      }),
+    });
+
+    const marker = screen.getByTestId("confidence-fallback-marker");
+    expect(marker.textContent).toBe("fallback confidence");
+    expect(screen.getByRole("button", { name: /fallback confidence/i })).toBeTruthy();
+  });
+
   it("delegates interval clicks and drag starts through its callbacks", () => {
     const onSeekInterval = vi.fn();
     const onBeginDrag = vi.fn();

@@ -3191,14 +3191,19 @@ def _compute_lexeme_rerun(
         subprocess_errors_as_response=False,
     )
     _set_compute_progress(job_id, 95.0, message='Finalising')
-    text = str((response.payload or {}).get(tier_key) or '').strip()
-    return {
+    response_payload = response.payload or {}
+    text = str(response_payload.get(tier_key) or '').strip()
+    result = {
         tier_key: text,
         'tier': tier_key,
         'text': text,
         'interval': {'start': plan.start, 'end': plan.end},
         'source': 'rerun',
     }
+    for confidence_key in ('confidence', 'confidence_source', 'confidence_n_tokens'):
+        if confidence_key in response_payload:
+            result[confidence_key] = response_payload[confidence_key]
+    return result
 
 
 def _compute_lexeme_rerun_ipa(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
