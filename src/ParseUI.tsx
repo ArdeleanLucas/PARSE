@@ -1299,6 +1299,7 @@ export function ParseUI() {
     ? surveyLabelFor(activeResolvedSurvey.surveyId, surveySettings)
     : undefined;
   const activeSurveySourceItem = activeResolvedSurvey.sourceItem || undefined;
+  const activeSurveyChoices = Object.keys(activeResolvedSurvey.availableSurveys ?? {}).sort();
   const referenceFormLists = useMemo(
     () => resolveReferenceFormLists(enrichmentData, silConcepts, concept, primaryContactCodes, contactLanguageScripts),
     [concept, enrichmentData, silConcepts, primaryContactCodes, contactLanguageScripts],
@@ -2077,6 +2078,14 @@ export function ParseUI() {
               peaksUrl={selectedSpeakers[0] ? resolveAssetUrl(`/peaks/${selectedSpeakers[0]}.json`) : undefined}
               surveyLabel={activeSurveyLabel}
               surveySourceItem={activeSurveySourceItem}
+              surveyChoices={activeSurveyChoices}
+              resolvedSurveyId={activeResolvedSurvey.surveyId}
+              availableSurveys={activeResolvedSurvey.availableSurveys}
+              surveySettings={surveySettings}
+              surveyColorCodingEnabled={surveyColorCodingEnabled}
+              activeSpeaker={selectedSpeakers[0]}
+              conceptSurveyKey={activeResolvedSurvey.conceptKey}
+              onSurveyChoiceChange={handleSurveyChoiceChange}
             />
             <AIChat
               height={aiHeight}

@@ -1,3 +1,5 @@
+import type { SurveySettingsMap } from "../../../api/types";
+import { defaultSurveySettings, SURVEY_CHIP_CLASSES, surveyLabelFor } from "../../../lib/surveyOverlap";
 import type { Concept } from "./types";
 
 interface SpeakerHeaderProps {
@@ -8,6 +10,14 @@ interface SpeakerHeaderProps {
   totalConcepts: number;
   surveyLabel?: string;
   surveySourceItem?: string;
+  surveyChoices?: string[];
+  resolvedSurveyId?: string;
+  availableSurveys?: Record<string, string>;
+  surveySettings?: SurveySettingsMap;
+  surveyColorCodingEnabled?: boolean;
+  activeSpeaker?: string;
+  conceptSurveyKey?: string;
+  onSurveyChoiceChange?: (speaker: string, conceptKey: string, surveyId: string) => void;
   onPrev: () => void;
   onNext: () => void;
 }
@@ -20,9 +30,18 @@ export function SpeakerHeader({
   totalConcepts,
   surveyLabel,
   surveySourceItem,
+  surveyChoices,
+  resolvedSurveyId,
+  availableSurveys,
+  surveySettings,
+  surveyColorCodingEnabled = false,
+  activeSpeaker,
+  conceptSurveyKey,
+  onSurveyChoiceChange,
   onPrev,
   onNext,
 }: SpeakerHeaderProps) {
+  const settings = surveySettings ?? {};
   return (
     <section className="px-8 pt-6">
       <div className="mx-auto max-w-4xl">
@@ -64,6 +83,27 @@ export function SpeakerHeader({
                 <span className="text-slate-400">{surveySourceItem}</span>
               </div>
             ) : null}
+            {surveyChoices && surveyChoices.length > 1 && activeSpeaker && conceptSurveyKey && onSurveyChoiceChange && (
+              <div className="mt-1 flex flex-wrap gap-1" data-testid="annotate-survey-chip-row">
+                {surveyChoices.map((surveyId) => {
+                  const sourceItem = availableSurveys?.[surveyId] ?? '';
+                  const label = surveyLabelFor(surveyId, settings);
+                  const selected = resolvedSurveyId === surveyId;
+                  const displayColor = (settings[surveyId] ?? defaultSurveySettings(surveyId)).display_color;
+                  return (
+                    <button
+                      key={surveyId}
+                      type="button"
+                      aria-label={selected ? `Current survey ${label} ${sourceItem}` : `Switch ${concept.name} to ${label} ${sourceItem}`}
+                      onClick={() => onSurveyChoiceChange(activeSpeaker, conceptSurveyKey, surveyId)}
+                      className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold ring-1 ${selected ? (surveyColorCodingEnabled ? (SURVEY_CHIP_CLASSES[displayColor] ?? SURVEY_CHIP_CLASSES.slate) : 'bg-slate-900 text-white ring-slate-900') : 'bg-white text-slate-500 ring-slate-200 hover:bg-slate-50'}`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
           <button
             onClick={onNext}

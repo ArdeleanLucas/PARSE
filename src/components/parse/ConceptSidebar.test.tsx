@@ -830,8 +830,59 @@ describe('ConceptSidebar', () => {
     expect(onUnmerge).toHaveBeenCalledWith(expect.objectContaining({ id: 1, name: 'head' }));
   });
 
-  it('renders Approach A survey pills and sends per-speaker choice flips', () => {
-    const onSurveyChoiceChange = vi.fn();
+  it('keeps inline SurveyBadge text for single-survey and multi-survey rows', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="source"
+        conceptSub="1n"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={[
+          {
+            id: 7,
+            key: 'rain',
+            name: 'rain',
+            tag: 'untagged' as const,
+            sourceItem: 'KLQ_1.10',
+            sourceSurvey: 'klq',
+            surveys: { klq: 'KLQ_1.10', jbil: 'JBIL_100' },
+          },
+          {
+            id: 8,
+            key: 'snow',
+            name: 'snow',
+            tag: 'untagged' as const,
+            sourceItem: 'KLQ_1.11',
+            sourceSurvey: 'klq',
+          },
+        ]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={7}
+        onConceptSelect={vi.fn()}
+        activeSpeaker="Fail01"
+        surveySettings={{
+          klq: { display_label: 'Kurdish List', display_color: 'slate' },
+          jbil: { display_label: 'Jbil Modal', display_color: 'slate' },
+        }}
+        speakerSurveyChoices={{ Fail01: { rain: 'jbil' } }}
+        onSurveyChoiceChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('concept-row-7').textContent ?? '').toContain('Jbil Modal JBIL_100');
+    expect(screen.getByTestId('concept-row-8').textContent ?? '').toContain('Kurdish List KLQ_1.11');
+  });
+
+  it('does not render the multi-survey switch chip row under sidebar rows', () => {
     render(
       <ConceptSidebar
         query=""
@@ -865,15 +916,12 @@ describe('ConceptSidebar', () => {
           jbil: { display_label: 'Jbil Modal', display_color: 'slate' },
         }}
         speakerSurveyChoices={{ Fail01: { rain: 'jbil' } }}
-        onSurveyChoiceChange={onSurveyChoiceChange}
+        onSurveyChoiceChange={vi.fn()}
       />,
     );
 
     expect(screen.getByTestId('concept-row-7').textContent ?? '').toContain('Jbil Modal JBIL_100');
-
-    fireEvent.click(screen.getByRole('button', { name: /Switch rain to Kurdish List KLQ_1.10/i }));
-
-    expect(onSurveyChoiceChange).toHaveBeenCalledWith('Fail01', 'rain', 'klq');
+    expect(screen.queryByRole('button', { name: /Switch rain to Kurdish List KLQ_1.10/i })).toBeNull();
   });
 
   it('lets users click the visible survey badge to flip to the next overlapping survey', () => {
