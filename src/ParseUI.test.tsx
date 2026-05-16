@@ -875,6 +875,37 @@ describe("ParseUI", () => {
   });
 
 
+  it('honors speakerSurveyChoices override so user toggle flips the resolved chip', async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      ...mockConfig!,
+      speakers: ["Qasr01"],
+      concepts: [
+        { id: "220", label: "four", source_item: "4", source_survey: "jbil", surveys: { jbil: "4" } },
+      ],
+      concept_survey_links: { "220": { klq: "13.4" } },
+      speaker_survey_choices: { Qasr01: { "220": "klq" } },
+      survey_settings: {
+        jbil: { display_label: "JBIL", display_color: "violet" },
+        klq: { display_label: "KLQ", display_color: "emerald" },
+      },
+      survey_color_coding_enabled: true,
+    };
+    mockRecords = {
+      Qasr01: makeRecord("Qasr01", [
+        { conceptText: "four", conceptId: "220", ipa: "tʃwar", ortho: "four", start: 1, end: 2 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    const chipRow = await screen.findByTestId('annotate-survey-chip-row');
+    expect(within(chipRow).getAllByRole('button')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Current survey KLQ 13.4' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Switch four to JBIL 4' })).toBeTruthy();
+  });
+
+
   it('renders survey chips from configStore.load-merged canonical and sidecar surveys for hair', async () => {
     window.localStorage.setItem("parse.currentMode", "annotate");
     await hydrateMockConfigThroughRealConfigStore(
