@@ -1284,7 +1284,10 @@ export function ParseUI() {
       Object.fromEntries(rowIds.map((rowId) => [rowId, { ...(concept.surveys ?? {}), ...(conceptSurveyLinks[rowId] ?? {}) }])),
       speakerConceptSurveyLinks,
     );
-    const bucket = buckets[0];
+    const chosenSurveyId = selectedSpeakers[0]
+      ? speakerSurveyChoices?.[selectedSpeakers[0]]?.[concept.key]
+      : undefined;
+    const bucket = (chosenSurveyId ? buckets.find((b) => b.surveyId === chosenSurveyId) : undefined) ?? buckets[0];
     if (!bucket) return resolveConceptSurvey(concept, selectedSpeakers[0] ?? null, speakerSurveyChoices, surveySettings);
     const display = surveySettings[bucket.surveyId] ?? { display_label: bucket.surveyId.toLocaleUpperCase(), display_color: 'slate' };
     return {

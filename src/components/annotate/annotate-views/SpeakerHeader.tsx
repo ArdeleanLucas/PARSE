@@ -91,7 +91,11 @@ export function SpeakerHeader({
                         type="button"
                         aria-label={selected ? `Current survey ${label} ${sourceItem}` : `Switch ${concept.name} to ${label} ${sourceItem}`}
                         onClick={() => onSurveyChoiceChange(activeSpeaker, conceptSurveyKey, surveyId)}
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 font-mono ${selected ? (surveyColorCodingEnabled ? (SURVEY_CHIP_CLASSES[displayColor] ?? SURVEY_CHIP_CLASSES.slate) : 'bg-slate-900 text-white ring-slate-900') : 'bg-white text-slate-500 ring-slate-200 hover:bg-slate-50'}`}
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold font-mono transition ${
+                          surveyColorCodingEnabled
+                            ? (SURVEY_CHIP_CLASSES[displayColor] ?? SURVEY_CHIP_CLASSES.slate)
+                            : (selected ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-500 ring-slate-200 hover:bg-slate-50')
+                        } ${selected ? 'ring-2' : 'ring-1 opacity-60 hover:opacity-100'}`}
                       >
                         {label}&nbsp;<span className="font-normal opacity-80">{sourceItem}</span>
                       </button>
