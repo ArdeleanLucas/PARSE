@@ -22,7 +22,9 @@ import { useParseUIPipeline } from './hooks/useParseUIPipeline';
 import { resolveSurveyLinksForSpeaker, surveyRowIdsForConcept } from './lib/surveyLinksForSpeaker';
 import {
   resolveConceptSurvey,
+  surveyChoiceKeysForConcept,
   surveyLabelFor,
+  surveyLinksForConcept,
 } from './lib/surveyOverlap';
 import {
   conceptMatchesIntervalText,
@@ -1299,7 +1301,27 @@ export function ParseUI() {
     ? surveyLabelFor(activeResolvedSurvey.surveyId, surveySettings)
     : undefined;
   const activeSurveySourceItem = activeResolvedSurvey.sourceItem || undefined;
-  const activeSurveyChoices = Object.keys(activeResolvedSurvey.availableSurveys ?? {}).sort();
+  const activeHasSpeakerAwareSurveyLinks = Object.keys(conceptSurveyLinks ?? {}).length > 0 || Object.keys(speakerConceptSurveyLinks ?? {}).length > 0;
+  const activeSpeakerBuckets = useMemo(() => {
+    if (!activeHasSpeakerAwareSurveyLinks) return [];
+    const rowIds = surveyRowIdsForConcept(concept);
+    const fallbackLinks = surveyLinksForConcept(concept);
+    const globalLinks = Object.fromEntries(
+      rowIds.map((rowId) => [rowId, { ...fallbackLinks, ...(conceptSurveyLinks[rowId] ?? {}) }]),
+    );
+    return resolveSurveyLinksForSpeaker(
+      rowIds,
+      selectedSpeakers[0] ?? null,
+      globalLinks,
+      speakerConceptSurveyLinks,
+    );
+  }, [activeHasSpeakerAwareSurveyLinks, concept, conceptSurveyLinks, selectedSpeakers, speakerConceptSurveyLinks]);
+  const activeSurveyChoices = activeSpeakerBuckets.length > 0
+    ? activeSpeakerBuckets.map((bucket) => bucket.surveyId).sort()
+    : surveyChoiceKeysForConcept(concept);
+  const activeAvailableSurveys = activeSpeakerBuckets.length > 0
+    ? Object.fromEntries(activeSpeakerBuckets.map((bucket) => [bucket.surveyId, bucket.sourceItem]))
+    : surveyLinksForConcept(concept);
   const referenceFormLists = useMemo(
     () => resolveReferenceFormLists(enrichmentData, silConcepts, concept, primaryContactCodes, contactLanguageScripts),
     [concept, enrichmentData, silConcepts, primaryContactCodes, contactLanguageScripts],
@@ -2080,7 +2102,7 @@ export function ParseUI() {
               surveySourceItem={activeSurveySourceItem}
               surveyChoices={activeSurveyChoices}
               resolvedSurveyId={activeResolvedSurvey.surveyId}
-              availableSurveys={activeResolvedSurvey.availableSurveys}
+              availableSurveys={activeAvailableSurveys}
               surveySettings={surveySettings}
               surveyColorCodingEnabled={surveyColorCodingEnabled}
               activeSpeaker={selectedSpeakers[0]}
