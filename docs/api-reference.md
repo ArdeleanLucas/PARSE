@@ -1,6 +1,6 @@
 # API Reference
 
-> Last updated: 2026-05-14
+> Last updated: 2026-05-16
 >
 > This page consolidates the current PARSE HTTP surface and MCP server mode. HTTP routes were cross-checked against `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/*.ts`) and `python/server.py` (thin HTTP orchestrator; route domains live under `python/server_routes/`); MCP tools were cross-checked against `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`).
 
@@ -143,6 +143,8 @@ WebSocket streaming is additive. Clients can continue polling `/api/stt/status`,
 Audition marker CSV import details live in [Audition CSV speaker import](runtime/audition-csv-import.md). It preserves CSV row order and cue timestamps, resolves labels to integer PARSE concept ids before allocating new ids, writes concept + `ortho_words` intervals with `import_index` / `audition_prefix` trace metadata, accepts bracket and bare/malformed-prefix rows, can join a companion `commentsCsv` upload into `parse-enrichments.json` lexeme notes by row index, and deliberately leaves `ortho`, `ipa`, and `bnd` for downstream jobs.
 
 Single-interval lexeme rerun endpoints (`/api/lexeme/run_ortho`, `/api/lexeme/run_ipa`) are job-tracked by default: clients should poll the returned `jobId` through the compute job APIs, and use `async=false` only for deprecated compatibility with the legacy synchronous result shape. The tagged batch endpoint (`/api/lexemes/rerun-by-tag`) follows the same default job-tracked rule. All rerun paths validate speaker/concept existence, reject intervals longer than 60 seconds, widen only the acoustic window by `pad`, and report the original selected `start`/`end` in per-interval responses so callers do not accidentally retime data just because they requested more acoustic context.
+
+Successful ORTH result entries may include the confidence triplet defined in OpenAPI component `LexemeRerunByTagResultEntry`: `confidence` (legacy float), `confidence_source` (`"avg_logprob"` or `"constant_fallback"`), and `confidence_n_tokens` (non-negative integer lexical-token count excluding Whisper special tokens).
 
 `POST /api/concepts/{conceptId}/duplicate` mutates `concepts.csv`, not annotation intervals. It refuses non-numeric ids and missing concepts, and 409s only when no free variant suffix is available (`A`–`Z` exhausted for the source item). The first call on a bare row rewrites the original to `X (A)` and appends `X (B)`; subsequent calls on any row sharing the same `source_item` append the next free `(C)`, `(D)`, … so n-ary variants are produced by repeated calls rather than by a single batched request. The backend writes a `concepts.csv.bak-*-pre-duplicate-<id>` backup before replacing the CSV, restores the prewrite bytes if the write fails, and returns `{ primary, sibling }` (the renamed source row plus the newly appended row) for frontend refresh.
 

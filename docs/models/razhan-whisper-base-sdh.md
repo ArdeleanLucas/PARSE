@@ -26,27 +26,25 @@ The provider is selected by `ortho.backend` in `config/ai_config.json` — `"hf"
 
 ## Configuration
 
+Config schema was sectioned in PR #494. Legacy flat `ortho` configs must be migrated before PARSE starts: run `python python/tools/migrate_ai_config_ortho.py --workspace <path>` for a dry-run, then add `--apply` to write. The migrator creates a timestamped `ai_config.json.bak-…` backup before changing the local file.
+
 Block in `config/ai_config.json`:
 
 ```json
 "ortho": {
   "backend": "hf",
-  "model_path": "razhan/whisper-base-sdh",
-  "language": "sd",
-  "device": "cuda",
-  "compute_type": "float16",
-  "vad_filter": true,
-  "vad_parameters": {
-    "min_silence_duration_ms": 500,
-    "threshold": 0.35
+  "model": {"repo_id": "razhan/whisper-base-sdh", "device": "cuda"},
+  "generation": {
+    "language": "sd",
+    "condition_on_prev_tokens": false,
+    "compression_ratio_threshold": 1.8,
+    "no_repeat_ngram_size": 3,
+    "repetition_penalty": 1.2
   },
-  "condition_on_previous_text": false,
-  "compression_ratio_threshold": 1.8,
-  "no_repeat_ngram_size": 3,
-  "repetition_penalty": 1.2,
-  "initial_prompt": "",
-  "refine_lexemes": false,
-  "provider": "faster-whisper"
+  "decoding": {
+    "initial_prompt": "",
+    "refine_lexemes": false
+  }
 }
 ```
 
@@ -54,18 +52,18 @@ Knob-by-knob:
 
 | Knob | Default | Effect | Notes |
 |---|---|---|---|
-| `backend` | `hf` | Selects the provider class (`hf` = HuggingFace Transformers, `faster-whisper` = CT2 / faster-whisper). | The `hf` backend is what receives empirical attention here. The `faster-whisper` backend exists for parity testing and is kept aligned in default behavior. |
-| `model_path` | `razhan/whisper-base-sdh` | HF repo id (or local HF-format directory). | A CT2-format directory is detected and rejected here — it belongs only on the faster-whisper backend. |
-| `language` | `sd` | Whisper language code. Auto-mapped to `fa` for the underlying tokenizer. | Override per-call via the `language` kwarg on the provider's transcribe methods. |
-| `device` | `cuda` | `cuda` / `cuda:0` / `cpu`. | The provider normalizes `cuda` → `cuda:0`. |
-| `compute_type` | `float16` | Legacy faster-whisper knob; the HF backend ignores it (logs `"HFWhisperProvider ignoring legacy faster-whisper options"`). | Safe to leave set; documents intent for the CT2 backend if you toggle. |
-| `vad_filter`, `vad_parameters` | `true`, `{ms: 500, threshold: 0.35}` | Legacy faster-whisper VAD trim. The HF backend ignores both; VAD trimming is not applied on this backend today. | If clip-edge silence becomes a problem on the HF backend, see "Known limitations". |
-| `condition_on_previous_text` | `false` | Whisper's "condition the next chunk on the previously generated text" feature. False is correct for short-clip ORTH — leaking the previous chunk's text causes loops on clip boundaries. | |
-| `compression_ratio_threshold` | `1.8` | Whisper long-form fallback threshold; rejects high-compression hallucinations and retries with higher temperature. | Only takes effect with `return_timestamps=True` long-form decoding. PARSE does not use long-form mode in single-shot calls today; this knob is silently ignored on the HF backend's per-clip path. |
-| `no_repeat_ngram_size` | `3` | Bans any 3-gram from appearing twice in the output. | Functional on the HF backend's `model.generate` path. |
-| `repetition_penalty` | `1.2` | Logit penalty for repeating tokens. | Functional on the HF backend's `model.generate` path. |
-| `initial_prompt` | `""` (empty after the 2026-05-07 incident; previously had a Kurdish primer) | Text fed as decoder prefix via `processor.get_prompt_ids(...)`. **Caller-controlled per call**: public entry points default to `None` (no seed). Setting this in config is a default for callers that don't override. | See the "Empirical evidence" section below — seeding caused the model to parrot the prompt verbatim on short clips, and incidentally enabled three other defect classes. Default to leaving it empty unless a specific use case requires seeding. |
-| `refine_lexemes` | `false` | Run a second-pass concept-window decode for weak/missing lexemes after full-file ORTH. | Independent of pad / prompt — see `_short_clip_refine_lexemes` for behavior. |
+| `ortho.backend` | `hf` | Selects the provider class (`hf` = Hugging Face Transformers, `faster-whisper` = CT2 / faster-whisper). | The `hf` backend is what receives empirical attention here. The `faster-whisper` backend exists for parity testing and legacy CT2 opt-in. |
+| `ortho.model.repo_id` | `razhan/whisper-base-sdh` | HF repo id or local HF-format directory. | Replaces legacy `model_path`; CT2 directories are still detected and rejected with the same actionable error text because they belong only on the faster-whisper backend. |
+| `ortho.generation.language` | `sd` | Whisper language code. Auto-mapped to `fa` for the underlying tokenizer. | Override per-call via the `language` kwarg on the provider's transcribe methods. |
+| `ortho.model.device` | `cuda` | `cuda` / `cuda:0` / `cpu` / `auto`. | The provider normalizes CUDA requests through the PARSE compute-device resolver. |
+| `compute_type` | — | **Deprecated for HF.** The HF runtime stays FP32 today. | Future fp16 work should be a new MC after the milk/two/that/Khan02-cid-4 quality A/B; the faster-whisper backend still honors this CT2 knob. |
+| `vad_filter`, `vad_parameters` | — | **Deprecated for HF.** Provider-level VAD is gone from the HF path. | If VAD is needed, it belongs in the upstream interval pipeline. The faster-whisper backend still honors these keys when explicitly selected. |
+| `ortho.generation.condition_on_prev_tokens` | `false` | Whisper's "condition the next chunk on the previously generated text" feature. False is correct for short-clip ORTH — leaking the previous chunk's text causes loops on clip boundaries. | Renames legacy `condition_on_previous_text`; the cascade-fix rationale is unchanged. |
+| `ortho.generation.compression_ratio_threshold` | `1.8` | Whisper long-form fallback threshold; rejects high-compression hallucinations and retries with higher temperature when long-form decoding is active. | Owned by `model.generation_config` at provider load. |
+| `ortho.generation.no_repeat_ngram_size` | `3` | Bans any 3-gram from appearing twice in the output. | Functional on the HF backend's `model.generate` path. |
+| `ortho.generation.repetition_penalty` | `1.2` | Logit penalty for repeating tokens. | Functional on the HF backend's `model.generate` path. |
+| `ortho.decoding.initial_prompt` | `""` (empty after the 2026-05-07 incident; previously had a Kurdish primer) | Text fed as decoder prefix via `processor.get_prompt_ids(...)` only when a caller opts in. | See the "Empirical evidence" section below — seeding caused the model to parrot the prompt verbatim on short clips, and incidentally enabled three other defect classes. Default to leaving it empty unless a specific use case requires seeding. |
+| `ortho.decoding.refine_lexemes` | `false` | Run a second-pass concept-window decode for weak/missing lexemes after full-file ORTH. | Independent of pad / prompt — see `_short_clip_refine_lexemes` for behavior. |
 
 The per-call API for ORTH bulk and per-lexeme rerun also accepts a `pad` field with allowed values `{0.0, 0.2, 0.5}` and default `0.2`. This widens the audio window passed to the encoder relative to the user-selected interval. See "Tuning guide" below.
 

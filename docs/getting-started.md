@@ -156,12 +156,11 @@ Then edit the file for your machine.
 
 This controls the main speech-to-text provider.
 
-Current template defaults:
+Portable STT defaults shown in docs:
 
 ```json
 "stt": {
   "provider": "faster-whisper",
-  "model_path": "",
   "language": "ku",
   "device": "cuda",
   "compute_type": "float16",
@@ -169,46 +168,51 @@ Current template defaults:
 }
 ```
 
-Important note: if `config/ai_config.json` is missing entirely, the backend can still start by falling back to built-in defaults, but STT falls back to a generic Whisper `base` model instead of a locally configured Razhan path.
+Important note: if `config/ai_config.json` is missing entirely, the backend can still start by falling back to built-in defaults, but STT falls back to a generic Whisper `base` model instead of a locally configured Razhan path. local_whisper/faster-whisper still supports a machine-local `model_path` in your private config when you need to pin a local model directory.
 
 #### `ortho`
 
-This configures the orthographic transcription path. The tracked example now keeps **Razhan** as the canonical Southern Kurdish source model while defaulting ORTH to the Hugging Face Transformers backend:
+This configures the orthographic transcription path. Recommended ORTH configs now use the sectioned Hugging Face schema, with **Razhan** as the canonical Southern Kurdish source model:
 
 ```json
 "ortho": {
   "backend": "hf",
-  "model_path": "razhan/whisper-base-sdh",
-  "language": "sd",
-  "device": "cuda",
-  "compute_type": "float16",
-  "beam_size": 5,
-  "vad_filter": true,
-  "vad_parameters": {
-    "min_silence_duration_ms": 500,
-    "threshold": 0.35
+  "model": {"repo_id": "razhan/whisper-base-sdh", "device": "cuda"},
+  "generation": {
+    "language": "sd",
+    "condition_on_prev_tokens": false,
+    "compression_ratio_threshold": 1.8,
+    "no_repeat_ngram_size": 3,
+    "repetition_penalty": 1.2
   },
-  "condition_on_previous_text": false,
-  "compression_ratio_threshold": 1.8,
-  "no_repeat_ngram_size": 3,
-  "repetition_penalty": 1.2,
-  "initial_prompt": "کوڕ و کچ. مال و باخ. ئاو و خاک. هاتن و چوون. ئەم زمانە کوردیە.",
-  "refine_lexemes": false
+  "decoding": {
+    "initial_prompt": "کوڕ و کچ. مال و باخ. ئاو و خاک. هاتن و چوون. ئەم زمانە کوردیە.",
+    "refine_lexemes": false
+  }
 }
 ```
 
-The template also explains the current ORTH runtime contract:
+If you inherited or copied a flat ORTH block, preview the migration first:
 
-- `ortho.backend` defaults to `"hf"`; `ortho.model_path` should be a Hugging Face repo id such as `razhan/whisper-base-sdh` or a local HF-format directory.
-- The legacy CTranslate2 path remains available only by setting `ortho.backend` to `"faster-whisper"` and pointing `ortho.model_path` at a local CT2 conversion directory. CT2-looking directories are rejected when `backend="hf"` so the runtime fails with an actionable config error rather than silently using the wrong backend.
+```bash
+python python/tools/migrate_ai_config_ortho.py --workspace <path>
+```
+
+After reviewing the timestamped `ai_config.json.bak-…` backup path, rerun the same command with `--apply` to write the sectioned schema.
+
+The docs also explain the current ORTH runtime contract:
+
+- `ortho.backend` defaults to `"hf"`; `ortho.model.repo_id` should be a Hugging Face repo id such as `razhan/whisper-base-sdh` or a local HF-format directory.
+- The legacy CTranslate2 path remains available only by setting `ortho.backend` to `"faster-whisper"` and using a local CT2 conversion directory. In that local_whisper/faster-whisper mode, CT2 compatibility keys (`model_path`, `compute_type`, `vad_filter`, `vad_parameters`) still belong to the faster-whisper backend; strict HF configs should not include them.
 - Cite Razhan/DOLMA model usage with [Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*](https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf), Interspeech 2025, doi:[10.21437/Interspeech.2025-2296](https://doi.org/10.21437/Interspeech.2025-2296).
-- `ortho.language` may remain Southern Kurdish metadata (`sd`/`sdh`) in config or annotations; provider-side Whisper decoding normalizes Razhan/DOLMA `sd`/`sdh` requests to `fa` because the fine-tune used `--language="persian"`.
+- `ortho.generation.language` may remain Southern Kurdish metadata (`sd`/`sdh`) in config or annotations; provider-side Whisper decoding normalizes Razhan/DOLMA `sd`/`sdh` requests to `fa` because the fine-tune used `--language="persian"`.
 - HF ORTH uses low-level `WhisperProcessor` + `WhisperForConditionalGeneration.generate()` rather than the high-level pipeline, chunks whole-file transcription into 30-second windows, resamples non-16 kHz in-memory clips to 16 kHz, keeps concept-window timing from caller-supplied windows, and derives confidence from generated-token logprobs.
-- HF ORTH consumes the decode-level anti-cascade guards: `condition_on_previous_text=false`, `compression_ratio_threshold=1.8`, `no_repeat_ngram_size=3`, `repetition_penalty=1.2`, `temperature=0.0`, `do_sample=false`, and prompt ids from `initial_prompt`. `compute_type`, `vad_filter`, and `vad_parameters` remain legacy faster-whisper/CT2 options and are logged as ignored by HF.
-- If `ortho.initial_prompt` is omitted, ORTH uses the built-in Southern Kurdish Arabic-script decoder prime shown above; set `"initial_prompt": ""` explicitly to opt out.
+- ORTH outputs preserve `confidence` as the legacy float and may also include `confidence_source` (`"avg_logprob"` or `"constant_fallback"`) plus `confidence_n_tokens` (lexical-token count used for the avg log-prob, excluding Whisper special tokens).
+- HF ORTH consumes the decode-level anti-cascade guards from `ortho.generation`: `condition_on_prev_tokens=false`, `compression_ratio_threshold=1.8`, `no_repeat_ngram_size=3`, `repetition_penalty=1.2`, deterministic sampling flags, and prompt ids from `ortho.decoding.initial_prompt` only when a caller opts in.
+- If `ortho.decoding.initial_prompt` is omitted, ORTH uses the built-in Southern Kurdish Arabic-script decoder prime shown above; set `"initial_prompt": ""` explicitly to opt out.
 - Concept-window short clips do not seed Whisper with English PARSE concept IDs or glosses, though they can still inherit the built-in Kurdish decoder prime unless explicitly opted out.
 - STT/ORTH/IPA language resolves from request payload first, then `annotation.metadata.language_code`; if both are absent, PARSE warns before allowing auto-detect.
-- `refine_lexemes=true` enables a short-clip Whisper pass after Tier 2 forced alignment, improving `tiers.ortho_words` at the cost of extra runtime and using the same language-resolution guard.
+- `ortho.decoding.refine_lexemes=true` enables a short-clip Whisper pass after Tier 2 forced alignment, improving `tiers.ortho_words` at the cost of extra runtime and using the same language-resolution guard.
 
 #### `ipa` and `wav2vec2`
 
