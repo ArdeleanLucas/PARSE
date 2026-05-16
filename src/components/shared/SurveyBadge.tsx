@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
 import type { SurveySettingsMap } from '../../api/types';
-import { SURVEY_BADGE_TEXT_CLASSES, surveyLabelFor } from '../../lib/surveyOverlap';
+import { normalizeDisplayColor, SURVEY_BADGE_TEXT_CLASSES, surveyLabelFor } from '../../lib/surveyOverlap';
 
 export interface SurveyBadgeProps {
   conceptId: string;
@@ -36,6 +36,7 @@ export function SurveyBadge({
   onPromote,
   className = '',
 }: SurveyBadgeProps) {
+  const normalizedDisplayColor = normalizeDisplayColor(resolvedDisplayColor);
   const resolvedSurveyLabel = surveyLabelFor(resolvedSurveyId, surveySettings);
   const badge = resolvedSurveyId && resolvedSourceItem
     ? `${resolvedSurveyLabel} ${resolvedSourceItem}`
@@ -52,7 +53,7 @@ export function SurveyBadge({
   const canCycleSurveyBadge = !!(activeSpeaker && onCycle && multiSurveyBadge && nextSurveyId);
   const canPromoteSurveyBadge = !!(!activeSpeaker && onPromote && multiSurveyBadge && nextSurveyId);
   const canFlipSurveyBadge = canCycleSurveyBadge || canPromoteSurveyBadge;
-  const surveyBadgeClassName = `font-mono text-[10px] ${surveyColorCodingEnabled && resolvedSurveyId ? (SURVEY_BADGE_TEXT_CLASSES[resolvedDisplayColor] ?? 'text-slate-400') : parentActive ? 'text-indigo-400' : 'text-slate-300'}`;
+  const surveyBadgeClassName = `font-mono text-[10px] ${surveyColorCodingEnabled && resolvedSurveyId ? (SURVEY_BADGE_TEXT_CLASSES[normalizedDisplayColor] ?? 'text-slate-400') : parentActive ? 'text-indigo-400' : 'text-slate-300'}`;
   const mergedClassName = `${surveyBadgeClassName}${className ? ` ${className}` : ''}`;
   const [open, setOpen] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState(0);

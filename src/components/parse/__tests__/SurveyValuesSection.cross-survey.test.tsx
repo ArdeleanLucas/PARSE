@@ -47,7 +47,7 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
         conceptSurveyLinks={{ '527': { klq: '1.5', jbil: '34' } }}
         speakerConceptSurveyLinks={{}}
         surveyColorCodingEnabled
-        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'indigo' }, jbil: { display_label: 'JBIL', display_color: 'rose' } }}
+        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'violet' }, jbil: { display_label: 'JBIL', display_color: 'rose' } }}
         speakerSurveyChoices={{}}
         onSurveyOverlapUpdate={vi.fn()}
         onPromoteSurveyPrimary={onPromoteSurveyPrimary}
@@ -78,10 +78,10 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
       />,
     );
 
-    const klqGrid = screen.getByRole('button', { name: /Set KLQ color to indigo/i }).closest('.grid');
+    const klqGrid = screen.getByRole('button', { name: /Set KLQ color to violet/i }).closest('.grid');
     expect(klqGrid?.className).toContain('grid-cols-5');
     const klqSwatches = Array.from(klqGrid?.querySelectorAll('button') ?? []);
-    expect(klqSwatches.map((button) => button.getAttribute('title'))).toEqual(['indigo', 'emerald', 'amber', 'rose', 'slate']);
+    expect(klqSwatches.map((button) => button.getAttribute('title'))).toEqual(['violet', 'emerald', 'amber', 'rose', 'slate']);
     expect(screen.getByRole('button', { name: /Set JBIL color to amber/i })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Set KLQ color to orange/i })).toBeNull();
   });
@@ -100,10 +100,10 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
       />,
     );
 
-    const indigoSwatch = screen.getByRole('button', { name: /Set KLQ color to indigo/i });
-    expect(indigoSwatch.getAttribute('style')).toMatch(/background-color:\s*(#6366[fF]1|rgb\(99,\s*102,\s*241\))/);
-    expect(indigoSwatch.className).not.toContain('bg-indigo-50');
-    expect(indigoSwatch.className).not.toContain('ring-indigo-200');
+    const violetSwatch = screen.getByRole('button', { name: /Set KLQ color to violet/i });
+    expect(violetSwatch.getAttribute('style')).toMatch(/background-color:\s*(#8[bB]5[cC][fF]6|rgb\(139,\s*92,\s*246\))/);
+    expect(violetSwatch.className).not.toContain('bg-violet-50');
+    expect(violetSwatch.className).not.toContain('ring-violet-200');
 
     const emeraldSwatch = screen.getByRole('button', { name: /Set KLQ color to emerald/i });
     expect(emeraldSwatch.getAttribute('style')).toMatch(/background-color:\s*(#10[bB]981|rgb\(16,\s*185,\s*129\))/);
@@ -135,6 +135,25 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
     expect(roseSwatch.className).not.toContain('survey-swatch-selected');
   });
 
+
+  it('selects the violet swatch for legacy saved indigo display colors', () => {
+    render(
+      <SurveyValuesSection
+        activeConcept={{ id: 527, key: '527', name: 'nose', tag: 'untagged' as never, surveys: { klq: '1.5' } }}
+        activeSpeaker="Fail01"
+        workspaceConcepts={[]}
+        conceptSurveyLinks={{}}
+        surveyColorCodingEnabled
+        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'indigo' } }}
+        speakerSurveyChoices={{}}
+        onSurveyOverlapUpdate={vi.fn()}
+      />,
+    );
+
+    const violetSwatch = screen.getByRole('button', { name: /Set KLQ color to violet/i });
+    expect(violetSwatch.getAttribute('data-selected')).toBe('true');
+  });
+
   it('renders speaker override survey IDs for merged/source-item active concepts using merged raw concept ids', () => {
     render(
       <SurveyValuesSection
@@ -163,7 +182,7 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
           },
         }}
         surveyColorCodingEnabled={false}
-        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'emerald' }, jbil: { display_label: 'JBIL', display_color: 'indigo' } }}
+        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'emerald' }, jbil: { display_label: 'JBIL', display_color: 'violet' } }}
         speakerSurveyChoices={{}}
         onSurveyOverlapUpdate={vi.fn()}
       />,
@@ -230,7 +249,7 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
         conceptSurveyLinks={{}}
         speakerConceptSurveyLinks={{ Saha01: { '1': { jbil: '32' } } }}
         surveyColorCodingEnabled={false}
-        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'emerald' }, jbil: { display_label: 'JBIL', display_color: 'indigo' } }}
+        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'emerald' }, jbil: { display_label: 'JBIL', display_color: 'violet' } }}
         speakerSurveyChoices={{}}
         onSurveyOverlapUpdate={vi.fn()}
       />,
@@ -250,7 +269,7 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
         conceptSurveyLinks={{}}
         speakerConceptSurveyLinks={{ Saha01: { '1': { jbil: '32' } } }}
         surveyColorCodingEnabled={false}
-        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'emerald' }, jbil: { display_label: 'JBIL', display_color: 'indigo' } }}
+        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'emerald' }, jbil: { display_label: 'JBIL', display_color: 'violet' } }}
         speakerSurveyChoices={{}}
         onSurveyOverlapUpdate={vi.fn()}
       />,
@@ -280,7 +299,7 @@ describe('SurveyValuesSection cross-survey reconciliation', () => {
         conceptSurveyLinks={{}}
         speakerConceptSurveyLinks={{}}
         surveyColorCodingEnabled={false}
-        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'emerald' }, jbil: { display_label: 'JBIL', display_color: 'indigo' } }}
+        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'emerald' }, jbil: { display_label: 'JBIL', display_color: 'violet' } }}
         speakerSurveyChoices={{}}
         onSurveyOverlapUpdate={vi.fn()}
       />,

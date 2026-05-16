@@ -28,7 +28,7 @@ export const SURVEY_CHIP_CLASSES: Record<string, string> = {
  * bypasses the dark-mode bg-X-50 overrides that would otherwise collapse
  * every swatch to a similar dim grey. */
 export const SWATCH_HEX_BY_COLOR: Record<string, string> = {
-  indigo: '#6366F1',
+  violet: '#8B5CF6',
   emerald: '#10B981',
   amber: '#F59E0B',
   rose: '#F43F5E',
@@ -59,6 +59,14 @@ export interface ResolvedConceptSurvey {
   availableSurveys: ConceptSurveyLinks;
 }
 
+/** Migrate legacy 'indigo' display_color to 'violet' (MC-397).
+ *  Pass-through for all other values. */
+export function normalizeDisplayColor(color: unknown): string {
+  const value = String(color ?? '').trim();
+  if (value === 'indigo') return 'violet';
+  return value;
+}
+
 export function normalizeSurveyId(value: unknown): string {
   return String(value ?? "")
     .trim()
@@ -83,7 +91,7 @@ export function surveyLabelFor(surveyId: string, settings: SurveySettingsMap | u
 
 function surveyColorFor(surveyId: string, settings: SurveySettingsMap | undefined): string {
   const normalized = normalizeSurveyId(surveyId);
-  return settings?.[normalized]?.display_color?.trim() || DEFAULT_DISPLAY_COLOR;
+  return normalizeDisplayColor(settings?.[normalized]?.display_color) || DEFAULT_DISPLAY_COLOR;
 }
 
 function conceptChoiceKeys(concept: Concept): string[] {

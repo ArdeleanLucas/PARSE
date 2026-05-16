@@ -3,6 +3,7 @@ import type { Concept } from "./speakerForm";
 import {
   aggregateWorkspaceSurveys,
   defaultSurveySettings,
+  normalizeDisplayColor,
   normalizeSurveyId,
   resolveConceptSurvey,
   surveyLabelFor,
@@ -24,6 +25,16 @@ describe("survey-overlap frontend helpers", () => {
     expect(normalizeSurveyId("  JBIL Survey!! ")).toBe("jbil_survey");
     expect(normalizeSurveyId("KLQ")).toBe("klq");
     expect(normalizeSurveyId(null)).toBe("");
+  });
+
+  it("normalizes legacy indigo display color to violet while preserving other values", () => {
+    expect(normalizeDisplayColor("indigo")).toBe("violet");
+    for (const color of ["violet", "emerald", "amber", "rose", "slate", "teal", "blue", "fuchsia"]) {
+      expect(normalizeDisplayColor(color)).toBe(color);
+    }
+    expect(normalizeDisplayColor("")).toBe("");
+    expect(normalizeDisplayColor(null)).toBe("");
+    expect(normalizeDisplayColor(undefined)).toBe("");
   });
 
   it("supplies display defaults without enabling color semantics", () => {
