@@ -52,7 +52,7 @@ PARSE does not replace ELAN, Praat, FLEx, or LingPy. It connects them and adds t
 | Cross-speaker comparison | Manual | Scripted | Lexicon-focused | LexStat cognate clustering | Dedicated Compare table over the same workspace; runs LingPy LexStat with a tunable threshold |
 | Borrowing evidence | Manual | Manual | Manual | Programmatic | Manual flag in Compare; CLEF (Contact Lexeme Fetcher) auto-fetches contact-language forms from Wiktionary, ASJP, and Lexibank so you have something to compare against — the borrowing decision is yours, not algorithmic |
 | Phylogenetic export | Custom scripts | Custom scripts | Limited | Native Wordlist | One-click LingPy TSV (ID / CONCEPT / DOCULECT / IPA / COGID / TOKENS / BORROWING) and NEXUS; downstream consumption is not yet covered by integration tests |
-| AI / automation | Basic alignment | Powerful scripting | Low | Library scripting | Current Whisper STT via `faster-whisper`; optional forced alignment; ~60-tool MCP agent layer |
+| AI / automation | Basic alignment | Powerful scripting | Low | Library scripting | Current Whisper STT via `faster-whisper`; optional forced alignment; 65-tool MCP agent layer |
 | End-to-end workflow | Annotation only | Acoustics only | Lexicon & glossing | Computation only | Audio → annotation → comparison → export in one workspace; multiple WAVs per speaker currently need manual coordination |
 | Stack | Java desktop | C / Pascal desktop | C# desktop | Python library | React 18 + Vite browser UI; Python HTTP server (FastAPI / Pydantic); Zustand state |
 

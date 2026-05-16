@@ -79,8 +79,8 @@ Core endpoints:
 The `mode` query parameter accepts:
 
 - `active` — obey `config/mcp_config.json` or the legacy root-level `mcp_config.json`
-- `default` — expose the shipped default 64-tool surface
-- `all` — expose the full tool surface (currently also 64 tools unless a future all-only surface diverges)
+- `default` — expose the shipped default 65-tool surface
+- `all` — expose the full tool surface (currently also 65 tools unless a future all-only surface diverges)
 
 Each listed tool includes standard MCP schema fields plus `meta.x-parse` safety metadata such as `mutability`, `supports_dry_run`, `dry_run_parameter`, `preconditions`, and `postconditions`.
 
@@ -117,7 +117,7 @@ The adapter does not add a separate network protocol. It launches as a local pro
 - `PARSE_API_PORT`
 - `PARSE_PORT`
 
-Use the shipped default 64-tool surface for most agent sessions. Set `config/mcp_config.json` → `{ "expose_all_tools": false }` only when you intentionally need the legacy curated opt-out surface.
+Use the shipped default 65-tool surface for most agent sessions. Set `config/mcp_config.json` → `{ "expose_all_tools": false }` only when you intentionally need the legacy curated opt-out surface.
 
 ## Authentication Model
 

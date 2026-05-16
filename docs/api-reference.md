@@ -129,6 +129,7 @@ WebSocket streaming is additive. Clients can continue polling `/api/stt/status`,
 | `POST /api/onboard/speaker/status` | Poll onboarding job status | Background-job status endpoint |
 | `POST /api/concepts/import` | Import concepts CSV | Multipart form upload |
 | `POST /api/concepts/{conceptId}/duplicate` | Duplicate one concept row into the next free variant | Numeric `conceptId`; first call rewrites the original to `X (A)` and appends `X (B)`, subsequent calls on the same source item append `(C)`, `(D)`, …; writes a pre-duplicate backup and returns `{ primary, sibling }` |
+| `POST /api/concepts/{conceptId}/promote-survey-primary` | Promote one linked survey item to the `concepts.csv` primary value | Body: `{ survey_id, source_item }`; global operation with no speaker field; backs up `concepts.csv`, moves the old primary into `concept_survey_links`, and returns `ConceptSurveyLinkResponse` |
 | `POST /api/concepts/{conceptId}/survey-links` | Add or replace one cross-survey link for a concept | Body: `{ survey_id, source_item }`; writes a sidecar `concept_survey_links` entry and returns `ConceptSurveyLinkResponse` (`ok`, `concept`, `survey_overlap`) |
 | `DELETE /api/concepts/{conceptId}/survey-links` | Remove one sidecar cross-survey link from a concept | Body: `{ survey_id, source_item? }`; deleting a legacy `concepts.csv` link returns 409 |
 | `POST /api/concepts/relink-by-gloss` | Dry-run or apply strict cross-survey concept relinking by canonical gloss | Body: `{ apply?, accepted_groups? }`; dry-run returns strict groups + fuzzy candidates, `apply=true` migrates accepted strict groups, backs up touched files, unions survey links, rewrites `concept_id` references, and removes merged rows. Fuzzy candidates are never applied automatically |
@@ -149,6 +150,8 @@ Successful ORTH result entries may include the confidence triplet defined in Ope
 `POST /api/concepts/{conceptId}/duplicate` mutates `concepts.csv`, not annotation intervals. It refuses non-numeric ids and missing concepts, and 409s only when no free variant suffix is available (`A`–`Z` exhausted for the source item). The first call on a bare row rewrites the original to `X (A)` and appends `X (B)`; subsequent calls on any row sharing the same `source_item` append the next free `(C)`, `(D)`, … so n-ary variants are produced by repeated calls rather than by a single batched request. The backend writes a `concepts.csv.bak-*-pre-duplicate-<id>` backup before replacing the CSV, restores the prewrite bytes if the write fails, and returns `{ primary, sibling }` (the renamed source row plus the newly appended row) for frontend refresh.
 
 `POST` and `DELETE /api/concepts/{conceptId}/survey-links` are the per-concept cross-survey link CRUD endpoints. They edit the sidecar `concept_survey_links` map inside `survey-overlap.json` (not `concepts.csv`). `POST` requires both `survey_id` and `source_item`; `DELETE` accepts `survey_id` alone (delete by survey) or `survey_id + source_item` (delete only that link). Both return the updated `ConceptEntry` plus the full `survey_overlap` payload so the React client can refresh in place. Attempts to delete a link that lives in `concepts.csv` (legacy primary-survey link) return 409 — those callers must migrate the link first via `relink-by-gloss` or by editing `concepts.csv` directly.
+
+`POST /api/concepts/{conceptId}/promote-survey-primary` is the global primary-switch flow for a linked concept: send `{ survey_id, source_item }`, omit any speaker field, and PARSE backs up `concepts.csv`, moves the old primary survey/item into `concept_survey_links`, removes the promoted sidecar entry, and returns the same `ConceptSurveyLinkResponse` envelope for UI refresh.
 
 `POST /api/concepts/relink-by-gloss` consolidates duplicate concepts that resolve to the same canonical gloss across surveys. Dry-run (`apply` omitted or `false`) returns `groups` of strict matches and `fuzzy_candidates` for manual review. `apply=true` requires `accepted_groups` and refuses to apply fuzzy candidates automatically; it backs up `concepts.csv`, `parse-enrichments.json`, and any annotation files it touches, unions survey links, rewrites `concept_id` references in annotations and enrichments, and removes the merged rows from `concepts.csv`.
 
@@ -501,8 +504,8 @@ Task 5 adds a discovery/execution bridge so external Python tooling can use the 
 
 `mode` query parameter accepts:
 - `active` — obey `config/mcp_config.json` (or fallback root `mcp_config.json`)
-- `default` — force the shipped default 64-tool surface
-- `all` — force the full tool surface (currently also 64 tools unless a future explicit all-only surface diverges)
+- `default` — force the shipped default 65-tool surface
+- `all` — force the full tool surface (currently also 65 tools unless a future explicit all-only surface diverges)
 
 ### Tool schema payload
 
@@ -526,7 +529,7 @@ Each tool entry returned by the bridge includes:
 
 ## MCP server mode
 
-PARSE can also run as a stdio MCP server by exposing the shipped **60-tool** `ParseChatTools` default plus the **3** workflow macros through `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`). Read-only `mcp_get_exposure_mode` is added by the adapter itself, so the default published MCP surface is **64 tools** total and the `expose_all_tools=true` surface is also **64**. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the legacy curated 40-tool subset, which still becomes **44** adapter tools once the 3 workflow macros and adapter helper are included.
+PARSE can also run as a stdio MCP server by exposing the shipped **61-tool** `ParseChatTools` default plus the **3** workflow macros through `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`). Read-only `mcp_get_exposure_mode` is added by the adapter itself, so the default published MCP surface is **65 tools** total and the `expose_all_tools=true` surface is also **65**. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the legacy curated 41-tool subset, which still becomes **45** adapter tools once the 3 workflow macros and adapter helper are included.
 
 ### Start the adapter
 
@@ -562,7 +565,7 @@ pip install 'mcp[cli]'
 
 If no explicit environment block is passed, the adapter also reads repo-local overrides from `.parse-env`.
 
-## Legacy curated MCP task surface (40 `ParseChatTools` + 3 workflow macros; 44 adapter tools including `mcp_get_exposure_mode`)
+## Legacy curated MCP task surface (41 `ParseChatTools` + 3 workflow macros; 45 adapter tools including `mcp_get_exposure_mode`)
 
 ### Inspection / preview / preflight
 
@@ -624,6 +627,7 @@ If no explicit environment block is passed, the adapter also reads repo-local ov
 | `clef_clear_data` | MCP wrapper for `POST /api/clef/clear`; clears per-language `concepts` entries in `config/sil_contact_languages.json`, preserves `_meta`, and optionally removes known provider caches |
 | `import_tag_csv` | Import a CSV as a PARSE tag list |
 | `prepare_tag_import` | Preview and validate a tag import |
+| `populate_cross_survey_links` | Populate concept-level cross-survey links from a reference lexeme CSV (`dryRun=true` first; merge by default, `replace=true` rebuilds only `concept_survey_links`) |
 | `onboard_speaker_import` | Import one speaker from on-disk audio/CSV into the workspace |
 | `import_processed_speaker` | Import one speaker from existing processed artifacts |
 | `csv_only_reimport` | Re-import an existing speaker from refreshed cue/comments CSV files using the registered WAV and a mandatory backup |
@@ -678,7 +682,7 @@ The stdio MCP adapter does not add a separate network auth layer. Access is gove
 
 ## MCP usage notes
 
-The shipped MCP default exposes the full safe 60-tool PARSE task surface plus 3 high-level workflow macros and `mcp_get_exposure_mode`; `expose_all_tools=false` is the legacy curated opt-out.
+The shipped MCP default exposes the full safe 61-tool PARSE task surface plus 3 high-level workflow macros and `mcp_get_exposure_mode`; `expose_all_tools=false` is the legacy curated opt-out.
 
 Operational rules that remain important:
 - use `dryRun=true` first for gated mutating tools such as `contact_lexeme_lookup`, `clef_clear_data`, `onboard_speaker_import`, `csv_only_reimport`, `revert_csv_reimport`, and timestamp/application workflows

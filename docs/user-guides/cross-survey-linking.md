@@ -198,8 +198,8 @@ After population, a concept can have one primary survey ID in `concepts.csv` and
 After the links are applied:
 
 - Concepts with only one survey ID show a normal static survey badge.
-- Concepts with multiple survey IDs show a clickable badge.
-- With a speaker active, clicking the badge changes that speaker's preferred survey ID for the concept. This is non-destructive and does not rewrite `concepts.csv`.
+- Concepts with multiple survey IDs show a clickable badge; in Annotate, the active speaker also gets a header-level Survey chip row so the current choice stays visible beside the concept title.
+- With a speaker active, clicking the badge or header chip changes that speaker's preferred survey ID for the concept. This is non-destructive and does not rewrite `concepts.csv`.
 - Without a speaker active, clicking the badge can promote another survey ID to the global primary value. PARSE backs up `concepts.csv` before rewriting it.
 
 Use promotion only when you want exports to use a different survey's IDs as the primary IDs.
@@ -213,7 +213,7 @@ Use promotion only when you want exports to use a different survey's IDs as the 
 5. **Fix the CSV if needed.** Resolve duplicate IDs, missing primary rows, spelling differences, or spreadsheet formatting issues.
 6. **Choose merge or replace.** Use merge mode for normal additions. Use replace mode only when this CSV should become the full concept-level cross-survey link map.
 7. **Apply the links.** Re-run with `dryRun: false` only after the preview is correct.
-8. **Verify in PARSE.** Open the concept list and check that linked concepts now show clickable survey badges.
+8. **Verify in PARSE.** Open the concept list and, in Annotate, the speaker header; check that linked concepts show clickable survey badges/header chips.
 9. **Promote only if needed.** If an export should use another survey's IDs as primary, promote that survey in the UI before exporting.
 
 ## Troubleshooting

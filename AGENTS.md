@@ -410,7 +410,8 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - PR #216 adds a built-in Southern Kurdish Arabic-script ORTH decoder prime when `ortho.initial_prompt` is omitted and preserves explicit `"initial_prompt": ""` as user opt-out.
   - PR #218 changes ORTH default backend to Hugging Face Transformers `HFWhisperProvider` on `razhan/whisper-base-sdh`; STT remains faster-whisper, and legacy ORTH uses `ortho.backend="faster-whisper"` plus a local CTranslate2 model path.
   - PRs #219/#220/#222 restore HF transcription fidelity with low-level `WhisperProcessor` + `WhisperForConditionalGeneration.generate()`, 30-second full-file chunks, generated-token logprob confidence, non-16 kHz in-memory resampling, and concept-window decoding without `return_timestamps=True`.
-  - PR #226 restores HF decode-level repetition guards: `compression_ratio_threshold`, `no_repeat_ngram_size`, `repetition_penalty`, `condition_on_previous_text`, `temperature=0.0`, and `do_sample=false`. `compute_type` and VAD remain legacy faster-whisper options and are logged as ignored by HF.
+  - PR #226 restores HF decode-level repetition guards; PR #494 moves current HF ORTH config into strict sectioned `ortho.model` / `ortho.generation` / `ortho.decoding`, rejects legacy flat HF configs with a migrator, and keeps `compute_type` / VAD as faster-whisper-only compatibility keys rather than HF runtime knobs.
+  - PR #495 threads `confidence_source` (`avg_logprob` vs `constant_fallback`) and `confidence_n_tokens` through ORTH/OpenAPI/frontend consumers; PR #498 removes healthy-path HF warning/fallback by owning decode policy on `model.generation_config`, forwarding encoder attention masks, and probing that `generated.scores` is present at load.
   - PRs #299/#300 make full-file, concept-window, and per-lexeme HF ORTH suppress configured prompts by default, require explicit caller opt-in for seeded decoding, and add no-parrot regression evidence for the prompt-prefix incident.
   - Cite Razhan model usage with Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*, Interspeech 2025, doi:10.21437/Interspeech.2025-2296, PDF: https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf.
 - **Full-pipeline resource lifecycle and stale-lock recovery shipped**:
@@ -427,7 +428,7 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - PR #264 scopes concept merges to Compare mode; Annotate keeps raw concept rows independently navigable.
   - PRs #267/#268/#270/#284 ship speaker-local `AnnotationRecord.concept_tags`, omit empty concept-tag sidecars, and keep tag filters/counts scoped to the active speaker while preserving the shared tag vocabulary.
   - PRs #271/#272/#273/#278 harden source-item backfill/import so `concepts.csv` keeps the five-column schema and MCP/processed-speaker onboarding does not collapse `source_item` / `source_survey` metadata.
-  - PRs #291/#292/#295/#303 add `survey-overlap.json`, `GET`/`POST /api/survey-overlap`, survey label/color controls, per-speaker choices, Current-survey copy, and sidebar color/multi-survey chips.
+  - PRs #291/#292/#295/#303 add `survey-overlap.json`, `GET`/`POST /api/survey-overlap`, survey label/color controls, per-speaker choices, Current-survey copy, sidebar badges, and initial multi-survey chips; PRs #492/#496/#503 relocate active multi-survey choices to the Annotate header chip row while keeping sidebar badges/context-menu promotion.
   - PRs #297/#296 add `POST /api/concepts/{conceptId}/duplicate` and a sidebar right-click duplicate action that renames the source row to `X (A)`, appends `X (B)` with the same source metadata, and refreshes the workstation.
 - **Streaming responses shipped**:
   - Additive WebSocket sidecar in `python/external_api/streaming.py`
@@ -439,10 +440,10 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
 ## MCP adapter note
 
 - `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) now supports `config/mcp_config.json` for explicit MCP surface selection.
-- Shipped default MCP adapter surface is **62 tools** total: **58** default `ParseChatTools` from `python/ai/chat_tools.py::DEFAULT_MCP_TOOL_NAMES`, the **3** high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, plus read-only `mcp_get_exposure_mode` for self-inspection.
-- `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES` preserves the previous **38**-tool parse-task subset; explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the adapter on that legacy **42**-tool published surface.
-- Setting `expose_all_tools=true` expands `active` mode back to the full **62**-tool adapter surface, which now matches the shipped default.
-- The shipped default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus the write-capable `clef_clear_data`, `csv_only_reimport`, and `revert_csv_reimport` tools; the underlying boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is not a standalone MCP tool name in `REGISTRY`.
+- Shipped default MCP adapter surface is **65 tools** total: **61** default `ParseChatTools` from `python/ai/chat_tools.py::DEFAULT_MCP_TOOL_NAMES`, the **3** high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, plus read-only `mcp_get_exposure_mode` for self-inspection.
+- `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES` preserves the previous **41**-tool parse-task subset; explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the adapter on that legacy **45**-tool published surface.
+- Setting `expose_all_tools=true` expands `active` mode back to the full **65**-tool adapter surface, which now matches the shipped default.
+- The shipped default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus the write-capable `clef_clear_data`, `csv_only_reimport`, `revert_csv_reimport`, and `populate_cross_survey_links` tools; the underlying boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is not a standalone MCP tool name in `REGISTRY`.
 - The workflow macros are:
   - `run_full_annotation_pipeline`
   - `prepare_compare_mode`
