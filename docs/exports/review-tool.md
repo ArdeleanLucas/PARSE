@@ -41,8 +41,6 @@ Useful env-gated flags:
 - `SKIP_AUDIO=1` — emit `review_data.json` + `timestamps/` only; skip the
   ffmpeg clip materialization step (much faster while iterating on
   metadata).
-- `INCLUDE_SPECTROGRAMS=1` — include per-clip spectrograms (only honored
-  if the export script's `--help` advertises `--include-spectrograms`).
 - `CONTACT_CONFIG=/path/to/sil_contact_languages.json` — override the
   default config location (only forwarded if the export script advertises
   `--contact-config`).

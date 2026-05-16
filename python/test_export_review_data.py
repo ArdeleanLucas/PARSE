@@ -505,6 +505,20 @@ class AnalyticalFieldsTests(unittest.TestCase):
             self.assertEqual(forms[speaker]["arabic_similarity"], 0.0)
             self.assertIsNone(forms[speaker]["borrowing_flag"])
 
+    def test_non_mapping_enrichments_falls_back_safely(self) -> None:
+        # Valid JSON but the top-level is a list / string / number — covers the
+        # ``isinstance(data, Mapping)`` guard in ``_load_enrichments``.
+        for payload in ("[]", '"oops"', "42"):
+            with self.subTest(payload=payload), TemporaryDirectory() as tmp:
+                workspace = self._two_speaker_ash_workspace(tmp)
+                (workspace / "parse-enrichments.json").write_text(payload, encoding="utf-8")
+                review_data, _ = build_review_data(workspace=workspace)
+                forms = {f["speaker"]: f for f in review_data["concepts"][0]["forms"]}
+                for speaker in ("Fail01", "Khan01"):
+                    self.assertEqual(forms[speaker]["cognate_class"], "?")
+                    self.assertEqual(forms[speaker]["arabic_similarity"], 0.0)
+                    self.assertIsNone(forms[speaker]["borrowing_flag"])
+
     def test_contact_config_meta_keys_skipped(self) -> None:
         # ``_meta`` and other underscore-prefixed top-level keys are metadata,
         # not language codes — mirrors contact_lexeme_fetcher's own filter.
