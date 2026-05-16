@@ -1281,7 +1281,7 @@ export function ParseUI() {
     const buckets = resolveSurveyLinksForSpeaker(
       rowIds,
       selectedSpeakers[0] ?? null,
-      Object.fromEntries(rowIds.map((rowId) => [rowId, conceptSurveyLinks[rowId] ?? concept.surveys ?? {}])),
+      Object.fromEntries(rowIds.map((rowId) => [rowId, { ...(concept.surveys ?? {}), ...(conceptSurveyLinks[rowId] ?? {}) }])),
       speakerConceptSurveyLinks,
     );
     const bucket = buckets[0];

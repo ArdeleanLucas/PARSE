@@ -870,8 +870,8 @@ describe("ParseUI", () => {
 
     const chipRow = await screen.findByTestId('annotate-survey-chip-row');
     expect(within(chipRow).getAllByRole('button')).toHaveLength(2);
-    expect(screen.getByRole('button', { name: 'Switch four to JBIL 4' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Current survey KLQ 13.4' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Current survey JBIL 4' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Switch four to KLQ 13.4' })).toBeTruthy();
   });
 
 
@@ -911,8 +911,8 @@ describe("ParseUI", () => {
 
     const chipRow = await screen.findByTestId('annotate-survey-chip-row');
     expect(within(chipRow).getAllByRole('button')).toHaveLength(2);
-    expect(screen.getByRole('button', { name: 'Switch hair (men) to JBIL 32' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Current survey KLQ 1.1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Current survey JBIL 32' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Switch hair (men) to KLQ 1.1' })).toBeTruthy();
   });
 
   function seedSingleSpeakerProject() {
