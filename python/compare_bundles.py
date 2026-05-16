@@ -83,26 +83,109 @@ def _source_wav_from_annotation(payload: Mapping[str, Any], speaker: str) -> str
     return source_wav
 
 
-def _intervals_for_speaker(project_root: Path, speaker: str) -> tuple[list[dict[str, Any]], str]:
+TierIntervals = dict[str, list[dict[str, Any]]]
+
+
+def _tier_intervals(tiers: object, name: str) -> list[dict[str, Any]]:
+    tier = tiers.get(name) if isinstance(tiers, Mapping) else None
+    intervals = tier.get("intervals") if isinstance(tier, Mapping) else None
+    return [iv for iv in intervals if isinstance(iv, dict)] if isinstance(intervals, list) else []
+
+
+def _intervals_for_speaker(project_root: Path, speaker: str) -> tuple[TierIntervals, str]:
+    empty: TierIntervals = {"concept": [], "ortho": [], "ipa": []}
     path = _annotation_path(project_root, speaker)
     if not path.exists():
-        return [], f"audio/working/{speaker}/{speaker}.wav"
+        return empty, f"audio/working/{speaker}/{speaker}.wav"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-        return [], f"audio/working/{speaker}/{speaker}.wav"
+        return empty, f"audio/working/{speaker}/{speaker}.wav"
     tiers = payload.get("tiers") if isinstance(payload, Mapping) else None
-    concept_tier = tiers.get("concept") if isinstance(tiers, Mapping) else None
-    intervals = concept_tier.get("intervals") if isinstance(concept_tier, Mapping) else None
     source_wav = _source_wav_from_annotation(payload, speaker) if isinstance(payload, Mapping) else f"audio/working/{speaker}/{speaker}.wav"
-    return ([iv for iv in intervals if isinstance(iv, dict)] if isinstance(intervals, list) else []), source_wav
+    return {
+        "concept": _tier_intervals(tiers, "concept"),
+        "ortho": _tier_intervals(tiers, "ortho"),
+        "ipa": _tier_intervals(tiers, "ipa"),
+    }, source_wav
 
 
-def _candidate_from_interval(interval: Mapping[str, Any], source_wav: str) -> dict[str, Any]:
-    ipa = interval.get("ipa") or interval.get("ipa_text")
+def _interval_concept_id(interval: Mapping[str, Any]) -> str:
+    return str(interval.get("concept_id") or interval.get("conceptId") or "").strip()
+
+
+def _group_by_concept_id(
+    intervals: Sequence[dict[str, Any]],
+) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    missing: list[dict[str, Any]] = []
+    for interval in intervals:
+        cid = _interval_concept_id(interval)
+        if cid:
+            grouped.setdefault(cid, []).append(interval)
+        else:
+            missing.append(interval)
+    return grouped, missing
+
+
+def _seconds(value: object) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _overlap_seconds(left: Mapping[str, Any], right: Mapping[str, Any]) -> float:
+    left_start = _seconds(left.get("start") or left.get("start_sec"))
+    left_end = _seconds(left.get("end") or left.get("end_sec"))
+    right_start = _seconds(right.get("start") or right.get("start_sec"))
+    right_end = _seconds(right.get("end") or right.get("end_sec"))
+    return max(0.0, min(left_end, right_end) - max(left_start, right_start))
+
+
+def _pick_time_overlap(
+    candidates: Sequence[dict[str, Any]],
+    concept_interval: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    overlapping = [candidate for candidate in candidates if _overlap_seconds(candidate, concept_interval) > 0]
+    if not overlapping:
+        return None
+    concept_start = _seconds(concept_interval.get("start") or concept_interval.get("start_sec"))
+    return min(
+        overlapping,
+        key=lambda candidate: abs(_seconds(candidate.get("start") or candidate.get("start_sec")) - concept_start),
+    )
+
+
+def _pick_sibling(
+    siblings_for_cid: Sequence[dict[str, Any]],
+    siblings_without_cid: Sequence[dict[str, Any]],
+    concept_interval: Mapping[str, Any],
+    concept_index: int,
+) -> dict[str, Any] | None:
+    # Match concept_id/conceptId first, tie-break by index, then by time overlap when sibling conceptId is absent.
+    if 0 <= concept_index < len(siblings_for_cid):
+        return siblings_for_cid[concept_index]
+    return _pick_time_overlap(siblings_without_cid, concept_interval)
+
+
+def _candidate_from_interval(
+    interval: Mapping[str, Any],
+    source_wav: str,
+    *,
+    ortho_interval: Mapping[str, Any] | None = None,
+    ipa_interval: Mapping[str, Any] | None = None,
+    allow_interval_transcription: bool = True,
+) -> dict[str, Any]:
+    ipa = (ipa_interval or {}).get("text") if ipa_interval else None
+    if not ipa and allow_interval_transcription:
+        ipa = interval.get("ipa") or interval.get("ipa_text")
+    ortho = (ortho_interval or {}).get("text") if ortho_interval else None
+    if not ortho and allow_interval_transcription:
+        ortho = interval.get("ortho") or interval.get("orthography")
     return {
         "ipa": str(ipa) if ipa else None,
-        "ortho": str(interval.get("ortho") or interval.get("orthography") or interval.get("text") or ""),
+        "ortho": str(ortho) if ortho else "",
         "start_sec": float(interval.get("start") or interval.get("start_sec") or 0.0),
         "end_sec": float(interval.get("end") or interval.get("end_sec") or 0.0),
         "source_wav": source_wav,
@@ -246,11 +329,14 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
                 if scoped:
                     bundle["speaker_concept_survey_links"][str(speaker)] = scoped
         for speaker in selected_speakers:
-            intervals, source_wav = _intervals_for_speaker(project_root, speaker)
+            tiers, source_wav = _intervals_for_speaker(project_root, speaker)
+            concept_intervals = tiers["concept"]
+            ortho_by_concept, ortho_without_concept = _group_by_concept_id(tiers["ortho"])
+            ipa_by_concept, ipa_without_concept = _group_by_concept_id(tiers["ipa"])
             by_concept: dict[str, list[dict[str, Any]]] = {}
             legacy_by_text: dict[str, list[dict[str, Any]]] = {}
-            for interval in intervals:
-                cid = str(interval.get("concept_id") or "").strip()
+            for interval in concept_intervals:
+                cid = _interval_concept_id(interval)
                 if cid:
                     by_concept.setdefault(cid, []).append(interval)
                 else:
@@ -260,13 +346,33 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
             for row in group["rows"]:
                 row_id = str(row["id"])
                 matches = by_concept.get(row_id, [])
+                used_legacy_text_fallback = False
                 if not matches:
                     legacy_matches = legacy_by_text.get(_stem_key(row.get("concept_en", "")), [])
                     if legacy_matches:
                         matches = legacy_matches
+                        used_legacy_text_fallback = True
                         warnings.append(f"legacy text fallback used for {speaker} row {row_id}")
                 if matches:
-                    speaker_candidates[row_id] = _candidate_from_interval(matches[0], source_wav)
+                    concept_interval = matches[0]
+                    cid = _interval_concept_id(concept_interval)
+                    ortho_interval = (
+                        _pick_sibling(ortho_by_concept.get(cid, []), ortho_without_concept, concept_interval, 0)
+                        if cid
+                        else None
+                    )
+                    ipa_interval = (
+                        _pick_sibling(ipa_by_concept.get(cid, []), ipa_without_concept, concept_interval, 0)
+                        if cid
+                        else None
+                    )
+                    speaker_candidates[row_id] = _candidate_from_interval(
+                        concept_interval,
+                        source_wav,
+                        ortho_interval=ortho_interval,
+                        ipa_interval=ipa_interval,
+                        allow_interval_transcription=not used_legacy_text_fallback,
+                    )
                     candidate_rows.append(row_id)
                 else:
                     speaker_candidates[row_id] = None
