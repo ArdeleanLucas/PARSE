@@ -33,6 +33,7 @@ import {
 } from '../../lib/compareBundles';
 import type { SpeakerForm } from '../../lib/speakerForm';
 import { useEnrichmentStore } from '../../stores/enrichmentStore';
+import { VariantChip } from '../shared/VariantChip';
 import { CognateCell, SimBar } from './CognateCell';
 
 // Verbatim from CanonicalPicker.tsx:7-13 — keeps repair_hint extraction behaviour identical.
@@ -304,13 +305,13 @@ function VariantCard({
         </label>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-2" data-testid={`variant-card-header-${speaker}-${variant.csv_row_id}`}>
-            <span className="font-mono text-[10px] text-slate-400">{variant.csv_row_id}</span>
-            {variant.letter && <span className="text-[13px] font-semibold text-slate-800">{variant.letter}</span>}
+            {variant.letter && <VariantChip letter={variant.letter} />}
             {variant.ipa && (
               <span className="font-mono text-[13px] text-indigo-700">/{variant.ipa}/</span>
             )}
+            {variant.ipa && variant.ortho && <span className="text-slate-400" aria-hidden>·</span>}
             {variant.ortho && (
-              <span className="font-serif text-[14px] text-slate-700" dir="rtl">
+              <span className="font-serif text-[14px] text-slate-700">
                 {variant.ortho}
               </span>
             )}

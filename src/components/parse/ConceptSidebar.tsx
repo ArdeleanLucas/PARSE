@@ -7,6 +7,7 @@ import type { ConceptSurveyLinks, ConceptSurveyLinksByConcept, SpeakerConceptSur
 import { conceptMatchesElicitedKeys } from '../../lib/speakerElicitedConcepts';
 import { resolveSurveyLinksForSpeaker, surveyRowIdsForConcept, type SpeakerSurveyLinkBucket } from '../../lib/surveyLinksForSpeaker';
 import { SurveyBadge } from '../shared/SurveyBadge';
+import { VariantChip } from '../shared/VariantChip';
 import { defaultSurveySettings, normalizeSurveyId, resolveConceptSurvey, surveyLabelFor } from '../../lib/surveyOverlap';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
@@ -626,9 +627,16 @@ export function ConceptSidebar({
                         mergeAbsorbedNames: undefined,
                       };
                       return (
-                        <button
+                        <VariantChip
+                          as="button"
                           key={variant.conceptKey}
-                          type="button"
+                          letter={variant.variantLabel}
+                          dotClassName={tagDot[variant.tag ?? concept.tag]}
+                          dotTestId={`concept-variant-pill-dot-${variant.conceptKey}`}
+                          conceptEn={variant.conceptEn}
+                          active={childActive}
+                          recentlyDuplicated={isRecentlyDuplicated}
+                          showNew={isRecentlyDuplicated}
                           aria-label={`${parentName} variant ${variant.variantLabel} ${variant.conceptEn}`}
                           title={`${variant.conceptEn} (${variant.conceptKey})`}
                           data-testid={`concept-variant-pill-${variant.conceptKey}`}
@@ -638,13 +646,7 @@ export function ConceptSidebar({
                             event.stopPropagation();
                             setContextMenu({ concept: childConcept, x: event.clientX, y: event.clientY });
                           }}
-                          className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 transition ${childActive ? 'bg-indigo-50 text-indigo-900 ring-indigo-200' : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50'} ${isRecentlyDuplicated ? 'bg-emerald-50 text-emerald-800 ring-2 ring-emerald-400' : ''}`}
-                        >
-                          <span data-testid={`concept-variant-pill-dot-${variant.conceptKey}`} className={`h-1.5 w-1.5 rounded-full ${tagDot[variant.tag ?? concept.tag]}`} />
-                          <span>{variant.variantLabel}</span>
-                          <span className="sr-only">{variant.conceptEn}</span>
-                          {isRecentlyDuplicated && <span className="text-[8px] font-bold">NEW</span>}
-                        </button>
+                        />
                       );
                     })}
                   </div>
