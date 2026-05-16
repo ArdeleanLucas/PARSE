@@ -1,5 +1,4 @@
-import type { Concept, AnnotateSurveyBadge } from "./types";
-import { SurveyBadge } from "../../shared/SurveyBadge";
+import type { Concept } from "./types";
 
 interface SpeakerHeaderProps {
   annotated: boolean;
@@ -9,7 +8,6 @@ interface SpeakerHeaderProps {
   totalConcepts: number;
   surveyLabel?: string;
   surveySourceItem?: string;
-  surveyBadge?: AnnotateSurveyBadge;
   onPrev: () => void;
   onNext: () => void;
 }
@@ -22,7 +20,6 @@ export function SpeakerHeader({
   totalConcepts,
   surveyLabel,
   surveySourceItem,
-  surveyBadge,
   onPrev,
   onNext,
 }: SpeakerHeaderProps) {
@@ -60,19 +57,7 @@ export function SpeakerHeader({
               <span className="text-[9px] uppercase tracking-wider text-slate-400">Source</span>
               <span className="text-slate-500">{speaker}.wav</span>
             </div>
-            {surveyBadge ? (
-              <div data-testid="annotate-survey-badge-row" className="mt-1 flex items-center gap-1 font-mono text-[11px] text-slate-400">
-                <span className="text-[9px] uppercase tracking-wider text-slate-400">Survey</span>
-                <SurveyBadge
-                  conceptId={String(concept.id)}
-                  conceptKey={concept.key}
-                  conceptName={concept.name}
-                  parentActive
-                  variant="editor"
-                  {...surveyBadge}
-                />
-              </div>
-            ) : surveyLabel && surveySourceItem ? (
+            {surveyLabel && surveySourceItem ? (
               <div className="mt-1 flex items-center gap-1 font-mono text-[11px] text-slate-400">
                 <span className="text-[9px] uppercase tracking-wider text-slate-400">Survey</span>
                 <span className="text-slate-600">{surveyLabel}</span>

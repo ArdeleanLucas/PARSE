@@ -19,36 +19,6 @@ afterEach(() => {
 
 describe('ConceptSidebar', () => {
 
-  it('does not render survey badges inside sidebar concept rows', () => {
-    render(
-      <ConceptSidebar
-        query=""
-        onQueryChange={vi.fn()}
-        sortParent="concept"
-        conceptSub="az"
-        sourceSub="time"
-        onSortParentChange={vi.fn()}
-        onConceptSubChange={vi.fn()}
-        onSourceSubChange={vi.fn()}
-        sourceDisabled={false}
-        filteredConcepts={[{ id: 41, key: 'water', name: 'water', tag: 'confirmed' as const, sourceSurvey: 'klq', sourceItem: '4.1' }]}
-        statusFilter="all"
-        onStatusFilterChange={vi.fn()}
-        selectedTagIds={new Set()}
-        onTagSelectionChange={vi.fn()}
-        tags={[]}
-        activeConceptId={41}
-        activeConceptKey="water"
-        onConceptSelect={vi.fn()}
-        surveySettings={{ klq: { display_label: 'KLQ', display_color: 'emerald' } }}
-        surveyColorCodingEnabled
-      />,
-    );
-
-    const row = screen.getByTestId('concept-row-41');
-    expect(row.querySelector('[data-testid^="survey-badge-"]')).toBeNull();
-    expect(row.textContent ?? '').not.toContain('KLQ 4.1');
-  });
 
   it('keeps singleton rows to one parent affordance and selects the singleton parent key', () => {
     const onConceptSelect = vi.fn();
@@ -529,7 +499,7 @@ describe('ConceptSidebar', () => {
     expect(screen.getByRole('button', { name: /water/i })).toBeTruthy();
     const active = screen.getByRole('button', { name: /fire/i });
     expect(active.className).toContain('bg-indigo-50');
-    expect(screen.getByTestId('concept-parent-button-2').getAttribute('aria-label') ?? '').toContain('2.1');
+    expect(screen.getByTestId('concept-row-2').textContent ?? '').toContain('2.1');
   });
 
   it('forwards search, status filter, tag selection, and concept-selection callbacks', () => {
@@ -684,7 +654,7 @@ describe('ConceptSidebar', () => {
     expect(screen.getByRole('button', { name: /review needed/i }).className).not.toContain('text-white');
   });
 
-  it('keeps source survey plus source item in the parent accessible label when both are present', () => {
+  it('shows source survey plus source item as the concept badge when both are present', () => {
     render(
       <ConceptSidebar
         query=""
@@ -707,11 +677,10 @@ describe('ConceptSidebar', () => {
       />,
     );
 
-    expect(screen.getByTestId('concept-parent-button-42').getAttribute('aria-label') ?? '').toContain('KLQ 1.2');
-    expect(screen.getByTestId('concept-row-42').textContent ?? '').not.toContain('KLQ 1.2');
+    expect(screen.getByTestId('concept-row-42').textContent ?? '').toContain('KLQ 1.2');
   });
 
-  it('keeps bare source item in the parent accessible label without a prefix when source survey is absent', () => {
+  it('shows bare source item as the concept badge without a prefix when source survey is absent', () => {
     render(
       <ConceptSidebar
         query=""
@@ -734,12 +703,12 @@ describe('ConceptSidebar', () => {
       />,
     );
 
-    const text = screen.getByTestId('concept-parent-button-42').getAttribute('aria-label') ?? '';
+    const text = screen.getByTestId('concept-row-42').textContent ?? '';
     expect(text).toContain('1.2');
     expect(text).not.toContain('#1.2');
   });
 
-  it('keeps a #id fallback in the parent accessible label when no source item is present', () => {
+  it('falls back to a #id badge when no source item is present', () => {
     render(
       <ConceptSidebar
         query=""
@@ -762,7 +731,7 @@ describe('ConceptSidebar', () => {
       />,
     );
 
-    expect(screen.getByTestId('concept-parent-button-42').getAttribute('aria-label') ?? '').toContain('#42');
+    expect(screen.getByTestId('concept-row-42').textContent ?? '').toContain('#42');
   });
 
   it('labels the source-aware sort tab as Source', () => {
@@ -792,7 +761,7 @@ describe('ConceptSidebar', () => {
     expect(screen.queryByText('Survey')).toBeNull();
   });
 
-  it('keeps mixed source and #id metadata in labels and enables Source sorting when any source item exists', () => {
+  it('renders mixed source and #id badges and enables Source sorting when any source item exists', () => {
     render(
       <ConceptSidebar
         query=""
@@ -818,8 +787,8 @@ describe('ConceptSidebar', () => {
       />,
     );
 
-    expect(screen.getByTestId('concept-parent-button-42').getAttribute('aria-label') ?? '').toContain('KLQ 1.2');
-    expect(screen.getByTestId('concept-parent-button-43').getAttribute('aria-label') ?? '').toContain('#43');
+    expect(screen.getByTestId('concept-row-42').textContent ?? '').toContain('KLQ 1.2');
+    expect(screen.getByTestId('concept-row-43').textContent ?? '').toContain('#43');
     expect(screen.getByTestId('concept-sort-parent-source').getAttribute('aria-disabled')).toBeNull();
   });
 
@@ -900,15 +869,14 @@ describe('ConceptSidebar', () => {
       />,
     );
 
-    expect(screen.getByTestId('concept-parent-button-7').getAttribute('aria-label') ?? '').toContain('Jbil Modal JBIL_100');
-    expect(screen.getByTestId('concept-row-7').textContent ?? '').not.toContain('Jbil Modal JBIL_100');
+    expect(screen.getByTestId('concept-row-7').textContent ?? '').toContain('Jbil Modal JBIL_100');
 
     fireEvent.click(screen.getByRole('button', { name: /Switch rain to Kurdish List KLQ_1.10/i }));
 
     expect(onSurveyChoiceChange).toHaveBeenCalledWith('Fail01', 'rain', 'klq');
   });
 
-  it('keeps per-speaker survey choice pills clickable after row badge removal', () => {
+  it('lets users click the visible survey badge to flip to the next overlapping survey', () => {
     const onSurveyChoiceChange = vi.fn();
     render(
       <ConceptSidebar
@@ -947,8 +915,8 @@ describe('ConceptSidebar', () => {
       />,
     );
 
-    const badge = screen.getByRole('button', { name: /Switch rain to Kurdish List KLQ_1.10/i });
-    expect(screen.queryByRole('button', { name: /Switch survey for rain/i })).toBeNull();
+    const badge = screen.getByRole('button', { name: /Switch survey for rain from Jbil Modal JBIL_100 to Kurdish List KLQ_1.10/i });
+    expect(badge.textContent ?? '').toContain('Jbil Modal JBIL_100');
 
     fireEvent.click(badge);
 

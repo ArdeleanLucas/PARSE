@@ -793,7 +793,7 @@ afterEach(() => {
 
 
 describe('ParseUI survey primary promotion', () => {
-  it('does not render the no-speaker survey promote badge in sidebar rows', async () => {
+  it('promotes primary survey from the no-speaker sidebar badge and refreshes config', async () => {
     window.localStorage.setItem('parse.currentMode', 'compare');
     mockConfig = {
       ...mockConfig!,
@@ -811,12 +811,16 @@ describe('ParseUI survey primary promotion', () => {
 
     render(<ParseUI />);
 
-    const row = await screen.findByTestId('concept-row-1');
-    expect(row.querySelector('[data-testid^="survey-badge-"]')).toBeNull();
-    expect(screen.queryByRole('button', {
+    const badge = await screen.findByRole('button', {
       name: 'Promote survey for nose from KLQ 1.5 to JBIL 34',
-    })).toBeNull();
-    expect(apiClient.promoteConceptSurveyPrimary).not.toHaveBeenCalled();
+    });
+    fireEvent.click(badge);
+
+    await waitFor(() => expect(apiClient.promoteConceptSurveyPrimary).toHaveBeenCalledWith('1', {
+      survey_id: 'jbil',
+      source_item: '34',
+    }));
+    await waitFor(() => expect(mockReloadConfig).toHaveBeenCalled());
   });
 });
 
