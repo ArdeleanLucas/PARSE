@@ -93,6 +93,9 @@ interface ConceptSidebarProps {
    * the first visible variant.
    */
   isConceptVariantVisibleInSidebar?: (concept: SidebarConcept, variant: SidebarVariant) => boolean;
+  /** When true, suppress the per-concept variant pill strip (A/B/C/...). Used in compare
+   * mode where the strip floods the panel as more speakers are added. */
+  hideVariantPills?: boolean;
   scopedToSpeaker?: boolean;
   onScopedToSpeakerChange?: (next: boolean) => void;
   elicitedConceptKeys?: ReadonlySet<string>;
@@ -198,6 +201,7 @@ export function ConceptSidebar({
   onDuplicateConcept,
   onDeleteConcept,
   isConceptVariantVisibleInSidebar,
+  hideVariantPills = false,
   scopedToSpeaker = false,
   onScopedToSpeakerChange,
   elicitedConceptKeys = new Set<string>(),
@@ -574,7 +578,7 @@ export function ConceptSidebar({
             : (resolvedSurvey.sourceItem || fallbackBadge || `#${concept.id}`);
           const variants = concept.variants ?? [];
           const visibleVariants = isConceptVariantVisibleInSidebar ? variants.filter((variant) => isConceptVariantVisibleInSidebar(concept, variant)) : variants;
-          const hasVariants = visibleVariants.length > 1;
+          const hasVariants = !hideVariantPills && visibleVariants.length > 1;
           const firstVariantKey = visibleVariants[0]?.conceptKey ?? variants[0]?.conceptKey ?? null;
           const parentActive = !!(concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey)));
           const parentName = concept.name;
