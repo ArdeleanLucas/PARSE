@@ -78,7 +78,6 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   peaksUrl,
   surveyLabel,
   surveySourceItem,
-  surveyBadge,
 }) => {
   const record = useAnnotationStore((s) => s.records[speaker] ?? null);
   const moveIntervalAcrossTiers = useAnnotationStore((s) => s.moveIntervalAcrossTiers);
@@ -1048,7 +1047,6 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
         totalConcepts={totalConcepts}
         surveyLabel={surveyLabel}
         surveySourceItem={surveySourceItem}
-        surveyBadge={surveyBadge}
         onPrev={onPrev}
         onNext={onNext}
       />
