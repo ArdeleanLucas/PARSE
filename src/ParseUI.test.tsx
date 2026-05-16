@@ -803,7 +803,7 @@ describe('ParseUI survey primary promotion', () => {
       ],
       concept_survey_links: { '1': { klq: '1.5', jbil: '34' } },
       survey_settings: {
-        klq: { display_label: 'KLQ', display_color: 'indigo' },
+        klq: { display_label: 'KLQ', display_color: 'violet' },
         jbil: { display_label: 'JBIL', display_color: 'rose' },
       },
       survey_color_coding_enabled: true,

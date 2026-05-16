@@ -35,7 +35,7 @@ describe('SurveyBadge', () => {
     const badge = container.querySelector('span');
     expect(badge?.textContent).toBe('KLQ 1.1');
     expect(badge?.className).toContain('mr-2 px-1 py-0.5');
-    expect(badge?.className).toContain('text-indigo-500');
+    expect(badge?.className).toContain('text-violet-500');
   });
 
   it('opens a menu for three available surveys', () => {

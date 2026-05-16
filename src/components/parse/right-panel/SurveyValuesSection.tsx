@@ -5,6 +5,7 @@ import type { Concept } from '../../../lib/speakerForm';
 import {
   aggregateWorkspaceSurveys,
   defaultSurveySettings,
+  normalizeDisplayColor,
   normalizeSurveyId,
   resolveConceptSurvey,
   SWATCH_HEX_BY_COLOR,
@@ -42,7 +43,7 @@ interface SurveyValuesSectionProps {
 }
 
 const SURVEY_COLOR_PALETTE = [
-  'indigo',
+  'violet',
   'emerald',
   'amber',
   'rose',
@@ -118,7 +119,7 @@ export function SurveyValuesSection({
       ? Object.fromEntries(speakerBuckets.map((bucket) => [bucket.surveyId, bucket.sourceItem]))
       : Object.fromEntries(Object.entries(activeConcept?.surveys ?? {}).map(([surveyId, sourceItem]) => [normalizeSurveyId(surveyId), String(sourceItem ?? '').trim()]).filter(([surveyId, sourceItem]) => surveyId && sourceItem))
   ), [activeConcept, speakerBuckets]);
-  const resolvedDisplayColor = (surveySettings[resolved.surveyId] ?? defaultSurveySettings(resolved.surveyId)).display_color;
+  const resolvedDisplayColor = normalizeDisplayColor((surveySettings[resolved.surveyId] ?? defaultSurveySettings(resolved.surveyId)).display_color);
   const hasWorkspaceSurveys = workspaceChoices.length > 0;
   const updateLabel = (surveyId: string, label: string) => {
     const existing = surveySettings[surveyId] ?? defaultSurveySettings(surveyId);
@@ -253,7 +254,7 @@ export function SurveyValuesSection({
               {workspaceChoices.map((surveyId) => {
                 const label = surveyLabelFor(surveyId, surveySettings);
                 const editing = editingSurveyId === surveyId;
-                const displayColor = (surveySettings[surveyId] ?? defaultSurveySettings(surveyId)).display_color;
+                const displayColor = normalizeDisplayColor((surveySettings[surveyId] ?? defaultSurveySettings(surveyId)).display_color);
                 return (
                   <div key={surveyId} className="rounded-md border border-slate-200 bg-white px-2 py-1.5">
                     {editing ? (
