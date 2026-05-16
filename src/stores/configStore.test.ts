@@ -64,6 +64,38 @@ describe("configStore.load survey-overlap hydration", () => {
     expect(config?.concepts[0]?.surveys).toEqual({ klq: "1.1", jbil: "32" });
   });
 
+
+  it("merges canonical concept surveys with sidecar links during load", async () => {
+    mockedGetConfig.mockResolvedValueOnce({
+      ...structuredClone(baseConfig),
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "249", label: "hair (men)", source_item: "32", source_survey: "JBIL", surveys: { jbil: "32" } },
+        { id: "250", label: "hair (women)", source_item: "32", source_survey: "JBIL", surveys: { jbil: "32" } },
+      ],
+    });
+    mockedGetSurveyOverlap.mockResolvedValueOnce({
+      version: 1,
+      color_coding_enabled: true,
+      surveys: {
+        jbil: { display_label: "JBIL", display_color: "violet" },
+        klq: { display_label: "KLQ", display_color: "emerald" },
+      },
+      concept_survey_links: {
+        "249": { klq: "1.1" },
+        "250": { klq: "1.1" },
+      },
+      speaker_choices: {},
+      speaker_concept_survey_links: {},
+    } satisfies SurveyOverlapState);
+
+    await useConfigStore.getState().load();
+
+    const config = useConfigStore.getState().config;
+    expect(config?.concepts.find((c) => c.id === "249")?.surveys).toEqual({ jbil: "32", klq: "1.1" });
+    expect(config?.concepts.find((c) => c.id === "250")?.surveys).toEqual({ jbil: "32", klq: "1.1" });
+  });
+
   it("continues loading /api/config when /api/survey-overlap rejects", async () => {
     mockedGetSurveyOverlap.mockRejectedValueOnce(new Error("sidecar unavailable"));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
