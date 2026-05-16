@@ -9,6 +9,7 @@ import ai.provider as provider_module
 from ai.device import _torch_cuda_available, resolve_compute_device
 
 from .hf_whisper_config import OrthoHFConfig
+from .hf_whisper_probe import compatibility_probe
 from .local_whisper import _normalize_whisper_language
 
 if TYPE_CHECKING:
@@ -222,6 +223,9 @@ class HFWhisperProvider(provider_module.AIProvider):
         if callable(eval_model):
             model = eval_model()
 
+        self._configure_generation_config(model)
+        compatibility_probe(model, processor, language=self._resolved_language())
+
         self._processor = processor
         self._model = model
         print(
@@ -235,15 +239,25 @@ class HFWhisperProvider(provider_module.AIProvider):
         )
         return self._processor, self._model
 
+    def _configure_generation_config(self, model: Any) -> None:
+        gc = getattr(model, "generation_config", None)
+        if gc is None:
+            return
+        gc.return_dict_in_generate = True
+        gc.output_scores = True
+        gc.compression_ratio_threshold = self.compression_ratio_threshold
+        gc.no_repeat_ngram_size = self.no_repeat_ngram_size
+        gc.repetition_penalty = self.repetition_penalty
+        gc.condition_on_prev_tokens = self.condition_on_prev_tokens
+        gc.do_sample = False
+        if self.task:
+            gc.task = self.task
+        resolved_language = self._resolved_language()
+        if resolved_language:
+            gc.language = resolved_language
+
     def _resolved_language(self, language: Optional[str] = None) -> Optional[str]:
         return _normalize_whisper_language((language or self.language) or None)
-
-    def _generate_kwargs(self, language: Optional[str] = None) -> Dict[str, Any]:
-        kwargs: Dict[str, Any] = {"task": self.task}
-        resolved_language = self._resolved_language(language)
-        if resolved_language:
-            kwargs["language"] = resolved_language
-        return kwargs
 
     @staticmethod
     def _coerce_audio_array(audio_array: Any) -> Any:
@@ -339,23 +353,12 @@ class HFWhisperProvider(provider_module.AIProvider):
         if sample_rate != _HF_WHISPER_SAMPLE_RATE:
             raw_audio = self._resample_audio(raw_audio, sample_rate, _HF_WHISPER_SAMPLE_RATE)
             sample_rate = _HF_WHISPER_SAMPLE_RATE
-        inputs = processor(raw_audio, sampling_rate=sample_rate, return_tensors="pt")
+        inputs = processor(raw_audio, sampling_rate=sample_rate, return_tensors="pt", return_attention_mask=True)
         move_inputs = getattr(inputs, "to", None)
         if callable(move_inputs):
             inputs = move_inputs(self._effective_device)
         model_inputs = self._model_input_dict(inputs)
-        generate_kwargs = {
-            **model_inputs,
-            "return_dict_in_generate": True,
-            "output_scores": True,
-            "compression_ratio_threshold": self.compression_ratio_threshold,
-            "no_repeat_ngram_size": self.no_repeat_ngram_size,
-            "repetition_penalty": self.repetition_penalty,
-            "condition_on_prev_tokens": self.condition_on_prev_tokens,
-            "temperature": 0.0,
-            "do_sample": False,
-            **self._generate_kwargs(language),
-        }
+        generate_kwargs = {**model_inputs}
         prompt = self.initial_prompt if initial_prompt is _USE_CONFIG_PROMPT else initial_prompt
         if prompt:
             prompt_ids = processor.get_prompt_ids(
