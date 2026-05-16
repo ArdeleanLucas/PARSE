@@ -275,8 +275,20 @@ def _build_ortho_provider(config: Optional[Dict[str, Any]]) -> AIProvider:
     backend = str(ortho_config.get("backend", "hf") or "hf").strip().lower()
     if backend == "hf":
         from .providers.hf_whisper import HFWhisperProvider
+        from .providers.hf_whisper_config import is_legacy_ortho_schema_error, legacy_schema_migration_command
 
-        return HFWhisperProvider(config=merged, config_section="ortho")
+        try:
+            return HFWhisperProvider(config=merged, config_section="ortho")
+        except ValueError as exc:
+            if is_legacy_ortho_schema_error(exc):
+                print(
+                    "[provider] ORTH config uses the legacy flat schema; run `{0}` before starting PARSE.".format(
+                        legacy_schema_migration_command()
+                    ),
+                    file=sys.stderr,
+                    flush=True,
+                )
+            raise
     if backend in {"faster-whisper", "fasterwhisper", "ct2"}:
         return LocalWhisperProvider(config=merged, config_section="ortho")
     raise ValueError(

@@ -72,14 +72,15 @@ def _provider_with_distinctive_prompt() -> HFWhisperProvider:
         config={
             "ortho": {
                 "backend": "hf",
-                "model_path": "razhan/whisper-base-sdh",
-                "language": "sd",
-                "device": "cpu",
-                "initial_prompt": DISTINCTIVE_MARKER_PROMPT,
-                "condition_on_previous_text": False,
-                "compression_ratio_threshold": 1.8,
-                "no_repeat_ngram_size": 3,
-                "repetition_penalty": 1.2,
+                "model": {"repo_id": "razhan/whisper-base-sdh", "device": "cpu"},
+                "generation": {
+                    "language": "sd",
+                    "condition_on_prev_tokens": False,
+                    "compression_ratio_threshold": 1.8,
+                    "no_repeat_ngram_size": 3,
+                    "repetition_penalty": 1.2,
+                },
+                "decoding": {"initial_prompt": DISTINCTIVE_MARKER_PROMPT},
             }
         }
     )
