@@ -54,7 +54,7 @@ export function BatchReportSummaryHeader({
 
       {allClean && outcomesCount > 0 && (
         <div
-          className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800"
+          className="rounded border border-emerald-300 bg-emerald-100 px-3 py-2 text-xs font-medium text-emerald-900"
           data-testid="batch-report-all-clean"
         >
           All {outcomesCount} speaker

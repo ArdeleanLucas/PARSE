@@ -290,6 +290,16 @@ html:is(.theme-amber, .theme-violet, .theme-blue) .bg-emerald-50 { background-co
 html:is(.theme-amber, .theme-violet, .theme-blue) .text-emerald-700 { color: #66D396 !important; }
 html:is(.theme-amber, .theme-violet, .theme-blue) .ring-emerald-200 { --tw-ring-color: #3D6B4F !important; }
 
+/* Batch Report "all clean" banner — uses bg-emerald-100 / border-emerald-300 /
+   text-emerald-900, none of which are mapped above. Without this override the
+   banner renders as a bright Tailwind tile on the dark card. Scoped by
+   data-testid so the blast radius is limited to this one element. */
+html:is(.theme-amber, .theme-violet, .theme-blue) [data-testid="batch-report-all-clean"] {
+  background-color: var(--success-bg) !important;
+  border-color: var(--success-border) !important;
+  color: var(--status-success) !important;
+}
+
 /* Primary "save / create" action buttons — themed to the active theme accent.
    Light mode keeps emerald green; dark themes get amber / violet / blue.
    Affects: CreateLexemePanel "Create lexeme", AnnotateView "Confirm anchor" +

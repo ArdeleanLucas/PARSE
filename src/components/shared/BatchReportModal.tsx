@@ -100,7 +100,10 @@ export function BatchReportModal({
 
   return (
     <Modal open={open} onClose={onClose} title={title}>
-      <div className="flex w-[min(90vw,64rem)] flex-col gap-3" data-testid="batch-report-modal">
+      <div
+        className="flex w-[min(calc(90vw-3rem),60rem)] flex-col gap-3"
+        data-testid="batch-report-modal"
+      >
         <BatchReportSummaryHeader
           totals={totals}
           outcomesCount={outcomes.length}
