@@ -150,7 +150,13 @@ def test_no_concept_id_legacy_interval_falls_back_to_text_with_warning(tmp_path:
 
     bundle = build_compare_bundles(tmp_path, speakers=["Saha01"])["bundles"][0]
 
-    assert bundle["candidates"]["Saha01"]["7"]["ipa"] == "aw"
+    assert bundle["candidates"]["Saha01"]["7"] == {
+        "ipa": None,
+        "ortho": "",
+        "start_sec": 4.0,
+        "end_sec": 5.0,
+        "source_wav": "audio/working/Saha01/Saha01.wav",
+    }
     assert any("legacy text fallback" in warning for warning in bundle["warnings"])
 
 
