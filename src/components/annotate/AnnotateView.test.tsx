@@ -312,6 +312,97 @@ describe('AnnotateView', () => {
     expect(screen.getByText('JBIL_100')).toBeTruthy();
   });
 
+  it('renders the resolved survey badge in the annotate editor header', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);
+
+    render(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+        surveyBadge={{
+          resolvedSurveyId: 'jbil',
+          resolvedSourceItem: '100',
+          resolvedDisplayColor: 'violet',
+          availableSurveys: { jbil: '100' },
+          surveySettings: { jbil: { display_label: 'JBIL', display_color: 'violet' } },
+          surveyColorCodingEnabled: true,
+          activeSpeaker: 'Fail01',
+          onEdit: vi.fn(),
+        }}
+      />,
+    );
+
+    const header = screen.getByTestId('annotate-survey-badge-row');
+    expect(header.querySelector('[data-testid^="survey-badge-"]')).toBeTruthy();
+    expect(screen.getByTestId('survey-badge-pill-water-jbil').textContent ?? '').toContain('JBIL 100');
+  });
+
+  it('renders one annotate editor survey badge pill per linked survey', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);
+
+    render(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+        surveyBadge={{
+          resolvedSurveyId: 'jbil',
+          resolvedSourceItem: '100',
+          resolvedDisplayColor: 'violet',
+          availableSurveys: { jbil: '100', klq: '4.1', ext: '9' },
+          surveySettings: {
+            jbil: { display_label: 'JBIL', display_color: 'violet' },
+            klq: { display_label: 'KLQ', display_color: 'emerald' },
+            ext: { display_label: 'EXT', display_color: 'slate' },
+          },
+          surveyColorCodingEnabled: true,
+          activeSpeaker: null,
+          onEdit: vi.fn(),
+        }}
+      />,
+    );
+
+    const pills = screen.getAllByTestId(/^survey-badge-pill-water-/);
+    expect(pills.map((pill) => pill.textContent)).toEqual(['EXT 9', 'JBIL 100', 'KLQ 4.1']);
+  });
+
+  it('fires the annotate editor survey-badge edit callback from a pill context menu', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);
+    const onEdit = vi.fn();
+
+    render(
+      <AnnotateView
+        concept={{ id: 1, key: 'water', name: 'water' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+        surveyBadge={{
+          resolvedSurveyId: 'jbil',
+          resolvedSourceItem: '100',
+          resolvedDisplayColor: 'violet',
+          availableSurveys: { jbil: '100' },
+          surveySettings: { jbil: { display_label: 'JBIL', display_color: 'violet' } },
+          surveyColorCodingEnabled: true,
+          activeSpeaker: 'Fail01',
+          onEdit,
+        }}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('survey-badge-pill-water-jbil'));
+
+    expect(onEdit).toHaveBeenCalledWith({ surveyId: 'jbil', sourceItem: '100' });
+  });
+
   it('pre-fills ORTHOGRAPHIC editor from tiers.ortho when both ortho and ortho_words have entries for the concept window', () => {
     mockRecord = makeRecord([{ conceptText: 'one', conceptId: 'water', ipa: 'jɛk', ortho: 'یەک', orthoWords: 'one', start: 18.5, end: 19.5 }]);
 

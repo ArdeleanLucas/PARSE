@@ -6,7 +6,6 @@ import { useConfigStore } from '../../stores/configStore';
 import type { ConceptSurveyLinks, ConceptSurveyLinksByConcept, SpeakerConceptSurveyLinks, SpeakerSurveyChoices, SurveySettingsMap } from '../../api/types';
 import { conceptMatchesElicitedKeys } from '../../lib/speakerElicitedConcepts';
 import { resolveSurveyLinksForSpeaker, surveyRowIdsForConcept, type SpeakerSurveyLinkBucket } from '../../lib/surveyLinksForSpeaker';
-import { SurveyBadge } from '../shared/SurveyBadge';
 import { defaultSurveySettings, normalizeSurveyId, resolveConceptSurvey, SURVEY_CHIP_CLASSES, surveyChoiceKeysForConcept, surveyLabelFor } from '../../lib/surveyOverlap';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
@@ -79,7 +78,6 @@ interface ConceptSidebarProps {
   speakerSurveyChoices?: SpeakerSurveyChoices;
   surveyColorCodingEnabled?: boolean;
   onSurveyChoiceChange?: (speaker: string, conceptKey: string, surveyId: string) => void;
-  onPromoteSurveyPrimary?: (conceptId: string, surveyId: string, sourceItem: string) => void | Promise<void>;
   onMergeRequest?: (concept: SidebarConcept) => void;
   onUnmergeConcept?: (concept: SidebarConcept) => void;
   onDuplicateConcept?: (concept: SidebarConcept) => void;
@@ -190,7 +188,6 @@ export function ConceptSidebar({
   speakerSurveyChoices = {},
   surveyColorCodingEnabled = false,
   onSurveyChoiceChange,
-  onPromoteSurveyPrimary,
   onMergeRequest,
   onUnmergeConcept,
   onDuplicateConcept,
@@ -649,21 +646,6 @@ export function ConceptSidebar({
                     })}
                   </div>
                 )}
-                <SurveyBadge
-                  conceptId={String(concept.id)}
-                  conceptKey={surveyConcept.key}
-                  conceptName={concept.name}
-                  resolvedSurveyId={resolvedSurvey.surveyId}
-                  resolvedSourceItem={resolvedSurvey.sourceItem || fallbackBadge || ''}
-                  resolvedDisplayColor={resolvedSurvey.displayColor}
-                  availableSurveys={resolvedSurvey.availableSurveys}
-                  surveySettings={surveySettings}
-                  surveyColorCodingEnabled={surveyColorCodingEnabled}
-                  activeSpeaker={activeSpeaker ?? null}
-                  parentActive={parentActive}
-                  onCycle={onSurveyChoiceChange ? (next) => onSurveyChoiceChange(activeSpeaker ?? '', surveyConcept.key, next.surveyId) : undefined}
-                  onPromote={onPromoteSurveyPrimary ? (next) => onPromoteSurveyPrimary(String(concept.id), next.surveyId, next.sourceItem) : undefined}
-                />
               </div>
               {surveyChoices.length > 1 && activeSpeaker && onSurveyChoiceChange && (
                 <div className="flex flex-wrap gap-1 px-7 pb-1.5">

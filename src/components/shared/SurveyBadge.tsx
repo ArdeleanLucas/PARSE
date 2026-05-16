@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
+import type { KeyboardEvent, MouseEvent } from 'react';
 
 import type { SurveySettingsMap } from '../../api/types';
 import { normalizeDisplayColor, SURVEY_BADGE_TEXT_CLASSES, surveyLabelFor } from '../../lib/surveyOverlap';
@@ -18,11 +17,23 @@ export interface SurveyBadgeProps {
   parentActive: boolean;
   onCycle?: (next: { surveyId: string; sourceItem: string }) => void;
   onPromote?: (next: { surveyId: string; sourceItem: string }) => void | Promise<void>;
+  onEdit?: (current: { surveyId: string; sourceItem: string }) => void;
+  variant?: 'sidebar' | 'editor';
   className?: string;
+}
+
+function surveyBadgeLabel(surveyId: string, sourceItem: string, fallback: string, settings: SurveySettingsMap): string {
+  if (surveyId && sourceItem) return `${surveyLabelFor(surveyId, settings)} ${sourceItem}`;
+  return sourceItem || fallback;
+}
+
+function slugForTestId(value: string): string {
+  return value.replace(/[^A-Za-z0-9_-]+/g, '-');
 }
 
 export function SurveyBadge({
   conceptId,
+  conceptKey,
   conceptName,
   resolvedSurveyId,
   resolvedSourceItem,
@@ -34,156 +45,165 @@ export function SurveyBadge({
   parentActive,
   onCycle,
   onPromote,
+  onEdit,
+  variant = 'sidebar',
   className = '',
 }: SurveyBadgeProps) {
-  const normalizedDisplayColor = normalizeDisplayColor(resolvedDisplayColor);
-  const resolvedSurveyLabel = surveyLabelFor(resolvedSurveyId, surveySettings);
-  const badge = resolvedSurveyId && resolvedSourceItem
-    ? `${resolvedSurveyLabel} ${resolvedSourceItem}`
-    : resolvedSourceItem || `#${conceptId}`;
   const surveyChoices = Object.keys(availableSurveys).sort();
-  const multiSurveyBadge = surveyChoices.length >= 2;
-  const popoverSurveyBadge = surveyChoices.length >= 3;
-  const currentSurveyIndex = surveyChoices.indexOf(resolvedSurveyId);
-  const nextSurveyId = multiSurveyBadge && resolvedSurveyId
-    ? surveyChoices[((currentSurveyIndex >= 0 ? currentSurveyIndex : 0) + 1) % surveyChoices.length]
-    : undefined;
-  const nextSurveySourceItem = nextSurveyId ? availableSurveys[nextSurveyId] ?? '' : '';
-  const nextSurveyLabel = nextSurveyId ? surveyLabelFor(nextSurveyId, surveySettings) : '';
-  const canCycleSurveyBadge = !!(activeSpeaker && onCycle && multiSurveyBadge && nextSurveyId);
-  const canPromoteSurveyBadge = !!(!activeSpeaker && onPromote && multiSurveyBadge && nextSurveyId);
-  const canFlipSurveyBadge = canCycleSurveyBadge || canPromoteSurveyBadge;
-  const surveyBadgeClassName = `font-mono text-[10px] ${surveyColorCodingEnabled && resolvedSurveyId ? (SURVEY_BADGE_TEXT_CLASSES[normalizedDisplayColor] ?? 'text-slate-400') : parentActive ? 'text-indigo-400' : 'text-slate-300'}`;
-  const mergedClassName = `${surveyBadgeClassName}${className ? ` ${className}` : ''}`;
-  const [open, setOpen] = useState(false);
-  const [focusedIndex, setFocusedIndex] = useState(0);
-  const popoverRef = useRef<HTMLSpanElement | null>(null);
-  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const normalizedDisplayColor = normalizeDisplayColor(resolvedDisplayColor);
+  const fallbackBadge = resolvedSourceItem || `#${conceptId}`;
+  const baseTextClass = surveyColorCodingEnabled && resolvedSurveyId
+    ? (SURVEY_BADGE_TEXT_CLASSES[normalizedDisplayColor] ?? 'text-slate-400')
+    : parentActive ? 'text-indigo-400' : 'text-slate-300';
+  const baseClassName = `font-mono text-[10px] ${baseTextClass}${className ? ` ${className}` : ''}`;
+  const containerClassName = variant === 'editor'
+    ? 'inline-flex flex-wrap items-center gap-1'
+    : 'mr-2 inline-flex flex-wrap items-center gap-1';
 
-  useEffect(() => {
-    if (!open) return undefined;
-
-    const handleDocumentMouseDown = (event: MouseEvent) => {
-      const target = event.target;
-      if (target instanceof Node && popoverRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-
-    document.addEventListener('mousedown', handleDocumentMouseDown);
-    return () => document.removeEventListener('mousedown', handleDocumentMouseDown);
-  }, [open]);
-
-  const focusMenuItem = (index: number) => {
-    window.setTimeout(() => itemRefs.current[index]?.focus(), 0);
+  const fireEdit = (surveyId: string, sourceItem: string) => {
+    if (!onEdit) return;
+    onEdit({ surveyId, sourceItem });
   };
 
-  const selectSurveyChoice = (surveyId: string) => {
-    const sourceItem = availableSurveys[surveyId] ?? '';
-    if (canCycleSurveyBadge && onCycle) onCycle({ surveyId, sourceItem });
-    else if (canPromoteSurveyBadge && onPromote) void onPromote({ surveyId, sourceItem });
-    setOpen(false);
+  const handleEditContextMenu = (surveyId: string, sourceItem: string) => (event: MouseEvent) => {
+    if (!onEdit) return;
+    event.preventDefault();
+    event.stopPropagation();
+    fireEdit(surveyId, sourceItem);
   };
 
-  const openMenu = () => {
-    const initialIndex = currentSurveyIndex >= 0 ? currentSurveyIndex : 0;
-    setFocusedIndex(initialIndex);
-    setOpen(true);
+  const handleKeyboardEdit = (surveyId: string, sourceItem: string) => (event: KeyboardEvent<HTMLElement>) => {
+    if (!onEdit || event.key !== 'ContextMenu') return;
+    event.preventDefault();
+    fireEdit(surveyId, sourceItem);
   };
 
-  const handlePopoverKeyDown = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      setOpen(false);
-      return;
-    }
+  const renderStaticPill = (surveyId: string, sourceItem: string, label: string, selected: boolean) => (
+    <span
+      key={surveyId || 'fallback'}
+      data-testid={`survey-badge-pill-${slugForTestId(conceptKey)}-${slugForTestId(surveyId || 'fallback')}`}
+      onContextMenu={handleEditContextMenu(surveyId, sourceItem)}
+      onKeyDown={handleKeyboardEdit(surveyId, sourceItem)}
+      tabIndex={onEdit ? 0 : undefined}
+      className={`rounded px-1 py-0.5 ${baseClassName} ${selected && surveyChoices.length > 1 ? 'bg-slate-50 ring-1 ring-slate-200' : ''}`}
+    >
+      {label}
+    </span>
+  );
 
-    if (!open) return;
-
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      setFocusedIndex((previousIndex) => {
-        const nextIndex = event.key === 'ArrowDown'
-          ? (previousIndex + 1) % surveyChoices.length
-          : (previousIndex - 1 + surveyChoices.length) % surveyChoices.length;
-        focusMenuItem(nextIndex);
-        return nextIndex;
-      });
-      return;
-    }
-
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      const surveyId = surveyChoices[focusedIndex];
-      if (surveyId) selectSurveyChoice(surveyId);
-    }
-  };
-
-  if (canFlipSurveyBadge && popoverSurveyBadge) {
-    return (
-      <span ref={popoverRef} className="relative mr-2 inline-block">
+  if (surveyChoices.length >= 2 && variant !== 'editor') {
+    const currentSurveyIndex = surveyChoices.indexOf(resolvedSurveyId);
+    const nextSurveyId = resolvedSurveyId
+      ? surveyChoices[((currentSurveyIndex >= 0 ? currentSurveyIndex : 0) + 1) % surveyChoices.length]
+      : undefined;
+    const nextSurveySourceItem = nextSurveyId ? availableSurveys[nextSurveyId] ?? '' : '';
+    const nextSurveyLabel = nextSurveyId ? surveyLabelFor(nextSurveyId, surveySettings) : '';
+    const label = surveyBadgeLabel(resolvedSurveyId, resolvedSourceItem, fallbackBadge, surveySettings);
+    const resolvedSurveyLabel = surveyLabelFor(resolvedSurveyId, surveySettings);
+    const canCycleSurveyBadge = !!(activeSpeaker && onCycle && nextSurveyId);
+    const canPromoteSurveyBadge = !!(!activeSpeaker && onPromote && nextSurveyId);
+    if (canCycleSurveyBadge || canPromoteSurveyBadge) {
+      return (
         <button
           type="button"
+          data-testid={`survey-badge-pill-${slugForTestId(conceptKey)}-${slugForTestId(resolvedSurveyId || 'fallback')}`}
           aria-label={canCycleSurveyBadge
-            ? `Choose survey for ${conceptName} from ${surveyChoices.length} linked surveys`
-            : `Choose primary survey for ${conceptName} from ${surveyChoices.length} linked surveys`}
-          aria-haspopup="menu"
-          aria-expanded={open}
-          onClick={() => (open ? setOpen(false) : openMenu())}
-          onKeyDown={handlePopoverKeyDown}
-          className={`rounded px-1 py-0.5 hover:bg-slate-100 hover:underline ${mergedClassName}`}
+            ? `Switch survey for ${conceptName} from ${resolvedSurveyLabel} ${resolvedSourceItem} to ${nextSurveyLabel} ${nextSurveySourceItem}`
+            : `Promote survey for ${conceptName} from ${resolvedSurveyLabel} ${resolvedSourceItem} to ${nextSurveyLabel} ${nextSurveySourceItem}`}
+          onClick={() => {
+            if (canCycleSurveyBadge && onCycle && nextSurveyId) onCycle({ surveyId: nextSurveyId, sourceItem: nextSurveySourceItem });
+            else if (canPromoteSurveyBadge && onPromote && nextSurveyId) void onPromote({ surveyId: nextSurveyId, sourceItem: nextSurveySourceItem });
+          }}
+          onContextMenu={handleEditContextMenu(resolvedSurveyId, resolvedSourceItem)}
+          onKeyDown={handleKeyboardEdit(resolvedSurveyId, resolvedSourceItem)}
+          className={`mr-2 rounded px-1 py-0.5 hover:bg-slate-100 hover:underline ${baseClassName}`}
         >
-          {badge}
+          {label}
         </button>
-        {open ? (
-          <div
-            role="menu"
-            aria-label={`Survey choices for ${conceptName}`}
-            className="absolute left-0 top-full z-30 mt-1 min-w-max rounded border border-slate-200 bg-white py-1 text-slate-700 shadow-lg"
-          >
-            {surveyChoices.map((surveyId, index) => {
-              const sourceItem = availableSurveys[surveyId] ?? '';
-              const surveyLabel = surveyLabelFor(surveyId, surveySettings);
-              const selected = surveyId === resolvedSurveyId;
-              return (
-                <button
-                  key={surveyId}
-                  ref={(element) => { itemRefs.current[index] = element; }}
-                  type="button"
-                  role="menuitem"
-                  aria-current={selected ? 'true' : undefined}
-                  tabIndex={-1}
-                  onClick={() => selectSurveyChoice(surveyId)}
-                  onKeyDown={handlePopoverKeyDown}
-                  className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-1 text-left text-xs hover:bg-slate-100 focus:bg-slate-100 focus:outline-none"
-                >
-                  <span aria-hidden="true" className="w-2 text-center">{selected ? '•' : ''}</span>
-                  <span>{surveyLabel} {sourceItem}</span>
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
+      );
+    }
+    return (
+      <span
+        data-testid={`survey-badge-pill-${slugForTestId(conceptKey)}-${slugForTestId(resolvedSurveyId || 'fallback')}`}
+        onContextMenu={handleEditContextMenu(resolvedSurveyId, resolvedSourceItem)}
+        onKeyDown={handleKeyboardEdit(resolvedSurveyId, resolvedSourceItem)}
+        tabIndex={onEdit ? 0 : undefined}
+        className={`mr-2 px-1 py-0.5 ${baseClassName}`}
+      >
+        {label}
       </span>
     );
   }
 
-  if (canFlipSurveyBadge) {
+  if (surveyChoices.length >= 2) {
+    const canCycleSurveyBadge = !!(activeSpeaker && onCycle);
+    const canPromoteSurveyBadge = !!(!activeSpeaker && onPromote);
+    const canFlipSurveyBadge = canCycleSurveyBadge || canPromoteSurveyBadge;
     return (
-      <button
-        type="button"
-        aria-label={canCycleSurveyBadge
-          ? `Switch survey for ${conceptName} from ${resolvedSurveyLabel} ${resolvedSourceItem} to ${nextSurveyLabel} ${nextSurveySourceItem}`
-          : `Promote survey for ${conceptName} from ${resolvedSurveyLabel} ${resolvedSourceItem} to ${nextSurveyLabel} ${nextSurveySourceItem}`}
-        onClick={() => {
-          if (canCycleSurveyBadge && onCycle) onCycle({ surveyId: nextSurveyId, sourceItem: nextSurveySourceItem });
-          else if (canPromoteSurveyBadge && onPromote) void onPromote({ surveyId: nextSurveyId, sourceItem: nextSurveySourceItem });
-        }}
-        className={`mr-2 rounded px-1 py-0.5 hover:bg-slate-100 hover:underline ${mergedClassName}`}
-      >
-        {badge}
-      </button>
+      <span data-testid={`survey-badge-${slugForTestId(conceptKey)}`} className={containerClassName}>
+        {surveyChoices.map((surveyId) => {
+          const sourceItem = availableSurveys[surveyId] ?? '';
+          const label = surveyBadgeLabel(surveyId, sourceItem, fallbackBadge, surveySettings);
+          const selected = surveyId === resolvedSurveyId;
+          const display = surveySettings[surveyId]?.display_color ?? resolvedDisplayColor;
+          const normalized = normalizeDisplayColor(display);
+          const colorClass = surveyColorCodingEnabled
+            ? (SURVEY_BADGE_TEXT_CLASSES[normalized] ?? baseTextClass)
+            : selected && parentActive ? 'text-indigo-400' : selected ? baseTextClass : 'text-slate-400';
+          const pillClassName = `rounded px-1 py-0.5 font-mono text-[10px] ${colorClass}${className ? ` ${className}` : ''} ${selected ? 'bg-slate-50 ring-1 ring-slate-200' : ''}`;
+          if (canFlipSurveyBadge && !selected) {
+            return (
+              <button
+                key={surveyId}
+                type="button"
+                data-testid={`survey-badge-pill-${slugForTestId(conceptKey)}-${slugForTestId(surveyId)}`}
+                aria-label={canCycleSurveyBadge
+                  ? `Switch survey for ${conceptName} to ${label}`
+                  : `Promote survey for ${conceptName} to ${label}`}
+                onClick={() => {
+                  if (canCycleSurveyBadge && onCycle) onCycle({ surveyId, sourceItem });
+                  else if (canPromoteSurveyBadge && onPromote) void onPromote({ surveyId, sourceItem });
+                }}
+                onContextMenu={handleEditContextMenu(surveyId, sourceItem)}
+                onKeyDown={handleKeyboardEdit(surveyId, sourceItem)}
+                className={`${pillClassName} hover:bg-slate-100 hover:underline`}
+              >
+                {label}
+              </button>
+            );
+          }
+          return renderStaticPill(surveyId, sourceItem, label, selected);
+        })}
+      </span>
     );
   }
 
-  return <span className={`mr-2 px-1 py-0.5 ${mergedClassName}`}>{badge}</span>;
+  const label = surveyBadgeLabel(resolvedSurveyId, resolvedSourceItem, fallbackBadge, surveySettings);
+  const canEdit = !!onEdit;
+  if (canEdit) {
+    return (
+      <span data-testid={`survey-badge-${slugForTestId(conceptKey)}`} className={containerClassName}>
+        <span
+          data-testid={`survey-badge-pill-${slugForTestId(conceptKey)}-${slugForTestId(resolvedSurveyId || 'fallback')}`}
+          onContextMenu={handleEditContextMenu(resolvedSurveyId, resolvedSourceItem)}
+          onKeyDown={handleKeyboardEdit(resolvedSurveyId, resolvedSourceItem)}
+          tabIndex={0}
+          className={`rounded px-1 py-0.5 ${baseClassName}`}
+        >
+          {label}
+        </span>
+      </span>
+    );
+  }
+
+  return (
+    <span data-testid={`survey-badge-${slugForTestId(conceptKey)}`} className={containerClassName}>
+      <span
+        data-testid={`survey-badge-pill-${slugForTestId(conceptKey)}-${slugForTestId(resolvedSurveyId || 'fallback')}`}
+        className={`rounded px-1 py-0.5 ${baseClassName}`}
+      >
+        {label}
+      </span>
+    </span>
+  );
 }

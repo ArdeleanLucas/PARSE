@@ -1299,6 +1299,21 @@ export function ParseUI() {
     ? surveyLabelFor(activeResolvedSurvey.surveyId, surveySettings)
     : undefined;
   const activeSurveySourceItem = activeResolvedSurvey.sourceItem || undefined;
+  const activeSurveyBadge = activeResolvedSurvey.surveyId || activeResolvedSurvey.sourceItem ? {
+    resolvedSurveyId: activeResolvedSurvey.surveyId,
+    resolvedSourceItem: activeResolvedSurvey.sourceItem || '',
+    resolvedDisplayColor: activeResolvedSurvey.displayColor,
+    availableSurveys: activeResolvedSurvey.availableSurveys,
+    surveySettings,
+    surveyColorCodingEnabled,
+    activeSpeaker: selectedSpeakers[0] ?? null,
+    onCycle: selectedSpeakers[0]
+      ? (next: { surveyId: string; sourceItem: string }) => handleSurveyChoiceChange(selectedSpeakers[0]!, concept.key, next.surveyId)
+      : undefined,
+    onPromote: selectedSpeakers[0]
+      ? undefined
+      : (next: { surveyId: string; sourceItem: string }) => handlePromoteSurveyPrimary(String(concept.id), next.surveyId, next.sourceItem),
+  } : undefined;
   const referenceFormLists = useMemo(
     () => resolveReferenceFormLists(enrichmentData, silConcepts, concept, primaryContactCodes, contactLanguageScripts),
     [concept, enrichmentData, silConcepts, primaryContactCodes, contactLanguageScripts],
@@ -1920,7 +1935,6 @@ export function ParseUI() {
           speakerSurveyChoices={speakerSurveyChoices}
           surveyColorCodingEnabled={surveyColorCodingEnabled}
           onSurveyChoiceChange={handleSurveyChoiceChange}
-          onPromoteSurveyPrimary={handlePromoteSurveyPrimary}
           scopedToSpeaker={scopedToSpeaker}
           onScopedToSpeakerChange={setScopedToSpeaker}
           elicitedConceptKeys={elicitedConceptKeys}
@@ -2077,6 +2091,7 @@ export function ParseUI() {
               peaksUrl={selectedSpeakers[0] ? resolveAssetUrl(`/peaks/${selectedSpeakers[0]}.json`) : undefined}
               surveyLabel={activeSurveyLabel}
               surveySourceItem={activeSurveySourceItem}
+              surveyBadge={activeSurveyBadge}
             />
             <AIChat
               height={aiHeight}

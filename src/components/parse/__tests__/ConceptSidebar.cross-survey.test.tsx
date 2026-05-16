@@ -125,8 +125,9 @@ describe('ConceptSidebar cross-survey linking', () => {
     );
 
     const row = screen.getByTestId('concept-row-1');
-    expect(row.textContent).toContain('JBIL 32');
-    expect(row.textContent).not.toContain('KLQ 1.1');
+    expect(row.textContent).not.toContain('JBIL 32');
+    expect(screen.getByTestId('concept-parent-button-1').getAttribute('aria-label') ?? '').toContain('JBIL 32');
+    expect(screen.getByTestId('concept-parent-button-1').getAttribute('aria-label') ?? '').not.toContain('KLQ 1.1');
     expect(within(row).getByRole('button', { name: /^hair \+2 JBIL 32/i })).toBeTruthy();
   });
 
@@ -141,9 +142,9 @@ describe('ConceptSidebar cross-survey linking', () => {
       />,
     );
 
-    const klqBadge = screen.getByRole('button', { name: /Switch survey for head from KLQ 1\.1 to JBIL 31/i });
-    expect(klqBadge.textContent).toBe('KLQ 1.1');
-    expect(klqBadge.className).toContain('hover:underline');
+    const klqBadge = screen.getByRole('button', { name: /Switch head to JBIL 31/i });
+    expect(klqBadge.textContent).toBe('JBIL');
+    expect(klqBadge.className).toContain('hover:bg-slate-50');
 
     fireEvent.click(klqBadge);
     expect(onSurveyChoiceChange).toHaveBeenCalledWith('speakerKey', 'conceptKey', 'jbil');
@@ -156,7 +157,7 @@ describe('ConceptSidebar cross-survey linking', () => {
         onSurveyChoiceChange={onSurveyChoiceChange}
       />,
     );
-    expect(screen.getByRole('button', { name: /Switch survey for head from JBIL 31 to KLQ 1\.1/i }).textContent).toBe('JBIL 31');
+    expect(screen.getByRole('button', { name: /Switch head to KLQ 1\.1/i }).textContent).toBe('KLQ');
   });
 
   it('reflects speakerSurveyChoices in the resolved badge without re-mount', () => {
@@ -184,8 +185,8 @@ describe('ConceptSidebar cross-survey linking', () => {
     );
 
     const row = screen.getByTestId('concept-row-54');
-    expect(row.textContent).toContain('JBIL 170');
-    expect(row.textContent).not.toContain('KLQ 4.2');
+    expect(screen.getByTestId('concept-parent-button-54').getAttribute('aria-label') ?? '').toContain('JBIL 170');
+    expect(screen.getByTestId('concept-parent-button-54').getAttribute('aria-label') ?? '').not.toContain('KLQ 4.2');
 
     rerender(
       <ConceptSidebar
@@ -200,8 +201,8 @@ describe('ConceptSidebar cross-survey linking', () => {
       />,
     );
 
-    expect(row.textContent).toContain('KLQ 4.2');
-    expect(row.textContent).not.toContain('JBIL 170');
+    expect(screen.getByTestId('concept-parent-button-54').getAttribute('aria-label') ?? '').toContain('KLQ 4.2');
+    expect(screen.getByTestId('concept-parent-button-54').getAttribute('aria-label') ?? '').not.toContain('JBIL 170');
     const selectedKlqChip = within(row).getByRole('button', { name: /Current survey KLQ 4\.2/i });
     expect(selectedKlqChip.className).toContain('bg-slate-900');
   });
@@ -335,7 +336,7 @@ describe('ConceptSidebar cross-survey linking', () => {
     const { rerender } = renderSidebar({
       speakerConceptSurveyLinks: { Saha01: { '53': { jbil: '169' }, '619': { jbil: '169' } } },
     });
-    expect(screen.getByText('JBIL 169')).toBeTruthy();
+    expect(screen.getByTestId('concept-parent-button-53').getAttribute('aria-label') ?? '').toContain('JBIL 169');
 
     rerender(
       <ConceptSidebar
@@ -348,7 +349,7 @@ describe('ConceptSidebar cross-survey linking', () => {
         onSurveyChoiceChange={vi.fn()}
       />,
     );
-    expect(screen.getByText('KLQ 4.9')).toBeTruthy();
+    expect(screen.getByTestId('concept-parent-button-53').getAttribute('aria-label') ?? '').toContain('KLQ 4.9');
   });
 
   it('renders cycle chips when a single-row concept has a sidecar entry and a legacy primary', () => {
@@ -382,7 +383,7 @@ describe('ConceptSidebar cross-survey linking', () => {
       .map((button) => button.textContent?.trim())
       .filter((text) => text === 'JBIL' || text === 'KLQ');
     expect(chipLabels.sort()).toEqual(['JBIL', 'KLQ']);
-    expect(within(row).getByRole('button', { name: /Switch survey for snow from JBIL 124 to KLQ 3\.4/i })).toBeTruthy();
+    expect(within(row).getByRole('button', { name: /Switch snow to KLQ 3\.4/i })).toBeTruthy();
   });
 
 });
