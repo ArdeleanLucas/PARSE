@@ -203,27 +203,31 @@ flowchart LR
 ### ORTH backend choice (2026-05-01)
 
 ORTH now defaults to `ortho.backend = "hf"` ([PR #218](https://github.com/ArdeleanLucas/PARSE/pull/218)), implemented by `HFWhisperProvider`
-with Hugging Face Transformers FP32 PyTorch on `razhan/whisper-base-sdh`. The
-first load may download roughly 280 MB into the standard Hugging Face cache at
-`~/.cache/huggingface/`. The legacy CT2 path remains selectable with
-`ortho.backend = "faster-whisper"` and a local CTranslate2 `ortho.model_path`,
-but it is no longer recommended for Razhan SDH ORTH: on Lucas's RTX 5090,
-HF Transformers was 16x faster on Saha01 and eliminated the 35.7% Latin /
-Cyrillic / CJK contamination seen in the CT2 path.
+with Hugging Face Transformers FP32 PyTorch on `razhan/whisper-base-sdh` via
+`ortho.model.repo_id`. The first load may download roughly 280 MB into the
+standard Hugging Face cache at `~/.cache/huggingface/`. The legacy CT2 path
+remains selectable with `ortho.backend = "faster-whisper"` and a local
+CTranslate2 conversion directory, but it is no longer recommended for Razhan SDH
+ORTH: on Lucas's RTX 5090, HF Transformers was 16x faster on Saha01 and
+eliminated the 35.7% Latin / Cyrillic / CJK contamination seen in the CT2 path.
 
 The shipped HF provider uses low-level `WhisperProcessor` +
 `WhisperForConditionalGeneration.generate()` rather than the high-level
 pipeline. Full-file ORTH is chunked into 30-second windows; in-memory/concept
 clips carry explicit sample rates and are resampled to 16 kHz when needed;
 concept-window timing comes from the caller-supplied concept interval rather
-than Whisper timestamp returns. Generated-token logprobs feed confidence, while
-`compression_ratio_threshold`, `no_repeat_ngram_size`, `repetition_penalty`,
-`condition_on_previous_text`, deterministic sampling flags, and explicit
-caller-supplied prompt ids provide the anti-cascade guard surface. Current
+than Whisper timestamp returns. Generated-token logprobs feed the legacy
+`confidence` float plus optional `confidence_source` / `confidence_n_tokens`
+provenance fields. Decode policy is owned by `model.generation_config`, set once
+at provider load from `ortho.generation`; per-call `generate()` kwargs are
+limited to input tensors, optional prompt IDs, and optional `max_new_tokens`.
+The load-time compatibility probe in [`python/ai/providers/hf_whisper_probe.py`](../python/ai/providers/hf_whisper_probe.py)
+asserts non-empty `generated.scores` before the provider is cached, guarding
+future Transformers upgrades from silently dropping confidence evidence. Current
 full-file, concept-window, and per-lexeme HF ORTH callers pass no configured
-prompt by default; callers must intentionally opt in if they want seeded
-decoding. Legacy `compute_type` and VAD keys remain accepted in config for CT2
-compatibility but are logged as ignored by HF.
+prompt by default; callers must intentionally opt in through
+`ortho.decoding.initial_prompt` if they want seeded decoding. Legacy CT2 knobs
+remain faster-whisper-only compatibility settings, not HF generation inputs.
 
 This separation is important conceptually:
 
