@@ -348,7 +348,7 @@ The current Compare interface provides:
 
 - a **concept × speaker matrix** for side-by-side lexical review
 - source-aware sidebar badges and sorting from `concepts.csv` `source_survey` / `source_item` values
-- survey-overlap chips, color coding, and per-speaker survey choices from `survey-overlap.json`; the Current survey badge updates from the active speaker/context rather than stale global copy
+- survey-overlap chips, color coding, and per-speaker survey choices from `survey-overlap.json`; the Annotate header survey chip row updates from the active speaker/context rather than stale global copy
 - grouped source-item variant rows when multiple concepts share the same `source_item`, with A/B/C realization pills in speaker forms
 - per-speaker canonical realization picks persisted under `manual_overrides.canonical_realizations`
 - manual concept merge/unmerge overrides persisted under `manual_overrides.concept_merges`, combining forms for review without rewriting source concepts or annotation intervals; merge overrides are Compare-mode-only and do not collapse Annotate navigation
@@ -382,7 +382,7 @@ The goal is not just visualization — it is structured decision-making for down
 
 ### Cross-survey concept linking
 
-Surveys often elicit the same gloss under different `source_item` numbers (KLQ-12 and JBIL-204 both meaning "rain"). Compare mode treats those as separate concept rows by default, but the right-side **Survey Values** panel lets a reviewer explicitly link them so survey-overlap chips, color coding, and downstream comparison data treat them as one analytical row without rewriting `concepts.csv`.
+Surveys often elicit the same gloss under different `source_item` numbers (for example, SurveyA-12 and SurveyB-204 both meaning "rain"). Compare mode treats those as separate concept rows by default, but the right-side **Survey Values** panel lets a reviewer explicitly link them so survey-overlap chips, color coding, and downstream comparison data treat them as one analytical row without rewriting `concepts.csv`.
 
 There are three ways linking can happen:
 

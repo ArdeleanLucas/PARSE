@@ -117,9 +117,9 @@ The adapter ships with the full safe PARSE tool surface by default and supports 
 
 | Mode | What you get |
 |---|---|
-| **Default** | 64 MCP tools total: 60 default `ParseChatTools` + 3 workflow macros + `mcp_get_exposure_mode` |
-| **Legacy curated opt-out** | 44 MCP tools total: 40 curated `ParseChatTools` + 3 workflow macros + `mcp_get_exposure_mode` via explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` |
-| **Expose all** | 64 MCP tools total: all 60 `ParseChatTools`, all 3 workflow macros, plus `mcp_get_exposure_mode` |
+| **Default** | 65 MCP tools total: 61 default `ParseChatTools` + 3 workflow macros + `mcp_get_exposure_mode` |
+| **Legacy curated opt-out** | 45 MCP tools total: 41 curated `ParseChatTools` + 3 workflow macros + `mcp_get_exposure_mode` via explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` |
+| **Expose all** | 65 MCP tools total: all 61 `ParseChatTools`, all 3 workflow macros, plus `mcp_get_exposure_mode` |
 
 The shipped default already exposes the full safe ParseChatTools surface. Create `config/mcp_config.json` (preferred) or root-level `mcp_config.json` only when you want to force a specific active mode:
 
@@ -264,9 +264,9 @@ Keep only the essentials in the client config and move the rest into repo-local 
 
 ### I expected fewer or more tools than I see by default
 
-Current PARSE defaults to the full safe 64-tool adapter surface: 60 `ParseChatTools`, 3 workflow macros, and `mcp_get_exposure_mode`. If you need the older smaller surface, set `{"expose_all_tools": false}` in `config/mcp_config.json`; that publishes the legacy 44-tool adapter surface.
+Current PARSE defaults to the full safe 65-tool adapter surface: 61 `ParseChatTools`, 3 workflow macros, and `mcp_get_exposure_mode`. If you need the older smaller surface, set `{"expose_all_tools": false}` in `config/mcp_config.json`; that publishes the legacy 45-tool adapter surface.
 
-The default set includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus write-capable `clef_clear_data`, `csv_only_reimport`, and `revert_csv_reimport` tools for dry-run-capable CLEF reset and Audition CSV reimport/revert workflows. The shorter name `bnd_stt` is only a compute-type alias for the HTTP/background-job path, not a separately registered MCP tool name.
+The default set includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus write-capable `clef_clear_data`, `csv_only_reimport`, `revert_csv_reimport`, and `populate_cross_survey_links` tools for dry-run-capable CLEF reset and Audition CSV reimport/revert workflows. The shorter name `bnd_stt` is only a compute-type alias for the HTTP/background-job path, not a separately registered MCP tool name.
 
 ### Can I use an official `parse_mcp` Python package or an HTTP MCP bridge?
 
@@ -281,7 +281,7 @@ For most local agent setups, the **stdio MCP adapter** is still the simplest pla
 
 After you are up and running:
 
-- inspect the default 64-tool MCP surface from your client; set `expose_all_tools=false` only when you intentionally need the legacy curated opt-out
+- inspect the default 65-tool MCP surface from your client; set `expose_all_tools=false` only when you intentionally need the legacy curated opt-out
 - try the workflow macros first: `run_full_annotation_pipeline`, `prepare_compare_mode`, and `export_complete_lingpy_dataset`
 - use `mcp_get_exposure_mode` to confirm which MCP surface the current project is publishing
 - move from this guide into the API and AI docs below when you need full schema and tool-reference detail
