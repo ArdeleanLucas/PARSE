@@ -117,7 +117,6 @@ export async function pollOffsetDetectJob(
     onProgress,
   }: {
     intervalMs?: number;
-    timeoutMs?: number;
     onProgress?: (p: { progress: number; message?: string }) => void;
   } = {},
 ): Promise<OffsetDetectResult> {

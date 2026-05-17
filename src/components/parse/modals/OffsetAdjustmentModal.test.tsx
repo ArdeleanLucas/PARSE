@@ -49,7 +49,6 @@ describe('OffsetAdjustmentModal', () => {
         onSubmitManualOffset={onSubmitManualOffset}
         onApplyDetectedOffset={vi.fn()}
         onOpenManualOffset={vi.fn()}
-        onCancelDetection={vi.fn()}
         onOpenJobLogs={vi.fn()}
       />,
     );
@@ -84,7 +83,6 @@ describe('OffsetAdjustmentModal', () => {
         onSubmitManualOffset={vi.fn()}
         onApplyDetectedOffset={vi.fn()}
         onOpenManualOffset={vi.fn()}
-        onCancelDetection={vi.fn()}
         onOpenJobLogs={onOpenJobLogs}
       />,
     );
@@ -106,7 +104,6 @@ describe('OffsetAdjustmentModal', () => {
         onSubmitManualOffset={vi.fn()}
         onApplyDetectedOffset={vi.fn()}
         onOpenManualOffset={vi.fn()}
-        onCancelDetection={vi.fn()}
         onOpenJobLogs={onOpenJobLogs}
       />,
     );
@@ -131,7 +128,6 @@ describe('OffsetAdjustmentModal', () => {
       onSubmitManualOffset: vi.fn(),
       onApplyDetectedOffset: vi.fn(),
       onOpenManualOffset: vi.fn(),
-      onCancelDetection: vi.fn(),
       onOpenJobLogs,
     };
 
@@ -184,7 +180,6 @@ describe('OffsetAdjustmentModal', () => {
         onSubmitManualOffset={vi.fn()}
         onApplyDetectedOffset={onApplyDetectedOffset}
         onOpenManualOffset={onOpenManualOffset}
-        onCancelDetection={vi.fn()}
         onOpenJobLogs={vi.fn()}
       />,
     );
@@ -220,7 +215,6 @@ describe('OffsetAdjustmentModal', () => {
         onSubmitManualOffset={vi.fn()}
         onApplyDetectedOffset={vi.fn()}
         onOpenManualOffset={vi.fn()}
-        onCancelDetection={vi.fn()}
         onOpenJobLogs={vi.fn()}
       />,
     );

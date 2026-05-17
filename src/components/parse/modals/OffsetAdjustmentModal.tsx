@@ -16,7 +16,6 @@ interface OffsetAdjustmentModalProps {
   onSubmitManualOffset: () => void;
   onApplyDetectedOffset: () => void;
   onOpenManualOffset: () => void;
-  onCancelDetection: (jobId: string) => void;
   onOpenJobLogs: (jobId: string) => void;
 }
 
@@ -46,7 +45,6 @@ export function OffsetAdjustmentModal({
   onSubmitManualOffset,
   onApplyDetectedOffset,
   onOpenManualOffset,
-  onCancelDetection,
   onOpenJobLogs,
 }: OffsetAdjustmentModalProps) {
   return (
@@ -75,16 +73,6 @@ export function OffsetAdjustmentModal({
             <p className="text-[11px] text-slate-400">
               This window stays open while the worker is running. The header also mirrors the status.
             </p>
-            {offsetState.jobId && (
-              <div className="flex justify-end">
-                <button
-                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                  onClick={() => onCancelDetection(offsetState.jobId!)}
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
           </div>
         )}
 

@@ -22,12 +22,6 @@ describe('pollOffsetDetectJob', () => {
   });
 
   it('keeps polling long-running offset detection until the backend reports completion', async () => {
-    let now = 0;
-    vi.spyOn(Date, 'now').mockImplementation(() => {
-      now += 10;
-      return now;
-    });
-
     const pollMock = vi.mocked(pollCompute);
     for (let i = 0; i < 50; i += 1) {
       pollMock.mockResolvedValueOnce(runningStatus(i));
@@ -47,7 +41,7 @@ describe('pollOffsetDetectJob', () => {
     });
 
     await expect(
-      pollOffsetDetectJob('offset-job-long', 'offset_detect', { intervalMs: 0, timeoutMs: 50 }),
+      pollOffsetDetectJob('offset-job-long', 'offset_detect', { intervalMs: 0 }),
     ).resolves.toMatchObject({ speaker: 'Fail01', offsetSec: 1.25 });
     expect(pollMock).toHaveBeenCalledTimes(51);
   });

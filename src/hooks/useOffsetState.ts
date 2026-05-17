@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { OffsetDetectResult, OffsetPair } from '../api/client';
-import { cancelComputeJob, OffsetJobError } from '../api/client';
+import { OffsetJobError } from '../api/client';
 
 export interface OffsetWorkflowConcept {
   id: number;
@@ -179,16 +179,6 @@ export function useOffsetState({
     setJobLogsOpen(jobId);
   }, []);
 
-  const cancelDetection = useCallback(async (jobId: string) => {
-    try {
-      await cancelComputeJob(jobId);
-    } catch (err) {
-      console.warn('Failed to cancel offset detection job', err);
-    } finally {
-      setOffsetState({ phase: 'idle' });
-    }
-  }, []);
-
   const closeJobLogs = useCallback(() => {
     setJobLogsOpen(null);
   }, []);
@@ -315,7 +305,6 @@ export function useOffsetState({
     jobLogsOpen,
     openJobLogs,
     closeJobLogs,
-    cancelDetection,
     manualAnchors,
     manualBusy,
     captureToast,
