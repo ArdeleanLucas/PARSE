@@ -341,11 +341,17 @@ def _annotation_interval_concept_identity(tier_key: str, raw: _server.Dict[str, 
 
 
 def _annotation_shift_intervals(record: _server.Dict[str, _server.Any], offset_sec: float) -> _server.Tuple[int, int, int]:
-    """Add ``offset_sec`` to every interval's start/end. Negative values clamp to 0.
+    """Shift annotation intervals by the requested global offset.
 
-    Mutates the record in place. Intervals flagged ``manuallyAdjusted`` are
-    skipped — once the annotator has locked a lexeme's timing (direct edit or
-    a captured anchor pair) a later global shift must not move it again.
+    Concept-tier intervals that still carry ``imported_csv_start`` use that
+    original CSV position as the absolute base, so repeated offset applies
+    converge to ``imported_csv_start + offset_sec`` instead of accumulating on
+    whatever the previous round left in ``start``. Legacy intervals without
+    imported CSV provenance keep the historical incremental behavior.
+
+    Mutates the record in place. A concept-tier ``manuallyAdjusted`` flag
+    protects that lexeme across mirror tiers sharing the same concept identity;
+    per-tier ``manuallyAdjusted`` flags also remain protected.
 
     Returns ``(shifted_intervals, skipped_protected, shifted_concepts)``.
     """
@@ -354,6 +360,44 @@ def _annotation_shift_intervals(record: _server.Dict[str, _server.Any], offset_s
     tiers = record.get('tiers')
     if not isinstance(tiers, dict):
         return (0, 0, 0)
+
+    offset = float(offset_sec)
+    concept_tier = tiers.get('concept')
+    concept_intervals = []
+    if isinstance(concept_tier, dict):
+        raw_concept_intervals = concept_tier.get('intervals')
+        if isinstance(raw_concept_intervals, list):
+            concept_intervals = raw_concept_intervals
+
+    delta_by_concept: _server.Dict[str, float] = {}
+    delta_by_interval_key: _server.Dict[_server.Tuple[float, float], float] = {}
+    protected_concept_ids: set[str] = set()
+    protected_interval_keys: set[_server.Tuple[float, float]] = set()
+    for index, raw in enumerate(concept_intervals):
+        if not isinstance(raw, dict):
+            continue
+        concept_identity = _annotation_interval_concept_identity('concept', raw, index)
+        start = _server._coerce_finite_float(raw.get('start', raw.get('xmin')))
+        end = _server._coerce_finite_float(raw.get('end', raw.get('xmax')))
+        interval_key = (float(start), float(end)) if start is not None and end is not None else None
+        if bool(raw.get('manuallyAdjusted')):
+            if concept_identity:
+                protected_concept_ids.add(concept_identity)
+            if interval_key is not None:
+                protected_interval_keys.add(interval_key)
+            continue
+        if start is None:
+            continue
+        imported_start = _server._coerce_finite_float(raw.get('imported_csv_start'))
+        if imported_start is None:
+            delta = offset
+        else:
+            delta = max(0.0, float(imported_start) + offset) - float(start)
+        if concept_identity:
+            delta_by_concept[concept_identity] = delta
+        if interval_key is not None:
+            delta_by_interval_key[interval_key] = delta
+
     shifted = 0
     skipped_protected = 0
     shifted_concept_keys = set()
@@ -370,11 +414,19 @@ def _annotation_shift_intervals(record: _server.Dict[str, _server.Any], offset_s
             end = _server._coerce_finite_float(raw.get('end', raw.get('xmax')))
             if start is None or end is None:
                 continue
-            if bool(raw.get('manuallyAdjusted')):
+            concept_identity = _annotation_interval_concept_identity(str(tier_key), raw, index)
+            interval_key = (float(start), float(end))
+            concept_protected = concept_identity and concept_identity in protected_concept_ids
+            interval_protected = interval_key in protected_interval_keys
+            if bool(raw.get('manuallyAdjusted')) or concept_protected or interval_protected:
                 skipped_protected += 1
                 continue
-            new_start = max(0.0, float(start) + float(offset_sec))
-            new_end = max(new_start, float(end) + float(offset_sec))
+            if concept_identity and concept_identity in delta_by_concept:
+                delta = delta_by_concept[concept_identity]
+            else:
+                delta = delta_by_interval_key.get(interval_key, offset)
+            new_start = max(0.0, float(start) + delta)
+            new_end = max(new_start, float(end) + delta)
             raw['start'] = new_start
             raw['end'] = new_end
             if 'xmin' in raw:
@@ -382,7 +434,6 @@ def _annotation_shift_intervals(record: _server.Dict[str, _server.Any], offset_s
             if 'xmax' in raw:
                 raw['xmax'] = new_end
             shifted += 1
-            concept_identity = _annotation_interval_concept_identity(str(tier_key), raw, index)
             if concept_identity:
                 shifted_concept_keys.add(concept_identity)
     _server._annotation_sort_all_intervals(record)
