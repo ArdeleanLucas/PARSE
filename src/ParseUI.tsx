@@ -107,6 +107,7 @@ interface DeleteConfirmationState {
   conceptKey: string;
   conceptLabel: string;
   blockingSpeakers: string[] | null;
+  navigateAfterDeleteTo?: { conceptId: number; conceptKey: string | null } | null;
 }
 
 interface LingTag {
@@ -1470,6 +1471,16 @@ export function ParseUI() {
     : (filtered.length > 0 ? filtered : concepts);
   const navigationTotal = navigationConcepts.length;
 
+  const resolveConceptOffsetTarget = useCallback((offset: number): { conceptId: number; conceptKey: string | null } | null => {
+    const list = navigationConcepts.length > 0 ? navigationConcepts : concepts;
+    if (list.length === 0) return null;
+    const currentIndex = list.findIndex((candidate) => candidate.id === conceptId);
+    const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+    const nextIndex = Math.min(list.length - 1, Math.max(0, baseIndex + offset));
+    const target = list[nextIndex];
+    return target ? { conceptId: target.id, conceptKey: target.key ?? null } : null;
+  }, [conceptId, concepts, navigationConcepts]);
+
   const goToConceptOffset = useCallback((offset: number) => {
     setSelectedConceptKey(null);
     setConceptId((id) => {
@@ -1969,6 +1980,7 @@ export function ParseUI() {
               conceptKey: sidebarConcept.key ?? String(sidebarConcept.id),
               conceptLabel: sidebarConcept.name,
               blockingSpeakers: null,
+              navigateAfterDeleteTo: null,
             });
           }}
           onDuplicateConcept={(sidebarConcept) => {
@@ -2112,6 +2124,15 @@ export function ParseUI() {
               activeSpeaker={selectedSpeakers[0]}
               conceptSurveyKey={activeResolvedSurvey.conceptKey}
               onSurveyChoiceChange={handleSurveyChoiceChange}
+              onDeleteConcept={() => {
+                setDeleteModalError(null);
+                setDeleteConfirmation({
+                  conceptKey: concept.key ?? String(concept.id),
+                  conceptLabel: concept.name,
+                  blockingSpeakers: null,
+                  navigateAfterDeleteTo: resolveConceptOffsetTarget(-1),
+                });
+              }}
             />
             <AIChat
               height={aiHeight}
@@ -2649,6 +2670,11 @@ export function ParseUI() {
                         await deleteConcept(pending.conceptKey);
                         await reloadConfig();
                         await syncTagStoreFromServer();
+                        if (pending.navigateAfterDeleteTo) {
+                          previousActiveRawKeyRef.current = pending.navigateAfterDeleteTo.conceptKey;
+                          setConceptId(pending.navigateAfterDeleteTo.conceptId);
+                          setSelectedConceptKey(pending.navigateAfterDeleteTo.conceptKey);
+                        }
                         setDeleteConfirmation(null);
                       } catch (err) {
                         console.error('[ParseUI] deleteConcept failed:', err);

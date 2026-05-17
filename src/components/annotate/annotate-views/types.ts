@@ -33,6 +33,7 @@ export interface AnnotateViewProps {
   activeSpeaker?: string;
   conceptSurveyKey?: string;
   onSurveyChoiceChange?: (speaker: string, conceptKey: string, surveyId: string) => void;
+  onDeleteConcept?: () => void;
 }
 
 export interface AnnotationPanelProps {

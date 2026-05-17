@@ -2226,6 +2226,113 @@ describe("ParseUI", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+
+  it("annotate-panel Delete concept opens the shared modal and navigates to the previous concept on success", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "1", label: "water" },
+        { id: "2", label: "hair" },
+        { id: "3", label: "fire" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", []) };
+    vi.mocked(apiClient.deleteConcept).mockResolvedValueOnce({ ok: true, deleted_id: "2" });
+
+    render(<ParseUI />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /hair/i }));
+    expect(await screen.findByRole("heading", { name: "hair" })).toBeTruthy();
+    mockSetActiveConcept.mockClear();
+
+    fireEvent.click(screen.getByTestId("annotate-delete-concept"));
+    expect(screen.getByText("Delete hair?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(apiClient.deleteConcept).toHaveBeenCalledWith("2"));
+    await waitFor(() => expect(mockReloadConfig).toHaveBeenCalled());
+    expect(mockSyncTagsFromServer).toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText("Delete hair?")).toBeNull());
+    expect(await screen.findByRole("heading", { name: "water" })).toBeTruthy();
+    await waitFor(() => expect(mockSetActiveConcept).toHaveBeenCalledWith("1"));
+  });
+
+  it("annotate-panel Delete concept keeps the modal open on 409 and does not navigate", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "1", label: "water" },
+        { id: "2", label: "hair" },
+        { id: "3", label: "fire" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", []) };
+    vi.mocked(apiClient.deleteConcept).mockRejectedValueOnce(
+      new ApiError(409, "DELETE", "/api/concepts/2", { error: "blocked", blocking_speakers: ["Qasr01"] }, "API DELETE /api/concepts/2 failed 409"),
+    );
+
+    render(<ParseUI />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /hair/i }));
+    expect(await screen.findByRole("heading", { name: "hair" })).toBeTruthy();
+    mockSetActiveConcept.mockClear();
+
+    fireEvent.click(screen.getByTestId("annotate-delete-concept"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(apiClient.deleteConcept).toHaveBeenCalledWith("2"));
+    expect(screen.getByText("Delete hair?")).toBeTruthy();
+    expect(screen.getByText(/1 speaker\(s\) have annotated this lexeme: Qasr01/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "hair" })).toBeTruthy();
+    expect(mockSetActiveConcept).not.toHaveBeenCalledWith("1");
+  });
+
+  it("sidebar right-click delete success keeps the current post-delete navigation behavior", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "1", label: "water" },
+        { id: "2", label: "hair" },
+        { id: "3", label: "fire" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", []) };
+    vi.mocked(apiClient.deleteConcept).mockResolvedValueOnce({ ok: true, deleted_id: "2" });
+
+    render(<ParseUI />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /hair/i }));
+    expect(await screen.findByRole("heading", { name: "hair" })).toBeTruthy();
+    mockSetActiveConcept.mockClear();
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    fireEvent.contextMenu(within(sidebar).getByRole("button", { name: /hair/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Delete variant/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(apiClient.deleteConcept).toHaveBeenCalledWith("2"));
+    await waitFor(() => expect(mockReloadConfig).toHaveBeenCalled());
+    expect(mockSyncTagsFromServer).toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "hair" })).toBeTruthy();
+    expect(mockSetActiveConcept).not.toHaveBeenCalledWith("1");
+  });
+
   it("delete network error surfaces inline in the delete modal and keeps it open", async () => {
     window.localStorage.setItem("parse.currentMode", "annotate");
     mockConfig = {
