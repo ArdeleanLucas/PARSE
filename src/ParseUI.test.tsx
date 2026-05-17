@@ -4281,7 +4281,7 @@ describe("Actions menu — transcription run flow", () => {
     clickSpy.mockRestore();
   });
 
-  it("captures an offset anchor from annotate mode and marks the lexeme as manually adjusted", async () => {
+  it("captures an offset anchor from annotate mode without marking the lexeme as manually adjusted", async () => {
     mockCurrentTime = 9.5;
     mockRecords = {
       Fail01: makeRecord("Fail01", [
@@ -4298,7 +4298,7 @@ describe("Actions menu — transcription run flow", () => {
 
     fireEvent.click(anchorButton);
 
-    expect(mockMarkLexemeManuallyAdjusted).toHaveBeenCalledWith("Fail01", 8, 8.4);
+    expect(mockMarkLexemeManuallyAdjusted).not.toHaveBeenCalled();
     expect((await within(rightPanel).findByTestId("annotate-capture-toast")).textContent).toContain(
       "Anchored water @ 00:09.50 → +1.50s offset.",
     );
@@ -4325,7 +4325,7 @@ describe("Actions menu — transcription run flow", () => {
     expect(within(anchorList).getByText("1")).toBeTruthy();
     expect(within(anchorList).getByText("+1.50s")).toBeTruthy();
     expect(screen.getByTestId("offset-manual-consensus").textContent).toContain("+1.500 s");
-    expect(mockMarkLexemeManuallyAdjusted).toHaveBeenCalledWith("Fail01", 8, 8.4);
+    expect(mockMarkLexemeManuallyAdjusted).not.toHaveBeenCalled();
   });
 
   it("shows detecting offset progress only in the generic header strip", async () => {
@@ -4380,7 +4380,7 @@ describe("Actions menu — transcription run flow", () => {
     expect(within(anchorList).getByText("1")).toBeTruthy();
     expect(within(anchorList).getByText("+1.50s")).toBeTruthy();
     expect(screen.getByTestId("offset-manual-consensus").textContent).toContain("+1.500 s");
-    expect(mockMarkLexemeManuallyAdjusted).toHaveBeenCalledWith("Fail01", 8, 8.4);
+    expect(mockMarkLexemeManuallyAdjusted).not.toHaveBeenCalled();
   });
 
   it("keeps the modal for detected results, then hides it while applying offset", async () => {
