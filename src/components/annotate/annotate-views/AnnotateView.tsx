@@ -10,6 +10,7 @@ import {
   Redo2,
   RotateCw,
   Save,
+  Trash2,
   SkipBack,
   SkipForward,
   Undo2,
@@ -86,6 +87,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   activeSpeaker,
   conceptSurveyKey,
   onSurveyChoiceChange,
+  onDeleteConcept,
 }) => {
   const record = useAnnotationStore((s) => s.records[speaker] ?? null);
   const moveIntervalAcrossTiers = useAnnotationStore((s) => s.moveIntervalAcrossTiers);
@@ -1258,6 +1260,14 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                 <Save className="h-4 w-4" /> Save Annotation
               </button>
             )}
+            <button
+              type="button"
+              data-testid="annotate-delete-concept"
+              onClick={onDeleteConcept}
+              className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-5 py-2.5 text-sm font-semibold text-rose-700 shadow-sm transition hover:bg-rose-50 hover:text-rose-800"
+            >
+              <Trash2 className="h-4 w-4" /> Delete concept
+            </button>
             <div className="relative">
               <button
                 type="button"

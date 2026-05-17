@@ -258,7 +258,7 @@ describe('AnnotateView', () => {
     vi.useRealTimers();
   });
 
-  function renderWaterAnnotateView() {
+  function renderWaterAnnotateView(props: Partial<React.ComponentProps<typeof AnnotateView>> = {}) {
     return render(
       <AnnotateView
         concept={{ id: 1, key: 'water', name: 'water' }}
@@ -267,6 +267,7 @@ describe('AnnotateView', () => {
         onPrev={() => {}}
         onNext={() => {}}
         audioUrl="/Fail01.wav"
+        {...props}
       />,
     );
   }
@@ -274,6 +275,22 @@ describe('AnnotateView', () => {
   function getOrthographicInput() {
     return screen.getByPlaceholderText('Enter orthographic form…') as HTMLInputElement;
   }
+
+
+  it('renders a destructive Delete concept button and calls its handler', () => {
+    const onDeleteConcept = vi.fn();
+    mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
+
+    renderWaterAnnotateView({ onDeleteConcept });
+
+    const button = screen.getByTestId('annotate-delete-concept');
+    expect(button.textContent).toContain('Delete concept');
+    expect(button.className).toContain('rose');
+
+    fireEvent.click(button);
+
+    expect(onDeleteConcept).toHaveBeenCalledTimes(1);
+  });
 
   it('renders stored annotate fields, speaker notes, and complete badge', () => {
     mockRecord = makeRecord([{ conceptText: 'water', ipa: 'aw', ortho: 'ئاو', start: 1, end: 2 }]);
