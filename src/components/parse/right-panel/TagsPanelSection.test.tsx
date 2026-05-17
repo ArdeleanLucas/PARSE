@@ -72,7 +72,8 @@ describe('TagsPanelSection', () => {
   it('toggles tag membership for the active speaker concept', () => {
     const setConceptTag = vi.fn();
     const clearConceptTag = vi.fn();
-    useAnnotationStore.setState({ setConceptTag, clearConceptTag });
+    const flushAutosave = vi.fn();
+    useAnnotationStore.setState({ setConceptTag, clearConceptTag, flushAutosave });
 
     render(<TagsPanelSection conceptId="sister" />);
 

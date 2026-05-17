@@ -22,6 +22,7 @@ const mockSplitInterval = vi.fn();
 const mockAddInterval = vi.fn();
 const mockEnsureSttTier = vi.fn();
 const mockEnsureSttWordsTier = vi.fn();
+const mockFlushAutosave = vi.fn();
 
 vi.mock("../../stores/transcriptionLanesStore", () => ({
   LANE_LABELS: {
@@ -54,6 +55,7 @@ vi.mock("../../stores/annotationStore", () => ({
       addInterval: mockAddInterval,
       ensureSttTier: mockEnsureSttTier,
       ensureSttWordsTier: mockEnsureSttWordsTier,
+      flushAutosave: mockFlushAutosave,
     }),
 }));
 

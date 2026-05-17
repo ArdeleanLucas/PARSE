@@ -94,6 +94,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   const saveLexemeAnnotation = useAnnotationStore((s) => s.saveLexemeAnnotation);
   const createConceptInterval = useAnnotationStore((s) => s.createConceptInterval);
   const saveSpeaker = useAnnotationStore((s) => s.saveSpeaker);
+  const flushAutosave = useAnnotationStore((s) => s.flushAutosave);
   const undoAnnotation = useAnnotationStore((s) => s.undo);
   const redoAnnotation = useAnnotationStore((s) => s.redo);
   const undoRedoHistory = useAnnotationStore((s) => s.histories[speaker] ?? null);
@@ -1178,7 +1179,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                   onClick={async () => {
                     if (confirmedAnchor) {
                       setConfirmedAnchor(speaker, concept.key, null);
-                      void saveSpeaker(speaker);
+                      flushAutosave(speaker);
                       setTimestampMessage({ kind: "ok", text: "Boundary confirmation cleared." });
                       return;
                     }

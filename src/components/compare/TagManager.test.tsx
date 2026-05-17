@@ -13,6 +13,7 @@ const mockRemoveTag = vi.fn();
 const mockUpdateTag = vi.fn();
 const mockSetConceptTag = vi.fn();
 const mockClearConceptTag = vi.fn();
+const mockFlushAutosave = vi.fn();
 let mockRecords: Record<string, AnnotationRecord> = {};
 let mockSelectedSpeakers: string[] = [];
 
@@ -57,6 +58,7 @@ vi.mock("../../stores/annotationStore", () => ({
       records: mockRecords,
       setConceptTag: mockSetConceptTag,
       clearConceptTag: mockClearConceptTag,
+      flushAutosave: mockFlushAutosave,
     }),
 }));
 

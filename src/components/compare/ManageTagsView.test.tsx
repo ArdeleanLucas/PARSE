@@ -9,6 +9,7 @@ let mockConfigSpeakers: string[] = [];
 let mockRecords: Record<string, AnnotationRecord> = {};
 const mockSetConceptTag = vi.fn();
 const mockClearConceptTag = vi.fn();
+const mockFlushAutosave = vi.fn();
 
 vi.mock('../../stores/tagStore', () => ({
   useTagStore: (selector: (state: unknown) => unknown) => selector({
@@ -29,6 +30,7 @@ vi.mock('../../stores/annotationStore', () => ({
     records: mockRecords,
     setConceptTag: mockSetConceptTag,
     clearConceptTag: mockClearConceptTag,
+    flushAutosave: mockFlushAutosave,
   }),
 }));
 
