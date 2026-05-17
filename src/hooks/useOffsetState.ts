@@ -31,12 +31,19 @@ export type OffsetState =
   | { phase: 'applied'; result: OffsetDetectResult; shifted: number; shiftedConcepts: number; protected: number }
   | { phase: 'error'; message: string; traceback?: string; jobId?: string; isBackendFailure: boolean };
 
+export interface OffsetWorkflowInterval {
+  start: number;
+  end: number;
+  imported_csv_start?: number;
+  imported_csv_end?: number;
+}
+
 interface UseOffsetStateArgs {
   activeActionSpeaker: string | null;
   selectedConcept: OffsetWorkflowConcept | null;
   protectedLexemeCount: number;
   getCurrentTime: () => number;
-  lookupConceptInterval: (speaker: string, concept: OffsetWorkflowConcept) => { start: number; end: number } | null;
+  lookupConceptInterval: (speaker: string, concept: OffsetWorkflowConcept) => OffsetWorkflowInterval | null;
   markLexemeManuallyAdjusted: (speaker: string, start: number, end: number) => void;
   detectTimestampOffset: (speaker: string) => Promise<{ jobId?: string; job_id?: string }>;
   detectTimestampOffsetFromPairs: (speaker: string, pairs: OffsetPair[]) => Promise<{ jobId?: string; job_id?: string }>;
@@ -137,6 +144,7 @@ export function useOffsetState({
         message: 'Scrub the waveform to where the lexeme actually is, then capture again.',
       };
     }
+    const anchorCsvTimeSec = interval.imported_csv_start ?? interval.start;
     setManualAnchors((prev) => {
       const filtered = prev.filter((anchor) => anchor.conceptKey !== selectedConcept.key);
       return [
@@ -144,13 +152,13 @@ export function useOffsetState({
         {
           conceptKey: selectedConcept.key,
           conceptName: selectedConcept.name,
-          csvTimeSec: interval.start,
+          csvTimeSec: anchorCsvTimeSec,
           audioTimeSec: audio,
           capturedAt: Date.now(),
         },
       ];
     });
-    const offset = audio - interval.start;
+    const offset = audio - anchorCsvTimeSec;
     const sign = offset >= 0 ? '+' : '';
     return {
       ok: true,

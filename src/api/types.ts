@@ -15,8 +15,15 @@ export interface AnnotationInterval {
   concept_id?: string;
   import_index?: number;
   audition_prefix?: string;
+  /** Original Audition/CSV start time for this interval. Preserved across
+   * later manual retiming so offset-anchor capture can compare corrected
+   * audio time against the imported timestamp instead of the edited start. */
+  imported_csv_start?: number;
+  /** Original Audition/CSV end time for this interval; absent on legacy
+   * annotations imported before provenance snapshots were persisted. */
+  imported_csv_end?: number;
   /** True once the user has manually set this lexeme's timing — via direct
-   * start/end edit, or by capturing a manual-anchor offset pair for it.
+   * start/end edit, or after applying a manual-anchor offset pair for it.
    * Global offset application skips flagged intervals so previously-fixed
    * timings don't get shifted again. Persisted in the annotation JSON. */
   manuallyAdjusted?: boolean;

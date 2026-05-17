@@ -44,6 +44,8 @@ _OPTIONAL_INTERVAL_PASSTHROUGH_FIELDS = (
     'concept_id',
     'import_index',
     'audition_prefix',
+    'imported_csv_start',
+    'imported_csv_end',
     'conceptId',
     'source',
     'confidence',
@@ -99,6 +101,11 @@ def _annotation_normalize_interval(raw_interval: _server.Any) -> _server.Optiona
                 normalized[field] = int(value)
             except (TypeError, ValueError):
                 continue
+        elif field in {'imported_csv_start', 'imported_csv_end'}:
+            numeric_value = _server._coerce_finite_float(value)
+            if numeric_value is None:
+                continue
+            normalized[field] = float(numeric_value)
         else:
             normalized[field] = str(value)
     confidence_triplet = _annotation_confidence_triplet(raw_interval)
