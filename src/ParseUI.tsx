@@ -14,7 +14,7 @@ import { useChatSession } from './hooks/useChatSession';
 import { useCompareReturnRestore } from './hooks/useCompareReturnRestore';
 import { useOpenInAnnotateHandler } from './hooks/useOpenInAnnotateHandler';
 import { THEME_LABELS, useThemeCycle } from './hooks/useThemeCycle';
-import { useOffsetState } from './hooks/useOffsetState';
+import { useOffsetState, type OffsetWorkflowInterval } from './hooks/useOffsetState';
 import { useParseUIModals } from './hooks/useParseUIModals';
 import { useParseUIPipeline } from './hooks/useParseUIPipeline';
 import { resolveSurveyLinksForSpeaker, surveyRowIdsForConcept } from './lib/surveyLinksForSpeaker';
@@ -841,17 +841,25 @@ export function ParseUI() {
 
   // Look up the current annotation interval (start + end) for a concept on
   // the active speaker (read directly from the store so we don't hold a
-  // hook subscription at parent scope).
+  // hook subscription at parent scope). Imported CSV provenance is surfaced
+  // so manual-anchor capture can use the original timestamp as truth even
+  // after the lexeme has been retimed (MC-410-C).
   const lookupConceptInterval = (
     speaker: string,
     concept: { id: number | string; name: string; key: string },
-  ): { start: number; end: number } | null => {
+  ): OffsetWorkflowInterval | null => {
     const records = useAnnotationStore.getState().records;
     const record = records[speaker];
     if (!record) return null;
     const intervals = record.tiers?.concept?.intervals ?? [];
     const interval = intervals.find((iv) => conceptMatchesIntervalText(concept, iv.concept_id ?? null));
-    return interval ? { start: interval.start, end: interval.end } : null;
+    if (!interval) return null;
+    return {
+      start: interval.start,
+      end: interval.end,
+      imported_csv_start: interval.imported_csv_start,
+      imported_csv_end: interval.imported_csv_end,
+    };
   };
 
   const [exporting, setExporting] = useState(false);

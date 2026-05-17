@@ -505,7 +505,7 @@ function makeUnmatchedCompareBundles() {
 
 function makeRecord(
   speaker: string,
-  concepts: Array<{ conceptText: string; conceptId?: string; ipa?: string; ortho?: string; start: number; end: number; importIndex?: number }>,
+  concepts: Array<{ conceptText: string; conceptId?: string; ipa?: string; ortho?: string; start: number; end: number; importIndex?: number; importedCsvStart?: number; importedCsvEnd?: number }>,
 ): AnnotationRecord {
   const tier = (intervals: AnnotationInterval[]) => ({
     name: "tier",
@@ -521,7 +521,15 @@ function makeRecord(
       concept: {
         name: "concept",
         display_order: 3,
-        intervals: concepts.map((c) => ({ start: c.start, end: c.end, text: c.conceptText, concept_id: c.conceptId ?? '1', ...(c.importIndex !== undefined ? { import_index: c.importIndex } : {}) })),
+        intervals: concepts.map((c) => ({
+          start: c.start,
+          end: c.end,
+          text: c.conceptText,
+          concept_id: c.conceptId ?? '1',
+          ...(c.importIndex !== undefined ? { import_index: c.importIndex } : {}),
+          ...(c.importedCsvStart !== undefined ? { imported_csv_start: c.importedCsvStart } : {}),
+          ...(c.importedCsvEnd !== undefined ? { imported_csv_end: c.importedCsvEnd } : {}),
+        })),
       },
       speaker: { name: "speaker", display_order: 4, intervals: [] },
     },
@@ -4299,6 +4307,62 @@ describe("Actions menu — transcription run flow", () => {
     fireEvent.click(anchorButton);
 
     expect(mockMarkLexemeManuallyAdjusted).not.toHaveBeenCalled();
+    expect((await within(rightPanel).findByTestId("annotate-capture-toast")).textContent).toContain(
+      "Anchored water @ 00:09.50 → +1.50s offset.",
+    );
+  });
+
+  it("anchors against imported_csv_start when a retimed lexeme carries CSV provenance", async () => {
+    // Lucas's fail02 scenario: a lexeme that was manually retimed to its
+    // real audio position (78.0s) still carries the original Audition CSV
+    // start (1.3s). Capturing an anchor must compare current audio to the
+    // IMPORTED time, not the edited start — otherwise the offset collapses
+    // to ~0 and global apply does nothing. This is the production-path
+    // integration test the unit test in useOffsetState.test.ts cannot do
+    // because it mocks lookupConceptInterval directly.
+    mockCurrentTime = 78.0;
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        {
+          conceptText: "water",
+          ipa: "aw",
+          ortho: "ئاو",
+          start: 78.0,
+          end: 78.5,
+          importedCsvStart: 1.3,
+          importedCsvEnd: 1.8,
+        },
+      ]),
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    const rightPanel = screen.getByTestId("right-panel");
+    fireEvent.click(within(rightPanel).getByTestId("annotate-capture-anchor"));
+
+    expect((await within(rightPanel).findByTestId("annotate-capture-toast")).textContent).toContain(
+      "Anchored water @ 01:18.00 → +76.70s offset.",
+    );
+  });
+
+  it("falls back to start when imported_csv_start is absent (legacy annotations)", async () => {
+    // Legacy speakers imported before MC-410-C have no imported_csv_*; the
+    // hook must still anchor using `start`, preserving pre-MC-410-C
+    // behavior. This locks the `?? interval.start` fallback in place.
+    mockCurrentTime = 9.5;
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", ipa: "aw", ortho: "ئاو", start: 8, end: 8.4 },
+      ]),
+    };
+
+    render(<ParseUI />);
+    await switchToAnnotateMode();
+
+    const rightPanel = screen.getByTestId("right-panel");
+    fireEvent.click(within(rightPanel).getByTestId("annotate-capture-anchor"));
+
     expect((await within(rightPanel).findByTestId("annotate-capture-toast")).textContent).toContain(
       "Anchored water @ 00:09.50 → +1.50s offset.",
     );
