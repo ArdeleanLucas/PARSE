@@ -489,6 +489,8 @@ def test_onboard_audition_csv_writes_lexeme_intervals_in_csv_order(tmp_path, mon
     assert [interval["text"] for interval in concept_intervals] == ["forehead", "nine", "to listen to"]
     assert [interval["start"] for interval in concept_intervals] == pytest.approx([8347.403, 1212.776, 10091.681])
     assert [interval["end"] for interval in concept_intervals] == pytest.approx([8348.639, 1213.743, 10092.674])
+    assert [interval["imported_csv_start"] for interval in concept_intervals] == pytest.approx([8347.403, 1212.776, 10091.681])
+    assert [interval["imported_csv_end"] for interval in concept_intervals] == pytest.approx([8348.639, 1213.743, 10092.674])
     assert [interval["concept_id"] for interval in concept_intervals] == ["2", "225", "226"]
     assert [interval["import_index"] for interval in concept_intervals] == [0, 1, 2]
     assert [interval["audition_prefix"] for interval in concept_intervals] == ["1.2", "9", "8.4"]
@@ -706,6 +708,12 @@ def test_append_audition_rows_preserves_existing_source_audio_duration(tmp_path,
     media._append_audition_rows_to_annotation(annotation, rows, resolved)
 
     assert annotation["source_audio_duration_sec"] == 12.0
+    concept_interval = annotation["tiers"]["concept"]["intervals"][0]
+    assert concept_interval["start"] == 20.0
+    assert concept_interval["end"] == 25.0
+    assert concept_interval["imported_csv_start"] == 20.0
+    assert concept_interval["imported_csv_end"] == 25.0
+    assert annotation["tiers"]["ortho_words"]["intervals"][0] == concept_interval
 
 
 def test_looks_like_audition_csv_logs_detection_failures(capsys) -> None:

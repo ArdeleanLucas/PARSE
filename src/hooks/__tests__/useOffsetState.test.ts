@@ -75,6 +75,42 @@ describe('useOffsetState', () => {
     expect(markLexemeManuallyAdjusted).not.toHaveBeenCalled();
   });
 
+  it('uses imported CSV provenance for manual anchor truth after a lexeme was retimed', () => {
+    const { result } = renderHook(() =>
+      useOffsetState({
+        activeActionSpeaker: 'Fail01',
+        selectedConcept,
+        protectedLexemeCount: 0,
+        getCurrentTime: () => 78.0,
+        lookupConceptInterval: () => ({
+          start: 78.0,
+          end: 78.5,
+          imported_csv_start: 1.3,
+          imported_csv_end: 1.8,
+        }),
+        markLexemeManuallyAdjusted: vi.fn(),
+        detectTimestampOffset: vi.fn(),
+        detectTimestampOffsetFromPairs: vi.fn(),
+        pollOffsetDetectJob: vi.fn(),
+        applyTimestampOffset: vi.fn(),
+        reloadSpeakerAnnotation: vi.fn(),
+      }),
+    );
+
+    act(() => {
+      result.current.captureCurrentAnchor();
+    });
+
+    expect(result.current.manualAnchors[0]).toMatchObject({
+      conceptKey: '1',
+      conceptName: 'water',
+      csvTimeSec: 1.3,
+      audioTimeSec: 78.0,
+    });
+    expect(result.current.manualConsensus?.median).toBeCloseTo(76.7);
+    expect(result.current.manualConsensus?.mad).toBe(0);
+  });
+
   it('submits captured anchors through the manual detect flow and preserves live progress updates', async () => {
     const detectTimestampOffsetFromPairs = vi.fn().mockResolvedValue({ jobId: 'offset-job-1', job_id: 'offset-job-1' });
     const pollOffsetDetectJob = vi.fn().mockImplementation(async (_jobId, _jobType, handlers) => {

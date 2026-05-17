@@ -26,7 +26,13 @@ def _record_with_two_lexemes(flags: tuple[bool, bool]):
     for idx, (start, text, flag) in enumerate(
         [(10.0, "STONE", flags[0]), (20.0, "WATER", flags[1])]
     ):
-        iv = {"start": start, "end": start + 0.5, "text": text}
+        iv = {
+            "start": start,
+            "end": start + 0.5,
+            "text": text,
+            "imported_csv_start": start,
+            "imported_csv_end": start + 0.5,
+        }
         if flag:
             iv["manuallyAdjusted"] = True
         intervals.append(iv)
@@ -57,9 +63,11 @@ def test_shift_intervals_skips_manually_adjusted_intervals() -> None:
     assert by_text["STONE"]["start"] == 10.0
     assert by_text["STONE"]["end"] == 10.5
     assert by_text["STONE"]["manuallyAdjusted"] is True
-    # WATER shifts by +5s.
+    # WATER shifts by +5s, while original imported CSV provenance stays pinned.
     assert by_text["WATER"]["start"] == 25.0
     assert by_text["WATER"]["end"] == 25.5
+    assert by_text["WATER"]["imported_csv_start"] == 20.0
+    assert by_text["WATER"]["imported_csv_end"] == 20.5
 
 
 def test_shift_intervals_reports_distinct_shifted_concepts_across_tiers() -> None:

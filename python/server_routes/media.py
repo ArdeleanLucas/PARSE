@@ -614,6 +614,8 @@ def _append_audition_rows_to_annotation(annotation: _server.Dict[str, _server.An
             'concept_id': _server._normalize_concept_id(resolved.get('id')),
             'import_index': int(import_index),
             'audition_prefix': str(resolved.get('audition_prefix') or '').strip(),
+            'imported_csv_start': start,
+            'imported_csv_end': end,
         }
         concept_intervals.append(interval)
         ortho_words_intervals.append(_server.copy.deepcopy(interval))

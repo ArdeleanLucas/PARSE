@@ -21,6 +21,8 @@ def test_normalize_interval_preserves_explicit_trace_metadata_fields() -> None:
         "concept_id": 17,
         "import_index": "4",
         "audition_prefix": 8.4,
+        "imported_csv_start": "1.25",
+        "imported_csv_end": 2.5,
         "conceptId": "legacy-17",
         "source": "concept_window_ipa",
     }
@@ -35,6 +37,8 @@ def test_normalize_interval_preserves_explicit_trace_metadata_fields() -> None:
         "concept_id": "17",
         "import_index": 4,
         "audition_prefix": "8.4",
+        "imported_csv_start": 1.25,
+        "imported_csv_end": 2.5,
         "conceptId": "legacy-17",
         "source": "concept_window_ipa",
     }
@@ -80,8 +84,26 @@ def test_normalize_interval_drops_unknown_fields() -> None:
     assert normalized["concept_id"] == "99"
     assert normalized["import_index"] == 3
     assert normalized["audition_prefix"] == "row_3"
+    assert "imported_csv_start" not in normalized
+    assert "imported_csv_end" not in normalized
     assert "garbage" not in normalized
     assert "client_only" not in normalized
+
+
+def test_normalize_interval_drops_invalid_imported_csv_times() -> None:
+    raw = {
+        "start": 1.0,
+        "end": 2.0,
+        "text": "bad provenance is absent, not zero-filled",
+        "imported_csv_start": "not-a-number",
+        "imported_csv_end": None,
+    }
+
+    normalized = _annotation_normalize_interval(raw)
+
+    assert normalized is not None
+    assert "imported_csv_start" not in normalized
+    assert "imported_csv_end" not in normalized
 
 
 def test_normalize_annotation_record_preserves_trace_metadata_across_round_trip() -> None:
@@ -105,6 +127,8 @@ def test_normalize_annotation_record_preserves_trace_metadata_across_round_trip(
                         "concept_id": 2,
                         "import_index": "7",
                         "audition_prefix": 9,
+                        "imported_csv_start": "2.0",
+                        "imported_csv_end": 2.5,
                         "conceptId": "legacy-2",
                         "source": "concept_window_ipa",
                         "garbage": "drop me",
@@ -116,6 +140,8 @@ def test_normalize_annotation_record_preserves_trace_metadata_across_round_trip(
                         "concept_id": "1",
                         "import_index": 6,
                         "audition_prefix": "8.4",
+                        "imported_csv_start": 1.0,
+                        "imported_csv_end": "1.5",
                         "conceptId": "legacy-1",
                         "source": "concept_window_ipa",
                     },
@@ -137,6 +163,8 @@ def test_normalize_annotation_record_preserves_trace_metadata_across_round_trip(
     assert water["concept_id"] == "2"
     assert water["import_index"] == 7
     assert water["audition_prefix"] == "9"
+    assert water["imported_csv_start"] == 2.0
+    assert water["imported_csv_end"] == 2.5
     assert water["conceptId"] == "legacy-2"
     assert water["source"] == "concept_window_ipa"
     assert "garbage" not in water
@@ -144,6 +172,8 @@ def test_normalize_annotation_record_preserves_trace_metadata_across_round_trip(
     assert stone["concept_id"] == "1"
     assert stone["import_index"] == 6
     assert stone["audition_prefix"] == "8.4"
+    assert stone["imported_csv_start"] == 1.0
+    assert stone["imported_csv_end"] == 1.5
     assert stone["conceptId"] == "legacy-1"
     assert stone["source"] == "concept_window_ipa"
 
