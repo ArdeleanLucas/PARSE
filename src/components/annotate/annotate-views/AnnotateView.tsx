@@ -1417,18 +1417,18 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                   title="Confirms the lexeme boundaries without requiring transcription. Used by cross-speaker anchor discovery in lexeme_search Signal B, audio re-STT priors, forced-alignment training data, and future audio-similarity discovery."
                   disabled={timestampSaving}
                   onClick={async () => {
-                    if (confirmedAnchor) {
-                      setConfirmedAnchor(speaker, concept.key, null);
-                      flushAutosave(speaker);
-                      setTimestampMessage({ kind: "ok", text: "Boundary confirmation cleared." });
-                      return;
-                    }
                     const nextStart = parseFloat(editStart);
                     const nextEnd = parseFloat(editEnd);
                     const start = Number.isFinite(nextStart) ? nextStart : conceptInterval.start;
                     const end = Number.isFinite(nextEnd) ? nextEnd : conceptInterval.end;
                     const startChanged = Math.abs(start - conceptInterval.start) > 1e-6;
                     const endChanged = Math.abs(end - conceptInterval.end) > 1e-6;
+                    if (confirmedAnchor && !startChanged && !endChanged) {
+                      setConfirmedAnchor(speaker, concept.key, null);
+                      flushAutosave(speaker);
+                      setTimestampMessage({ kind: "ok", text: "Boundary confirmation cleared." });
+                      return;
+                    }
                     if (startChanged || endChanged) {
                       setTimestampSaving(true);
                       try {
