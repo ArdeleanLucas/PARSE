@@ -148,14 +148,13 @@ export function useOffsetState({
         },
       ];
     });
-    markLexemeManuallyAdjusted(activeActionSpeaker, interval.start, interval.end);
     const offset = audio - interval.start;
     const sign = offset >= 0 ? '+' : '';
     return {
       ok: true,
       message: `Anchored ${selectedConcept.name} @ ${formatPlaybackTime(audio)} → ${sign}${offset.toFixed(2)}s offset.`,
     };
-  }, [activeActionSpeaker, selectedConcept, lookupConceptInterval, getCurrentTime, markLexemeManuallyAdjusted]);
+  }, [activeActionSpeaker, selectedConcept, lookupConceptInterval, getCurrentTime]);
 
   const captureAnchorFromBar = useCallback(() => {
     const result = captureCurrentAnchor();
@@ -229,6 +228,17 @@ export function useOffsetState({
     setOffsetState({ phase: 'applying', result });
     try {
       const apply = await applyTimestampOffset(result.speaker, result.offsetSec);
+      for (const anchor of manualAnchors) {
+        const anchorConcept: OffsetWorkflowConcept = {
+          id: 0,
+          key: anchor.conceptKey,
+          name: anchor.conceptName,
+        };
+        const interval = lookupConceptInterval(result.speaker, anchorConcept);
+        if (interval) {
+          markLexemeManuallyAdjusted(result.speaker, interval.start, interval.end);
+        }
+      }
       await reloadSpeakerAnnotation(result.speaker);
       setOffsetState({
         phase: 'applied',
@@ -244,7 +254,7 @@ export function useOffsetState({
         isBackendFailure: false,
       });
     }
-  }, [applyTimestampOffset, offsetState, reloadSpeakerAnnotation]);
+  }, [applyTimestampOffset, offsetState, reloadSpeakerAnnotation, manualAnchors, lookupConceptInterval, markLexemeManuallyAdjusted]);
 
   const submitManualOffset = useCallback(async () => {
     if (!activeActionSpeaker) {

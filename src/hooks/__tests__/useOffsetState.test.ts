@@ -30,7 +30,7 @@ describe('useOffsetState', () => {
     vi.useRealTimers();
   });
 
-  it('captures anchors from the current selection, marks the lexeme locked, and derives live consensus', () => {
+  it('captures anchors from the current selection without marking the lexeme locked, and derives live consensus', () => {
     const markLexemeManuallyAdjusted = vi.fn();
 
     const { result } = renderHook(() =>
@@ -66,12 +66,13 @@ describe('useOffsetState', () => {
       audioTimeSec: 9.5,
     });
     expect(result.current.manualConsensus).toMatchObject({ median: 1.5, mad: 0 });
-    expect(markLexemeManuallyAdjusted).toHaveBeenCalledWith('Fail01', 8, 8.4);
+    expect(markLexemeManuallyAdjusted).not.toHaveBeenCalled();
 
     act(() => {
       result.current.captureAnchorFromBar();
     });
     expect(result.current.captureToast).toContain('Anchored water @ 00:09.50');
+    expect(markLexemeManuallyAdjusted).not.toHaveBeenCalled();
   });
 
   it('submits captured anchors through the manual detect flow and preserves live progress updates', async () => {
@@ -119,6 +120,113 @@ describe('useOffsetState', () => {
       result: expect.objectContaining({ offsetSec: 1.5, method: 'manual_pair' }),
     });
     expect(result.current.lastProgressMessage).toBe('Scanning anchors…');
+  });
+
+  it('marks surviving manual anchors only after applying a detected offset', async () => {
+    const secondConcept: ConceptLike = { id: 2, key: '2', name: 'fire' };
+    const intervals: Record<string, { start: number; end: number }> = {
+      '1': { start: 8, end: 8.4 },
+      '2': { start: 10, end: 10.4 },
+    };
+    const markLexemeManuallyAdjusted = vi.fn();
+    const detectTimestampOffsetFromPairs = vi.fn().mockResolvedValue({ jobId: 'offset-job-anchors' });
+    const pollOffsetDetectJob = vi.fn().mockResolvedValue(makeDetectedResult({ offsetSec: 2.25, nAnchors: 2, totalAnchors: 2 }));
+    const applyTimestampOffset = vi.fn().mockResolvedValue({ shiftedIntervals: 2, protectedLexemes: 0 });
+    const reloadSpeakerAnnotation = vi.fn().mockResolvedValue(undefined);
+
+    const { result, rerender } = renderHook(
+      ({ concept, time }: { concept: ConceptLike; time: number }) =>
+        useOffsetState({
+          activeActionSpeaker: 'Fail01',
+          selectedConcept: concept,
+          protectedLexemeCount: 0,
+          getCurrentTime: () => time,
+          lookupConceptInterval: (_speaker, conceptArg) => intervals[conceptArg.key] ?? null,
+          markLexemeManuallyAdjusted,
+          detectTimestampOffset: vi.fn(),
+          detectTimestampOffsetFromPairs,
+          pollOffsetDetectJob,
+          applyTimestampOffset,
+          reloadSpeakerAnnotation,
+        }),
+      { initialProps: { concept: selectedConcept, time: 9.5 } },
+    );
+
+    act(() => {
+      result.current.captureCurrentAnchor();
+    });
+    rerender({ concept: secondConcept, time: 12.5 });
+    act(() => {
+      result.current.captureCurrentAnchor();
+    });
+    expect(markLexemeManuallyAdjusted).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.submitManualOffset();
+    });
+    await act(async () => {
+      await result.current.applyDetectedOffset();
+    });
+
+    expect(applyTimestampOffset).toHaveBeenCalledWith('Fail01', 2.25);
+    expect(markLexemeManuallyAdjusted.mock.calls).toEqual([
+      ['Fail01', 8, 8.4],
+      ['Fail01', 10, 10.4],
+    ]);
+    expect(reloadSpeakerAnnotation).toHaveBeenCalledWith('Fail01');
+  });
+
+  it('does not mark anchors removed before applying an offset', async () => {
+    const secondConcept: ConceptLike = { id: 2, key: '2', name: 'fire' };
+    const intervals: Record<string, { start: number; end: number }> = {
+      '1': { start: 8, end: 8.4 },
+      '2': { start: 10, end: 10.4 },
+    };
+    const markLexemeManuallyAdjusted = vi.fn();
+    const detectTimestampOffsetFromPairs = vi.fn().mockResolvedValue({ jobId: 'offset-job-anchors' });
+    const pollOffsetDetectJob = vi.fn().mockResolvedValue(makeDetectedResult({ offsetSec: 2.25, nAnchors: 1, totalAnchors: 1 }));
+    const applyTimestampOffset = vi.fn().mockResolvedValue({ shiftedIntervals: 2, protectedLexemes: 0 });
+
+    const { result, rerender } = renderHook(
+      ({ concept, time }: { concept: ConceptLike; time: number }) =>
+        useOffsetState({
+          activeActionSpeaker: 'Fail01',
+          selectedConcept: concept,
+          protectedLexemeCount: 0,
+          getCurrentTime: () => time,
+          lookupConceptInterval: (_speaker, conceptArg) => intervals[conceptArg.key] ?? null,
+          markLexemeManuallyAdjusted,
+          detectTimestampOffset: vi.fn(),
+          detectTimestampOffsetFromPairs,
+          pollOffsetDetectJob,
+          applyTimestampOffset,
+          reloadSpeakerAnnotation: vi.fn().mockResolvedValue(undefined),
+        }),
+      { initialProps: { concept: selectedConcept, time: 9.5 } },
+    );
+
+    act(() => {
+      result.current.captureCurrentAnchor();
+    });
+    rerender({ concept: secondConcept, time: 12.5 });
+    act(() => {
+      result.current.captureCurrentAnchor();
+      result.current.removeManualAnchor('1');
+    });
+    expect(result.current.manualAnchors).toHaveLength(1);
+    expect(markLexemeManuallyAdjusted).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.submitManualOffset();
+    });
+    await act(async () => {
+      await result.current.applyDetectedOffset();
+    });
+
+    expect(markLexemeManuallyAdjusted.mock.calls).toEqual([
+      ['Fail01', 10, 10.4],
+    ]);
+    expect(markLexemeManuallyAdjusted).not.toHaveBeenCalledWith('Fail01', 8, 8.4);
   });
   it('marks backend offset-detect errors as backend failures with propagated messages', async () => {
     const pollOffsetDetectJob = vi.fn().mockRejectedValue(
