@@ -46,7 +46,30 @@ _OPTIONAL_INTERVAL_PASSTHROUGH_FIELDS = (
     'audition_prefix',
     'conceptId',
     'source',
+    'confidence',
+    'confidence_source',
+    'confidence_n_tokens',
 )
+_CONFIDENCE_SOURCE_VALUES = frozenset({'avg_logprob', 'constant_fallback'})
+_CONFIDENCE_TRIPLET_FIELDS = frozenset({'confidence', 'confidence_source', 'confidence_n_tokens'})
+
+
+def _annotation_confidence_triplet(raw_interval: _server.Dict[str, _server.Any]) -> _server.Optional[_server.Dict[str, _server.Any]]:
+    if not any(field in raw_interval for field in _CONFIDENCE_TRIPLET_FIELDS):
+        return None
+    try:
+        confidence = float(raw_interval['confidence'])
+        source = str(raw_interval['confidence_source'])
+        n_tokens = int(raw_interval['confidence_n_tokens'])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not math.isfinite(confidence) or confidence < 0.0 or confidence > 1.0:
+        return None
+    if source not in _CONFIDENCE_SOURCE_VALUES:
+        return None
+    if n_tokens < 0:
+        return None
+    return {'confidence': confidence, 'confidence_source': source, 'confidence_n_tokens': n_tokens}
 
 
 def _annotation_sort_intervals(intervals: _server.List[_server.Dict[str, _server.Any]]) -> None:
@@ -69,6 +92,8 @@ def _annotation_normalize_interval(raw_interval: _server.Any) -> _server.Optiona
         value = raw_interval.get(field)
         if value is None:
             continue
+        if field in _CONFIDENCE_TRIPLET_FIELDS:
+            continue
         if field == 'import_index':
             try:
                 normalized[field] = int(value)
@@ -76,6 +101,9 @@ def _annotation_normalize_interval(raw_interval: _server.Any) -> _server.Optiona
                 continue
         else:
             normalized[field] = str(value)
+    confidence_triplet = _annotation_confidence_triplet(raw_interval)
+    if confidence_triplet is not None:
+        normalized.update(confidence_triplet)
     return normalized
 
 def _annotation_tier_key(raw_name: _server.Any) -> str:

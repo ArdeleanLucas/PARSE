@@ -10,6 +10,8 @@ import pytest
 
 from ai.provider import ConfidenceScore
 from ai.speaker_locks import SpeakerLockError
+from server_routes import lexeme_rerun
+from server_routes.test_lexeme_rerun_subprocess_isolation import _install_forked_process
 from app.http.lexeme_rerun_handlers import (
     LexemeRerunHandlerError,
     LexemeRerunSubprocessError,
@@ -182,6 +184,36 @@ def test_run_ortho_sync_response_forwards_typed_confidence_triplet(tmp_path: Pat
         "confidence": 0.42,
         "confidence_source": "constant_fallback",
         "confidence_n_tokens": 0,
+    }
+
+
+def test_run_ortho_real_subprocess_response_preserves_confidence_triplet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    confidence = ConfidenceScore(value=0.51, source="avg_logprob", n_tokens=4)
+
+    def fake_ortho_interval(**kwargs: Any) -> dict[str, Any]:
+        _ = kwargs
+        return {"text": "یەک", "confidence": confidence}
+
+    monkeypatch.setattr(lexeme_rerun, "_run_ortho_interval", fake_ortho_interval)
+    _install_forked_process(monkeypatch)
+
+    response = _ortho_response(
+        tmp_path,
+        {"speaker": "Saha01", "concept_key": "root", "start": 2795.918, "end": 2796.698},
+        runner=lexeme_rerun._run_ortho_interval_in_subprocess,
+    )
+
+    assert response.status == HTTPStatus.OK
+    assert response.payload == {
+        "ortho": "یەک",
+        "interval": {"start": 2795.918, "end": 2796.698},
+        "source": "rerun",
+        "jobId": None,
+        "confidence": 0.51,
+        "confidence_source": "avg_logprob",
+        "confidence_n_tokens": 4,
     }
 
 
