@@ -323,6 +323,115 @@ def test_chat_tools_apply_offset_skips_manually_adjusted(tmp_path) -> None:
     assert by_text["WATER"]["start"] == 25.0
 
 
+def test_chat_tools_apply_offset_multi_apply_is_idempotent(tmp_path) -> None:
+    """The MCP apply_timestamp_offset tool must converge across repeat applies,
+    not double-shift. Mirrors test_multi_apply_with_imported_csv_is_idempotent
+    but exercises the chat-tool code path (ParseChatTools.execute), which has
+    its own _shift_annotation_intervals implementation alongside the HTTP one.
+    Issue #528 tracks consolidating both implementations into one shared module."""
+    intervals = [
+        {
+            "start": 78.0,
+            "end": 78.5,
+            "text": "jbil 2",
+            "concept_id": "42",
+            "imported_csv_start": 78.0,
+            "imported_csv_end": 78.5,
+        },
+    ]
+    path = _write_speaker_with_lexemes(tmp_path, intervals)
+    tools = ParseChatTools(project_root=tmp_path)
+
+    tools.execute(
+        "apply_timestamp_offset",
+        {"speaker": "Test01", "offsetSec": 339.0, "dryRun": False},
+    )
+    after_round_one = json.loads(path.read_text(encoding="utf-8"))
+    assert after_round_one["tiers"]["concept"]["intervals"][0]["start"] == 417.0
+
+    tools.execute(
+        "apply_timestamp_offset",
+        {"speaker": "Test01", "offsetSec": 300.0, "dryRun": False},
+    )
+    after_round_two = json.loads(path.read_text(encoding="utf-8"))
+    final_start = after_round_two["tiers"]["concept"]["intervals"][0]["start"]
+    assert final_start == 378.0, (
+        "expected imported_csv_start (78.0) + last offset (300) = 378.0; "
+        "got {0!r} — the chat-tool path may have regressed back to incremental shift".format(final_start)
+    )
+    # Provenance still pinned.
+    assert after_round_two["tiers"]["concept"]["intervals"][0]["imported_csv_start"] == 78.0
+
+
+def test_chat_tools_apply_offset_negative_offset_reverts_to_imported(tmp_path) -> None:
+    """Negative offsets (the user 'revert this shift' workflow) must also be
+    absolute when imported_csv_start is present. Apply +339 then -339 returns
+    the unflagged interval to its imported origin, not to a double-shifted
+    position."""
+    intervals = [
+        {
+            "start": 78.0,
+            "end": 78.5,
+            "text": "jbil 2",
+            "concept_id": "42",
+            "imported_csv_start": 78.0,
+            "imported_csv_end": 78.5,
+        },
+    ]
+    path = _write_speaker_with_lexemes(tmp_path, intervals)
+    tools = ParseChatTools(project_root=tmp_path)
+
+    tools.execute(
+        "apply_timestamp_offset",
+        {"speaker": "Test01", "offsetSec": 339.0, "dryRun": False},
+    )
+    tools.execute(
+        "apply_timestamp_offset",
+        {"speaker": "Test01", "offsetSec": -339.0, "dryRun": False},
+    )
+
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    iv = persisted["tiers"]["concept"]["intervals"][0]
+    # Round 2 with offset=-339 means new_start = imported(78) + (-339) clamped to 0.
+    assert iv["start"] == 0.0
+    assert iv["imported_csv_start"] == 78.0  # provenance preserved
+
+
+def test_chat_tools_apply_offset_resets_via_zero_offset(tmp_path) -> None:
+    """Applying offset=0 after a prior round should reset unflagged intervals
+    to their imported_csv_start positions — a useful 'undo everything' that
+    multi-apply idempotency unlocks. (Note: ChatTools rejects |offset| < 1e-6,
+    so test with a near-zero value that still rounds to the imported position.)"""
+    intervals = [
+        {
+            "start": 78.0,
+            "end": 78.5,
+            "text": "jbil 2",
+            "concept_id": "42",
+            "imported_csv_start": 78.0,
+            "imported_csv_end": 78.5,
+        },
+    ]
+    path = _write_speaker_with_lexemes(tmp_path, intervals)
+    tools = ParseChatTools(project_root=tmp_path)
+
+    tools.execute(
+        "apply_timestamp_offset",
+        {"speaker": "Test01", "offsetSec": 339.0, "dryRun": False},
+    )
+    assert json.loads(path.read_text(encoding="utf-8"))["tiers"]["concept"]["intervals"][0]["start"] == 417.0
+
+    # Apply offsetSec=0.001 — sub-second nudge, demonstrates reset to ~imported.
+    tools.execute(
+        "apply_timestamp_offset",
+        {"speaker": "Test01", "offsetSec": 0.001, "dryRun": False},
+    )
+    final_start = json.loads(path.read_text(encoding="utf-8"))["tiers"]["concept"]["intervals"][0]["start"]
+    assert abs(final_start - 78.001) < 1e-6, (
+        "expected reset to imported_csv_start + tiny offset (78.001); got {0!r}".format(final_start)
+    )
+
+
 def test_apply_then_mark_round_trip_persists_flag(tmp_path) -> None:
     """Simulate the frontend MC-410-B sequence:
       (1) /api/offset/apply shifts every interval by offsetSec;
