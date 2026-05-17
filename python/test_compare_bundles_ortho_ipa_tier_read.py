@@ -80,3 +80,39 @@ def test_candidate_missing_ortho_and_ipa_tiers_do_not_fall_back_to_concept_text(
 
     assert candidate["ortho"] == ""
     assert candidate["ipa"] is None
+
+
+def test_sibling_falls_back_to_time_overlap_when_conceptId_is_wrong(tmp_path: pathlib.Path) -> None:
+    _seed_concepts(
+        tmp_path,
+        [
+            {"id": "1", "concept_en": "hair (A)", "source_item": "32", "source_survey": "JBIL", "custom_order": "1"},
+            {"id": "624", "concept_en": "hair (C)", "source_item": "32", "source_survey": "JBIL", "custom_order": "624"},
+        ],
+    )
+    _seed_annotation(
+        tmp_path,
+        "Saha01",
+        concept_intervals=[
+            {"start": 1.0, "end": 2.0, "text": "hair (A)", "concept_id": "1"},
+            {"start": 3.0, "end": 4.0, "text": "hair (C)", "concept_id": "624"},
+        ],
+        # The sibling tiers carry the right text at the right time windows,
+        # but both rows are mislabelled with conceptId='1'.
+        ortho_intervals=[
+            {"start": 1.0, "end": 2.0, "text": "میسەر", "conceptId": "1"},
+            {"start": 3.0, "end": 4.0, "text": "گەیش", "conceptId": "1"},
+        ],
+        ipa_intervals=[
+            {"start": 1.0, "end": 2.0, "text": "muːsɛr", "conceptId": "1"},
+            {"start": 3.0, "end": 4.0, "text": "ʁɛʒ", "conceptId": "1"},
+        ],
+    )
+
+    result = build_compare_bundles(tmp_path, speakers=["Saha01"], bundle_id="bundle:hair")
+    candidates = result["bundles"][0]["candidates"]["Saha01"]
+
+    assert candidates["1"]["ortho"] == "میسەر"
+    assert candidates["1"]["ipa"] == "muːsɛr"
+    assert candidates["624"]["ortho"] == "گەیش"
+    assert candidates["624"]["ipa"] == "ʁɛʒ"

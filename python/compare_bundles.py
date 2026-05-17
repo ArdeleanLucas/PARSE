@@ -159,14 +159,15 @@ def _pick_time_overlap(
 
 def _pick_sibling(
     siblings_for_cid: Sequence[dict[str, Any]],
-    siblings_without_cid: Sequence[dict[str, Any]],
+    all_siblings: Sequence[dict[str, Any]],
     concept_interval: Mapping[str, Any],
     concept_index: int,
 ) -> dict[str, Any] | None:
-    # Match concept_id/conceptId first, tie-break by index, then by time overlap when sibling conceptId is absent.
+    # Prefer a deterministic conceptId/index match; only then fall back to
+    # time overlap across the whole tier.
     if 0 <= concept_index < len(siblings_for_cid):
         return siblings_for_cid[concept_index]
-    return _pick_time_overlap(siblings_without_cid, concept_interval)
+    return _pick_time_overlap(all_siblings, concept_interval)
 
 
 def _candidate_from_interval(
@@ -331,8 +332,8 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
         for speaker in selected_speakers:
             tiers, source_wav = _intervals_for_speaker(project_root, speaker)
             concept_intervals = tiers["concept"]
-            ortho_by_concept, ortho_without_concept = _group_by_concept_id(tiers["ortho"])
-            ipa_by_concept, ipa_without_concept = _group_by_concept_id(tiers["ipa"])
+            ortho_by_concept, _ = _group_by_concept_id(tiers["ortho"])
+            ipa_by_concept, _ = _group_by_concept_id(tiers["ipa"])
             by_concept: dict[str, list[dict[str, Any]]] = {}
             legacy_by_text: dict[str, list[dict[str, Any]]] = {}
             for interval in concept_intervals:
@@ -357,12 +358,12 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
                     concept_interval = matches[0]
                     cid = _interval_concept_id(concept_interval)
                     ortho_interval = (
-                        _pick_sibling(ortho_by_concept.get(cid, []), ortho_without_concept, concept_interval, 0)
+                        _pick_sibling(ortho_by_concept.get(cid, []), tiers["ortho"], concept_interval, 0)
                         if cid
                         else None
                     )
                     ipa_interval = (
-                        _pick_sibling(ipa_by_concept.get(cid, []), ipa_without_concept, concept_interval, 0)
+                        _pick_sibling(ipa_by_concept.get(cid, []), tiers["ipa"], concept_interval, 0)
                         if cid
                         else None
                     )
