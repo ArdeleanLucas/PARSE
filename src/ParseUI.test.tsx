@@ -4328,7 +4328,7 @@ describe("Actions menu — transcription run flow", () => {
     expect(mockMarkLexemeManuallyAdjusted).toHaveBeenCalledWith("Fail01", 8, 8.4);
   });
 
-  it("shows detecting offset progress only in the generic header strip", async () => {
+  it("shows detecting offset progress in the header strip and synchronized modal", async () => {
     vi.mocked(apiClient.detectTimestampOffset).mockResolvedValue({ job_id: "offset-job-1", jobId: "offset-job-1" });
     vi.mocked(apiClient.listActiveJobs).mockResolvedValue([
       {
@@ -4355,8 +4355,12 @@ describe("Actions menu — transcription run flow", () => {
     expect(row.textContent).toContain("Offset detect");
     expect(row.textContent).toContain("42%");
     expect(row.textContent).toContain("Scanning anchors");
-    expect(screen.queryByTestId("offset-modal")).toBeNull();
-    expect(screen.queryByTestId("offset-detecting")).toBeNull();
+    const modal = await screen.findByTestId("offset-modal");
+    expect(screen.getByTestId("offset-detecting")).toBeTruthy();
+    expect(modal.textContent).toContain("42%");
+    expect(modal.textContent).toContain("Scanning anchors");
+    fireEvent.click(within(modal).getByRole("button", { name: "Cancel" }));
+    expect(apiClient.cancelComputeJob).toHaveBeenCalledWith("offset-job-1");
   });
 
   it("captures the current lexeme into the manual offset modal and shows the live consensus", async () => {

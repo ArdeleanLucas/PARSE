@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { cleanup, render, screen, fireEvent } from '@testing-library/react';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import type { OffsetDetectResult } from '../../../api/client';
 import { OffsetAdjustmentModal } from './OffsetAdjustmentModal';
 
@@ -18,6 +18,9 @@ function makeDetectedResult(overrides: Partial<OffsetDetectResult> = {}): Offset
 }
 
 describe('OffsetAdjustmentModal', () => {
+  afterEach(() => {
+    cleanup();
+  });
   it('renders manual anchors with live consensus and forwards anchor-management callbacks', () => {
     const onClose = vi.fn();
     const onCaptureCurrentSelection = vi.fn();
@@ -46,6 +49,7 @@ describe('OffsetAdjustmentModal', () => {
         onSubmitManualOffset={onSubmitManualOffset}
         onApplyDetectedOffset={vi.fn()}
         onOpenManualOffset={vi.fn()}
+        onCancelDetection={vi.fn()}
         onOpenJobLogs={vi.fn()}
       />,
     );
@@ -80,6 +84,7 @@ describe('OffsetAdjustmentModal', () => {
         onSubmitManualOffset={vi.fn()}
         onApplyDetectedOffset={vi.fn()}
         onOpenManualOffset={vi.fn()}
+        onCancelDetection={vi.fn()}
         onOpenJobLogs={onOpenJobLogs}
       />,
     );
@@ -90,7 +95,7 @@ describe('OffsetAdjustmentModal', () => {
     rerender(
       <OffsetAdjustmentModal
         open
-        offsetState={{ phase: 'error', message: 'Offset detection failed', jobId: 'offset-job-1' }}
+        offsetState={{ phase: 'error', message: 'Offset detection failed', jobId: 'offset-job-1', isBackendFailure: true }}
         manualAnchors={[]}
         manualConsensus={null}
         manualBusy={false}
@@ -101,14 +106,65 @@ describe('OffsetAdjustmentModal', () => {
         onSubmitManualOffset={vi.fn()}
         onApplyDetectedOffset={vi.fn()}
         onOpenManualOffset={vi.fn()}
+        onCancelDetection={vi.fn()}
         onOpenJobLogs={onOpenJobLogs}
       />,
     );
 
     expect(screen.getByTestId('offset-error').textContent).toContain('Offset detection failed');
-    fireEvent.click(screen.getByTestId('offset-error-view-log'));
+    fireEvent.click(screen.getByRole('button', { name: /View job log/i }));
     expect(onOpenJobLogs).toHaveBeenCalledWith('offset-job-1');
   });
+
+
+  it('gates job-log access to backend failures and uses the job-log label', () => {
+    const onOpenJobLogs = vi.fn();
+    const commonProps = {
+      open: true,
+      manualAnchors: [],
+      manualConsensus: null,
+      manualBusy: false,
+      protectedLexemeCount: 0,
+      onClose: vi.fn(),
+      onCaptureCurrentSelection: vi.fn(),
+      onRemoveManualAnchor: vi.fn(),
+      onSubmitManualOffset: vi.fn(),
+      onApplyDetectedOffset: vi.fn(),
+      onOpenManualOffset: vi.fn(),
+      onCancelDetection: vi.fn(),
+      onOpenJobLogs,
+    };
+
+    const { rerender } = render(
+      <OffsetAdjustmentModal
+        {...commonProps}
+        offsetState={{
+          phase: 'error',
+          message: 'Offset detection was cancelled.',
+          jobId: 'offset-job-cancelled',
+          isBackendFailure: false,
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /View job log/i })).toBeNull();
+
+    rerender(
+      <OffsetAdjustmentModal
+        {...commonProps}
+        offsetState={{
+          phase: 'error',
+          message: 'Offset detection failed',
+          jobId: 'offset-job-failed',
+          isBackendFailure: true,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /View job log/i }));
+    expect(onOpenJobLogs).toHaveBeenCalledWith('offset-job-failed');
+  });
+
 
   it('renders the detected review state with protected-lexeme notice and apply action', () => {
     const onApplyDetectedOffset = vi.fn();
@@ -128,6 +184,7 @@ describe('OffsetAdjustmentModal', () => {
         onSubmitManualOffset={vi.fn()}
         onApplyDetectedOffset={onApplyDetectedOffset}
         onOpenManualOffset={onOpenManualOffset}
+        onCancelDetection={vi.fn()}
         onOpenJobLogs={vi.fn()}
       />,
     );
@@ -163,6 +220,7 @@ describe('OffsetAdjustmentModal', () => {
         onSubmitManualOffset={vi.fn()}
         onApplyDetectedOffset={vi.fn()}
         onOpenManualOffset={vi.fn()}
+        onCancelDetection={vi.fn()}
         onOpenJobLogs={vi.fn()}
       />,
     );

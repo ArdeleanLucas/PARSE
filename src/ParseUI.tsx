@@ -1070,6 +1070,7 @@ export function ParseUI() {
     jobLogsOpen,
     openJobLogs,
     closeJobLogs,
+    cancelDetection,
     manualAnchors,
     manualBusy,
     captureToast,
@@ -2530,7 +2531,7 @@ export function ParseUI() {
         onClose={modals.sourcesReport.close}
       />
       <OffsetAdjustmentModal
-        open={offsetState.phase !== 'idle' && offsetState.phase !== 'detecting' && offsetState.phase !== 'applying'}
+        open={offsetState.phase !== 'idle' && offsetState.phase !== 'applying'}
         offsetState={offsetState}
         manualAnchors={manualAnchors}
         manualConsensus={manualConsensus}
@@ -2540,13 +2541,14 @@ export function ParseUI() {
         onCaptureCurrentSelection={() => {
           const result = captureCurrentAnchor();
           if (!result.ok) {
-            setOffsetState({ phase: 'error', message: result.message });
+            setOffsetState({ phase: 'error', message: result.message, isBackendFailure: false });
           }
         }}
         onRemoveManualAnchor={removeManualAnchor}
         onSubmitManualOffset={() => { void submitManualOffset(); }}
         onApplyDetectedOffset={() => { void applyDetectedOffset(); }}
         onOpenManualOffset={openManualOffset}
+        onCancelDetection={(jobId) => { void cancelDetection(jobId); }}
         onOpenJobLogs={openJobLogs}
       />
       <JobLogsModal

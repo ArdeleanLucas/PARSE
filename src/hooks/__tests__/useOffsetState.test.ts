@@ -2,6 +2,7 @@
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { OffsetDetectResult } from '../../api/client';
+import { OffsetJobError } from '../../api/client';
 import { useOffsetState } from '../useOffsetState';
 
 interface ConceptLike {
@@ -9,6 +10,15 @@ interface ConceptLike {
   key: string;
   name: string;
 }
+
+
+vi.mock('../../api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/client')>();
+  return {
+    ...actual,
+    cancelComputeJob: vi.fn(),
+  };
+});
 
 const selectedConcept: ConceptLike = { id: 1, key: '1', name: 'water' };
 
@@ -120,6 +130,79 @@ describe('useOffsetState', () => {
     });
     expect(result.current.lastProgressMessage).toBe('Scanning anchors…');
   });
+
+
+  it('cancels an in-flight offset detection job and returns to idle', async () => {
+    const { cancelComputeJob } = await import('../../api/client');
+    vi.mocked(cancelComputeJob).mockResolvedValue({ cancelled: true, job_id: 'offset-job-cancel' });
+
+    const { result } = renderHook(() =>
+      useOffsetState({
+        activeActionSpeaker: 'Fail01',
+        selectedConcept,
+        protectedLexemeCount: 0,
+        getCurrentTime: () => 9.5,
+        lookupConceptInterval: () => ({ start: 8, end: 8.4 }),
+        markLexemeManuallyAdjusted: vi.fn(),
+        detectTimestampOffset: vi.fn(),
+        detectTimestampOffsetFromPairs: vi.fn(),
+        pollOffsetDetectJob: vi.fn(),
+        applyTimestampOffset: vi.fn(),
+        reloadSpeakerAnnotation: vi.fn(),
+      }),
+    );
+
+    act(() => {
+      result.current.setOffsetState({
+        phase: 'detecting',
+        jobId: 'offset-job-cancel',
+        progress: 25,
+        origin: 'auto',
+      });
+    });
+
+    await act(async () => {
+      await result.current.cancelDetection('offset-job-cancel');
+    });
+
+    expect(cancelComputeJob).toHaveBeenCalledWith('offset-job-cancel');
+    expect(result.current.offsetState).toEqual({ phase: 'idle' });
+  });
+
+  it('marks backend offset-detect errors as backend failures with propagated messages', async () => {
+    const pollOffsetDetectJob = vi.fn().mockRejectedValue(
+      new OffsetJobError('offset-job-error', 'Backend failed while detecting offset', 'traceback body'),
+    );
+
+    const { result } = renderHook(() =>
+      useOffsetState({
+        activeActionSpeaker: 'Fail01',
+        selectedConcept,
+        protectedLexemeCount: 0,
+        getCurrentTime: () => 9.5,
+        lookupConceptInterval: () => ({ start: 8, end: 8.4 }),
+        markLexemeManuallyAdjusted: vi.fn(),
+        detectTimestampOffset: vi.fn().mockResolvedValue({ jobId: 'offset-job-error' }),
+        detectTimestampOffsetFromPairs: vi.fn(),
+        pollOffsetDetectJob,
+        applyTimestampOffset: vi.fn(),
+        reloadSpeakerAnnotation: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.detectOffsetForSpeaker();
+    });
+
+    expect(result.current.offsetState).toMatchObject({
+      phase: 'error',
+      jobId: 'offset-job-error',
+      message: 'Backend failed while detecting offset',
+      traceback: 'traceback body',
+      isBackendFailure: true,
+    });
+  });
+
 
   it('stores shifted concept counts after applying an offset', async () => {
     const applyTimestampOffset = vi.fn().mockResolvedValue({

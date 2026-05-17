@@ -16,6 +16,7 @@ interface OffsetAdjustmentModalProps {
   onSubmitManualOffset: () => void;
   onApplyDetectedOffset: () => void;
   onOpenManualOffset: () => void;
+  onCancelDetection: (jobId: string) => void;
   onOpenJobLogs: (jobId: string) => void;
 }
 
@@ -45,6 +46,7 @@ export function OffsetAdjustmentModal({
   onSubmitManualOffset,
   onApplyDetectedOffset,
   onOpenManualOffset,
+  onCancelDetection,
   onOpenJobLogs,
 }: OffsetAdjustmentModalProps) {
   return (
@@ -73,6 +75,16 @@ export function OffsetAdjustmentModal({
             <p className="text-[11px] text-slate-400">
               This window stays open while the worker is running. The header also mirrors the status.
             </p>
+            {offsetState.jobId && (
+              <div className="flex justify-end">
+                <button
+                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                  onClick={() => onCancelDetection(offsetState.jobId!)}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -315,7 +327,7 @@ export function OffsetAdjustmentModal({
               <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
               <span data-testid="offset-error">{offsetState.message}</span>
             </div>
-            {offsetState.jobId && (
+            {offsetState.isBackendFailure && offsetState.jobId && (
               <div className="text-[11px] text-slate-500">
                 Job <span className="font-mono text-slate-700">{offsetState.jobId}</span>
                 {' — '}
@@ -324,7 +336,7 @@ export function OffsetAdjustmentModal({
                   onClick={() => onOpenJobLogs(offsetState.jobId!)}
                   data-testid="offset-error-view-log"
                 >
-                  View crash log
+                  View job log
                 </button>
               </div>
             )}

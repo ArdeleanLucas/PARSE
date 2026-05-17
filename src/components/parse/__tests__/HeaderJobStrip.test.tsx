@@ -133,7 +133,7 @@ describe("HeaderJobStrip", () => {
     const row = screen.getByTestId("topbar-job-strip-row-job-1");
     expect(row.className).toContain("border-rose-200");
     expect(within(row).getByText(/CUDA exploded/)).toBeTruthy();
-    fireEvent.click(within(row).getByRole("button", { name: /View crash log/i }));
+    fireEvent.click(within(row).getByRole("button", { name: /View job log/i }));
     expect(onOpenLogs).toHaveBeenCalledWith("job-1");
   });
 

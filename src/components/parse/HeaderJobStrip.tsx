@@ -182,7 +182,7 @@ export function HeaderJobStrip({
                     onClick={() => onOpenLogs(job.jobId)}
                     className="rounded px-1.5 py-0.5 font-semibold text-rose-700 underline hover:text-rose-800"
                   >
-                    View crash log
+                    View job log
                   </button>
                 )}
               </>

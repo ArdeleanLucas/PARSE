@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { OffsetDetectResult, OffsetPair } from '../api/client';
-import { OffsetJobError } from '../api/client';
+import { cancelComputeJob, OffsetJobError } from '../api/client';
 
 export interface OffsetWorkflowConcept {
   id: number;
@@ -29,7 +29,7 @@ export type OffsetState =
   | { phase: 'manual' }
   | { phase: 'applying'; result: OffsetDetectResult }
   | { phase: 'applied'; result: OffsetDetectResult; shifted: number; shiftedConcepts: number; protected: number }
-  | { phase: 'error'; message: string; traceback?: string; jobId?: string };
+  | { phase: 'error'; message: string; traceback?: string; jobId?: string; isBackendFailure: boolean };
 
 interface UseOffsetStateArgs {
   activeActionSpeaker: string | null;
@@ -179,6 +179,16 @@ export function useOffsetState({
     setJobLogsOpen(jobId);
   }, []);
 
+  const cancelDetection = useCallback(async (jobId: string) => {
+    try {
+      await cancelComputeJob(jobId);
+    } catch (err) {
+      console.warn('Failed to cancel offset detection job', err);
+    } finally {
+      setOffsetState({ phase: 'idle' });
+    }
+  }, []);
+
   const closeJobLogs = useCallback(() => {
     setJobLogsOpen(null);
   }, []);
@@ -186,7 +196,7 @@ export function useOffsetState({
   const detectOffsetForSpeaker = useCallback(async () => {
     onCloseActionsMenu?.();
     if (!activeActionSpeaker) {
-      setOffsetState({ phase: 'error', message: 'Select a speaker first.' });
+      setOffsetState({ phase: 'error', message: 'Select a speaker first.', isBackendFailure: false });
       return;
     }
     setLastProgressMessage(null);
@@ -213,7 +223,13 @@ export function useOffsetState({
       const message = err instanceof Error ? err.message : String(err);
       const traceback = err instanceof OffsetJobError ? err.traceback : undefined;
       const jobId = err instanceof OffsetJobError ? err.jobId : submittedJobId ?? undefined;
-      setOffsetState({ phase: 'error', message, traceback, jobId });
+      setOffsetState({
+        phase: 'error',
+        message,
+        traceback,
+        jobId,
+        isBackendFailure: err instanceof OffsetJobError,
+      });
     }
   }, [activeActionSpeaker, detectTimestampOffset, onCloseActionsMenu, pollOffsetDetectJob]);
 
@@ -235,17 +251,22 @@ export function useOffsetState({
       setOffsetState({
         phase: 'error',
         message: err instanceof Error ? err.message : String(err),
+        isBackendFailure: false,
       });
     }
   }, [applyTimestampOffset, offsetState, reloadSpeakerAnnotation]);
 
   const submitManualOffset = useCallback(async () => {
     if (!activeActionSpeaker) {
-      setOffsetState({ phase: 'error', message: 'Select a speaker first.' });
+      setOffsetState({ phase: 'error', message: 'Select a speaker first.', isBackendFailure: false });
       return;
     }
     if (!manualAnchors.length) {
-      setOffsetState({ phase: 'error', message: 'Capture at least one anchor before computing the offset.' });
+      setOffsetState({
+        phase: 'error',
+        message: 'Capture at least one anchor before computing the offset.',
+        isBackendFailure: false,
+      });
       return;
     }
     setManualBusy(true);
@@ -276,7 +297,13 @@ export function useOffsetState({
       const message = err instanceof Error ? err.message : String(err);
       const traceback = err instanceof OffsetJobError ? err.traceback : undefined;
       const jobId = err instanceof OffsetJobError ? err.jobId : submittedJobId ?? undefined;
-      setOffsetState({ phase: 'error', message, traceback, jobId });
+      setOffsetState({
+        phase: 'error',
+        message,
+        traceback,
+        jobId,
+        isBackendFailure: err instanceof OffsetJobError,
+      });
     } finally {
       setManualBusy(false);
     }
@@ -288,6 +315,7 @@ export function useOffsetState({
     jobLogsOpen,
     openJobLogs,
     closeJobLogs,
+    cancelDetection,
     manualAnchors,
     manualBusy,
     captureToast,
