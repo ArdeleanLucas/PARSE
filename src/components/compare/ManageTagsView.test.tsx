@@ -161,9 +161,12 @@ describe('ManageTagsView', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /water/i }));
     expect(mockSetConceptTag).toHaveBeenCalledWith('S1', 'water', 'review-needed');
+    expect(mockFlushAutosave).toHaveBeenCalledWith('S1');
 
+    mockFlushAutosave.mockClear();
     fireEvent.click(screen.getByRole('button', { name: /fire/i }));
     expect(mockClearConceptTag).toHaveBeenCalledWith('S1', 'fire', 'review-needed');
+    expect(mockFlushAutosave).toHaveBeenCalledWith('S1');
   });
 
   it('falls back to configured speakers when toggling with no selected speakers', () => {
@@ -174,5 +177,7 @@ describe('ManageTagsView', () => {
 
     expect(mockSetConceptTag).toHaveBeenCalledWith('S1', 'earth', 'confirmed');
     expect(mockSetConceptTag).toHaveBeenCalledWith('S2', 'earth', 'confirmed');
+    expect(mockFlushAutosave).toHaveBeenCalledWith('S1');
+    expect(mockFlushAutosave).toHaveBeenCalledWith('S2');
   });
 });

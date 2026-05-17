@@ -84,9 +84,12 @@ describe('TagsPanelSection', () => {
 
     fireEvent.click(dialectalButton);
     expect(setConceptTag).toHaveBeenCalledWith('Fail01', 'sister', 't2');
+    expect(flushAutosave).toHaveBeenCalledWith('Fail01');
 
+    flushAutosave.mockClear();
     fireEvent.click(archaicButton);
     expect(clearConceptTag).toHaveBeenCalledWith('Fail01', 'sister', 't1');
+    expect(flushAutosave).toHaveBeenCalledWith('Fail01');
   });
 
   it('shows active-speaker applied count and global per-tag usage counts', () => {

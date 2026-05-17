@@ -99,7 +99,7 @@ export const ManageTagsView: React.FC<ManageTagsViewProps> = ({
     for (const speaker of targetSpeakers) {
       action(speaker, conceptKey, selectedTagId);
     }
-    targetSpeakers.forEach(flushAutosave);
+    for (const s of targetSpeakers) flushAutosave(s);
   };
 
   return (

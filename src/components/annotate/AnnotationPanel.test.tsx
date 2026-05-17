@@ -143,6 +143,8 @@ describe("AnnotationPanel", () => {
       text: "ipa-val",
     });
 
+    expect(mockFlushAutosave).toHaveBeenCalledWith("spk1");
+
     expect(screen.getByText("Saved.")).toBeTruthy();
   });
 
@@ -162,6 +164,7 @@ describe("AnnotationPanel", () => {
 
     fireEvent.click(deleteButtons[1]);
     expect(mockRemoveInterval).toHaveBeenCalledWith("spk1", "ipa", 1);
+    expect(mockFlushAutosave).toHaveBeenCalledWith("spk1");
   });
 
   it("inputs clear and concept pre-fills when activeSpeaker changes", () => {

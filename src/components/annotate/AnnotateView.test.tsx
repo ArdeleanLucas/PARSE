@@ -74,6 +74,7 @@ const mockSaveLexemeAnnotation = vi.fn().mockReturnValue({ ok: true, moved: 4 })
 const mockCreateConceptInterval = vi.fn().mockResolvedValue(undefined);
 const mockMoveIntervalAcrossTiers = vi.fn().mockReturnValue(0);
 const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
+const mockFlushAutosave = vi.fn();
 const mockUndo = vi.fn();
 const mockRedo = vi.fn();
 const mockSeek = vi.fn();
@@ -117,6 +118,7 @@ vi.mock('../../stores/annotationStore', () => ({
     createConceptInterval: mockCreateConceptInterval,
     moveIntervalAcrossTiers: mockMoveIntervalAcrossTiers,
     saveSpeaker: mockSaveSpeaker,
+    flushAutosave: mockFlushAutosave,
     undo: mockUndo,
     redo: mockRedo,
     setConceptTag: mockSetConceptTag,
@@ -1254,7 +1256,7 @@ describe('AnnotateView', () => {
     expect(screen.getByText('No lexeme interval yet for this variant.')).toBeTruthy();
   });
 
-  it('toggles Confirm time anchor without tagging or matched text', () => {
+  it('toggles Confirm time anchor without tagging or matched text', async () => {
     mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
 
     const { rerender } = renderWaterAnnotateView();
@@ -1269,7 +1271,10 @@ describe('AnnotateView', () => {
     }));
     expect(mockSetConfirmedAnchor.mock.calls[0][2]).not.toHaveProperty('matched_text');
     expect(mockSetConceptTag).not.toHaveBeenCalled();
+    await waitFor(() => expect(mockSaveSpeaker).toHaveBeenCalledWith('Fail01', expect.anything()));
 
+    mockSaveSpeaker.mockClear();
+    mockFlushAutosave.mockClear();
     mockRecord = {
       ...mockRecord!,
       confirmed_anchors: {
@@ -1290,6 +1295,7 @@ describe('AnnotateView', () => {
 
     fireEvent.click(screen.getByTestId('confirm-time'));
     expect(mockSetConfirmedAnchor).toHaveBeenLastCalledWith('Fail01', 'water', null);
+    expect(mockFlushAutosave).toHaveBeenCalledWith('Fail01');
   });
 
 
