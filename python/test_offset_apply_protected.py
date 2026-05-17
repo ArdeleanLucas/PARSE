@@ -63,11 +63,143 @@ def test_shift_intervals_skips_manually_adjusted_intervals() -> None:
     assert by_text["STONE"]["start"] == 10.0
     assert by_text["STONE"]["end"] == 10.5
     assert by_text["STONE"]["manuallyAdjusted"] is True
-    # WATER shifts by +5s, while original imported CSV provenance stays pinned.
-    assert by_text["WATER"]["start"] == 25.0
-    assert by_text["WATER"]["end"] == 25.5
+    # WATER shifts to imported_csv_start + offset, while original imported CSV provenance stays pinned.
+    assert by_text["WATER"]["start"] == by_text["WATER"]["imported_csv_start"] + 5.0
+    assert by_text["WATER"]["end"] == by_text["WATER"]["imported_csv_end"] + 5.0
     assert by_text["WATER"]["imported_csv_start"] == 20.0
     assert by_text["WATER"]["imported_csv_end"] == 20.5
+
+
+
+def _interval(start: float, text: str, concept_id: str, *, imported: bool = True, protected: bool = False):
+    item = {
+        "start": start,
+        "end": start + 0.5,
+        "text": text,
+        "concept_id": concept_id,
+    }
+    if imported:
+        item["imported_csv_start"] = start
+        item["imported_csv_end"] = start + 0.5
+    if protected:
+        item["manuallyAdjusted"] = True
+    return item
+
+
+def _multi_tier_record(*, imported: bool = True, protected: bool = False):
+    return {
+        "speaker": "Fail02",
+        "tiers": {
+            "concept": {
+                "type": "interval",
+                "display_order": 0,
+                "intervals": [
+                    _interval(78.0, "jbil 2", "42", imported=imported, protected=protected)
+                ],
+            },
+            "ipa": {
+                "type": "interval",
+                "display_order": 1,
+                "intervals": [_interval(78.0, "dʒbil", "42", imported=False)],
+            },
+            "ortho": {
+                "type": "interval",
+                "display_order": 2,
+                "intervals": [_interval(78.0, "jbil", "42", imported=False)],
+            },
+            "ortho_words": {
+                "type": "interval",
+                "display_order": 3,
+                "intervals": [_interval(78.0, "jbil", "42", imported=imported)],
+            },
+            "speaker": {
+                "type": "interval",
+                "display_order": 4,
+                # Runtime normalization rebuilds this tier from concept timings
+                # without concept_id; offset apply must still keep it aligned.
+                "intervals": [{"start": 78.0, "end": 78.5, "text": "Fail02"}],
+            },
+        },
+    }
+
+
+def test_multi_apply_with_imported_csv_is_idempotent() -> None:
+    record = _multi_tier_record()
+
+    _annotation_shift_intervals(record, 339.0)
+    first_round = {iv["text"]: iv for iv in record["tiers"]["concept"]["intervals"]}
+    assert first_round["jbil 2"]["start"] == 417.0
+
+    _annotation_shift_intervals(record, 422.0)
+    second_round = {iv["text"]: iv for iv in record["tiers"]["concept"]["intervals"]}
+    assert second_round["jbil 2"]["start"] == 500.0
+    assert second_round["jbil 2"]["start"] != 839.0
+
+
+def test_multi_apply_mirror_tiers_stay_aligned() -> None:
+    record = _multi_tier_record()
+
+    _annotation_shift_intervals(record, 339.0)
+    _annotation_shift_intervals(record, 422.0)
+
+    starts = {
+        tier_key: record["tiers"][tier_key]["intervals"][0]["start"]
+        for tier_key in ("concept", "ipa", "ortho", "ortho_words", "speaker")
+    }
+    assert starts == {
+        "concept": 500.0,
+        "ipa": 500.0,
+        "ortho": 500.0,
+        "ortho_words": 500.0,
+        "speaker": 500.0,
+    }
+
+
+def test_apply_without_imported_csv_uses_incremental_fallback() -> None:
+    record = _multi_tier_record(imported=False)
+
+    _annotation_shift_intervals(record, 339.0)
+    _annotation_shift_intervals(record, 422.0)
+
+    # Intentional legacy fallback for pre-MC-410-C annotations without imported CSV provenance.
+    assert record["tiers"]["concept"]["intervals"][0]["start"] == 78.0 + 339.0 + 422.0
+
+
+def test_apply_does_not_mutate_imported_csv_fields() -> None:
+    record = _multi_tier_record()
+    before = {
+        tier_key: [
+            (iv.get("imported_csv_start"), iv.get("imported_csv_end"))
+            for iv in tier.get("intervals", [])
+        ]
+        for tier_key, tier in record["tiers"].items()
+    }
+
+    _annotation_shift_intervals(record, 339.0)
+    _annotation_shift_intervals(record, 422.0)
+
+    after = {
+        tier_key: [
+            (iv.get("imported_csv_start"), iv.get("imported_csv_end"))
+            for iv in tier.get("intervals", [])
+        ]
+        for tier_key, tier in record["tiers"].items()
+    }
+    assert after == before
+
+
+def test_protected_concept_skipped_across_tiers() -> None:
+    record = _multi_tier_record(protected=True)
+
+    shifted, protected_, shifted_concepts = _annotation_shift_intervals(record, 339.0)
+
+    assert shifted == 0
+    assert protected_ == 5
+    assert shifted_concepts == 0
+    for tier_key in ("concept", "ipa", "ortho", "ortho_words", "speaker"):
+        interval = record["tiers"][tier_key]["intervals"][0]
+        assert interval["start"] == 78.0
+        assert interval["end"] == 78.5
 
 
 def test_shift_intervals_reports_distinct_shifted_concepts_across_tiers() -> None:
@@ -189,6 +321,115 @@ def test_chat_tools_apply_offset_skips_manually_adjusted(tmp_path) -> None:
     assert by_text["STONE"]["start"] == 10.0
     assert by_text["STONE"]["manuallyAdjusted"] is True
     assert by_text["WATER"]["start"] == 25.0
+
+
+def test_chat_tools_apply_offset_multi_apply_is_idempotent(tmp_path) -> None:
+    """The MCP apply_timestamp_offset tool must converge across repeat applies,
+    not double-shift. Mirrors test_multi_apply_with_imported_csv_is_idempotent
+    but exercises the chat-tool code path (ParseChatTools.execute), which has
+    its own _shift_annotation_intervals implementation alongside the HTTP one.
+    Issue #528 tracks consolidating both implementations into one shared module."""
+    intervals = [
+        {
+            "start": 78.0,
+            "end": 78.5,
+            "text": "jbil 2",
+            "concept_id": "42",
+            "imported_csv_start": 78.0,
+            "imported_csv_end": 78.5,
+        },
+    ]
+    path = _write_speaker_with_lexemes(tmp_path, intervals)
+    tools = ParseChatTools(project_root=tmp_path)
+
+    tools.execute(
+        "apply_timestamp_offset",
+        {"speaker": "Test01", "offsetSec": 339.0, "dryRun": False},
+    )
+    after_round_one = json.loads(path.read_text(encoding="utf-8"))
+    assert after_round_one["tiers"]["concept"]["intervals"][0]["start"] == 417.0
+
+    tools.execute(
+        "apply_timestamp_offset",
+        {"speaker": "Test01", "offsetSec": 300.0, "dryRun": False},
+    )
+    after_round_two = json.loads(path.read_text(encoding="utf-8"))
+    final_start = after_round_two["tiers"]["concept"]["intervals"][0]["start"]
+    assert final_start == 378.0, (
+        "expected imported_csv_start (78.0) + last offset (300) = 378.0; "
+        "got {0!r} — the chat-tool path may have regressed back to incremental shift".format(final_start)
+    )
+    # Provenance still pinned.
+    assert after_round_two["tiers"]["concept"]["intervals"][0]["imported_csv_start"] == 78.0
+
+
+def test_chat_tools_apply_offset_negative_offset_reverts_to_imported(tmp_path) -> None:
+    """Negative offsets (the user 'revert this shift' workflow) must also be
+    absolute when imported_csv_start is present. Apply +339 then -339 returns
+    the unflagged interval to its imported origin, not to a double-shifted
+    position."""
+    intervals = [
+        {
+            "start": 78.0,
+            "end": 78.5,
+            "text": "jbil 2",
+            "concept_id": "42",
+            "imported_csv_start": 78.0,
+            "imported_csv_end": 78.5,
+        },
+    ]
+    path = _write_speaker_with_lexemes(tmp_path, intervals)
+    tools = ParseChatTools(project_root=tmp_path)
+
+    tools.execute(
+        "apply_timestamp_offset",
+        {"speaker": "Test01", "offsetSec": 339.0, "dryRun": False},
+    )
+    tools.execute(
+        "apply_timestamp_offset",
+        {"speaker": "Test01", "offsetSec": -339.0, "dryRun": False},
+    )
+
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    iv = persisted["tiers"]["concept"]["intervals"][0]
+    # Round 2 with offset=-339 means new_start = imported(78) + (-339) clamped to 0.
+    assert iv["start"] == 0.0
+    assert iv["imported_csv_start"] == 78.0  # provenance preserved
+
+
+def test_chat_tools_apply_offset_resets_via_zero_offset(tmp_path) -> None:
+    """Applying offset=0 after a prior round should reset unflagged intervals
+    to their imported_csv_start positions — a useful 'undo everything' that
+    multi-apply idempotency unlocks. (Note: ChatTools rejects |offset| < 1e-6,
+    so test with a near-zero value that still rounds to the imported position.)"""
+    intervals = [
+        {
+            "start": 78.0,
+            "end": 78.5,
+            "text": "jbil 2",
+            "concept_id": "42",
+            "imported_csv_start": 78.0,
+            "imported_csv_end": 78.5,
+        },
+    ]
+    path = _write_speaker_with_lexemes(tmp_path, intervals)
+    tools = ParseChatTools(project_root=tmp_path)
+
+    tools.execute(
+        "apply_timestamp_offset",
+        {"speaker": "Test01", "offsetSec": 339.0, "dryRun": False},
+    )
+    assert json.loads(path.read_text(encoding="utf-8"))["tiers"]["concept"]["intervals"][0]["start"] == 417.0
+
+    # Apply offsetSec=0.001 — sub-second nudge, demonstrates reset to ~imported.
+    tools.execute(
+        "apply_timestamp_offset",
+        {"speaker": "Test01", "offsetSec": 0.001, "dryRun": False},
+    )
+    final_start = json.loads(path.read_text(encoding="utf-8"))["tiers"]["concept"]["intervals"][0]["start"]
+    assert abs(final_start - 78.001) < 1e-6, (
+        "expected reset to imported_csv_start + tiny offset (78.001); got {0!r}".format(final_start)
+    )
 
 
 def test_apply_then_mark_round_trip_persists_flag(tmp_path) -> None:
