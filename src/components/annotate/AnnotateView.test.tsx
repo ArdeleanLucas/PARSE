@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { AnnotationInterval, AnnotationRecord } from '../../api/types';
 
@@ -277,6 +277,17 @@ describe('AnnotateView', () => {
   function getOrthographicInput() {
     return screen.getByPlaceholderText('Enter orthographic form…') as HTMLInputElement;
   }
+
+  function openQuickRetimeMenu(selection = { start: 14.2, end: 15.31 }) {
+    const contextEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 96, clientY: 48 });
+    mockWaveSurferOptions!.quickRetimeSelection!.onContextMenu(selection, contextEvent);
+  }
+
+  const retimePickerConcepts = [
+    { id: 1, key: 'water', name: 'water' },
+    { id: 2, key: 'brother', name: 'brother', mergedVariants: [{ conceptKey: 'older-brother', conceptEn: 'elder sibling' }] },
+    { id: 3, key: 'brow', name: 'brow' },
+  ];
 
 
   it('renders a destructive Delete concept button and calls its handler', () => {
@@ -993,6 +1004,130 @@ describe('AnnotateView', () => {
     expect(mockClearQuickRetimeSelection).toHaveBeenCalledTimes(1);
     expect(mockAddRegion).toHaveBeenCalledWith(1.75, 2.75);
     expect(mockSeek).toHaveBeenCalledWith(1.75);
+  });
+
+  it('right-click menu offers "Update another timestamp" and opens a concept picker', async () => {
+    mockRecord = makeRecord([
+      { conceptText: 'water', conceptId: 'water', ipa: 'w', ortho: 'w', start: 1.25, end: 2.5 },
+      { conceptText: 'brother', conceptId: 'brother', ipa: 'b', ortho: 'b', start: 9.84, end: 10.62 },
+    ]);
+
+    renderWaterAnnotateView({ speakerConcepts: retimePickerConcepts });
+    openQuickRetimeMenu();
+
+    const menuItems = await screen.findAllByRole('menuitem');
+    expect(menuItems.map((item) => item.textContent)).toEqual([
+      'Update water timestamp',
+      'Update another timestamp…',
+      'Cancel selection',
+    ]);
+
+    fireEvent.click(screen.getByRole('menuitem', { name: /update another timestamp/i }));
+
+    const dialog = await screen.findByRole('dialog', { name: /move highlighted region to another concept/i });
+    expect(within(dialog).getByPlaceholderText(/search concepts on this speaker/i)).toBeTruthy();
+    expect(dialog.textContent).toContain('New timestamp: 0:14.200 – 0:15.310 (1.110s)');
+    expect(within(dialog).getByRole('option', { name: /brother/i }).getAttribute('aria-selected')).toBe('false');
+  });
+
+  it('filters the alternate-timestamp concept picker by concept and merged variant names', async () => {
+    mockRecord = makeRecord([
+      { conceptText: 'water', conceptId: 'water', start: 1.25, end: 2.5 },
+      { conceptText: 'brother', conceptId: 'brother', start: 9.84, end: 10.62 },
+    ]);
+
+    renderWaterAnnotateView({ speakerConcepts: retimePickerConcepts });
+    openQuickRetimeMenu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: /update another timestamp/i }));
+
+    const dialog = await screen.findByRole('dialog', { name: /move highlighted region to another concept/i });
+    fireEvent.change(within(dialog).getByPlaceholderText(/search concepts on this speaker/i), { target: { value: 'elder' } });
+
+    expect(within(dialog).getByRole('option', { name: /brother/i })).toBeTruthy();
+    expect(within(dialog).queryByRole('option', { name: /water/i })).toBeNull();
+    expect(within(dialog).queryByRole('option', { name: /brow/i })).toBeNull();
+  });
+
+  it('selecting an annotated concept commits saveLexemeAnnotation with old + new ranges', async () => {
+    mockRecord = makeRecord([
+      { conceptText: 'water', conceptId: 'water', ipa: 'old-water', ortho: 'water-orth', start: 1.25, end: 2.5 },
+      { conceptText: 'brother', conceptId: 'brother', ipa: 'old-brother', ortho: 'brother-orth', start: 9.84, end: 10.62 },
+    ]);
+
+    renderWaterAnnotateView({ speakerConcepts: retimePickerConcepts });
+    openQuickRetimeMenu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: /update another timestamp/i }));
+
+    const dialog = await screen.findByRole('dialog', { name: /move highlighted region to another concept/i });
+    fireEvent.click(within(dialog).getByRole('option', { name: /brother/i }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /update brother/i }));
+
+    await waitFor(() => expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith(expect.objectContaining({
+      speaker: 'Fail01',
+      oldStart: 9.84,
+      oldEnd: 10.62,
+      newStart: 14.2,
+      newEnd: 15.31,
+      ipaText: 'old-brother',
+      orthoText: 'brother-orth',
+      orthoEdited: false,
+      conceptName: 'brother',
+    })));
+    expect(mockCreateConceptInterval).not.toHaveBeenCalled();
+    expect(mockClearQuickRetimeSelection).toHaveBeenCalledTimes(1);
+    expect(mockAddRegion).toHaveBeenCalledWith(14.2, 15.31);
+    expect(mockSeek).toHaveBeenCalledWith(14.2);
+  });
+
+  it('selecting an empty concept calls createConceptInterval', async () => {
+    mockRecord = makeRecord([
+      { conceptText: 'water', conceptId: 'water', start: 1.25, end: 2.5 },
+      { conceptText: 'brother', conceptId: 'brother', start: 9.84, end: 10.62 },
+    ]);
+
+    renderWaterAnnotateView({ speakerConcepts: retimePickerConcepts });
+    openQuickRetimeMenu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: /update another timestamp/i }));
+
+    const dialog = await screen.findByRole('dialog', { name: /move highlighted region to another concept/i });
+    fireEvent.click(within(dialog).getByRole('option', { name: /brow/i }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /create lexeme for brow/i }));
+
+    await waitFor(() => expect(mockCreateConceptInterval).toHaveBeenCalledWith('Fail01', 'brow', 14.2, 15.31));
+    expect(mockSaveLexemeAnnotation).not.toHaveBeenCalled();
+    expect(mockClearQuickRetimeSelection).toHaveBeenCalledTimes(1);
+    expect(mockAddRegion).toHaveBeenCalledWith(14.2, 15.31);
+    expect(mockSeek).toHaveBeenCalledWith(14.2);
+  });
+
+  it('dismisses the alternate-timestamp picker with Escape without saving', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', conceptId: 'water', start: 1.25, end: 2.5 }]);
+
+    renderWaterAnnotateView({ speakerConcepts: retimePickerConcepts });
+    openQuickRetimeMenu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: /update another timestamp/i }));
+    await screen.findByRole('dialog', { name: /move highlighted region to another concept/i });
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /move highlighted region to another concept/i })).toBeNull());
+    expect(mockSaveLexemeAnnotation).not.toHaveBeenCalled();
+    expect(mockCreateConceptInterval).not.toHaveBeenCalled();
+  });
+
+  it('dismisses the alternate-timestamp picker on outside click without saving', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', conceptId: 'water', start: 1.25, end: 2.5 }]);
+
+    renderWaterAnnotateView({ speakerConcepts: retimePickerConcepts });
+    openQuickRetimeMenu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: /update another timestamp/i }));
+    await screen.findByRole('dialog', { name: /move highlighted region to another concept/i });
+
+    fireEvent.mouseDown(document.body);
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /move highlighted region to another concept/i })).toBeNull());
+    expect(mockSaveLexemeAnnotation).not.toHaveBeenCalled();
+    expect(mockCreateConceptInterval).not.toHaveBeenCalled();
   });
 
   it('cancels a quick-retime menu selection without saving', async () => {

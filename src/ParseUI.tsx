@@ -2038,6 +2038,7 @@ export function ParseUI() {
             <AnnotateView
               concept={concept}
               speaker={selectedSpeakers[0] ?? 'Mand01'}
+              speakerConcepts={speakerScopedConcepts}
               totalConcepts={total}
               onPrev={goPrev}
               onNext={goNext}
