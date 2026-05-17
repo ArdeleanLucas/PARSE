@@ -4,11 +4,9 @@ import {
   RotateCw, Save, Upload,
   Layers, ChevronDown, ChevronUp, X, AlertCircle,
   ArrowUpDown, Volume2,
-  Loader2,
   Tags, Import, AudioLines, Type, Mic,
   Workflow, Network, Trash2, ChevronDown as CDown,
   Download,
-  Anchor,
   Sun, Moon,
 } from 'lucide-react';
 import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, pollOffsetDetectJob, getCompareBundles } from './api/client';
@@ -1636,78 +1634,6 @@ export function ParseUI() {
 
           <HeaderJobStrip jobs={headerJobs} onOpenLogs={openJobLogs} />
 
-          {/* Persistent offset-job status chip. Survives modal dismissal
-              (even though we now lock the modal while the job runs, a
-              separate header indicator matters for the applying phase
-              and gives the user a single "what is PARSE doing" glance).
-              Idle state → renders nothing. Error state → click re-opens
-              the modal so the traceback + crash log are one click away. */}
-          {offsetState.phase !== 'idle' && (offsetState.phase === 'detecting' || offsetState.phase === 'applying' || offsetState.phase === 'error') && (() => {
-            const isError = offsetState.phase === 'error';
-            const isApplying = offsetState.phase === 'applying';
-            const isDetecting = offsetState.phase === 'detecting';
-            const label = isError
-              ? 'Offset failed'
-              : isApplying
-              ? 'Applying offset…'
-              : (offsetState.phase === 'detecting' && offsetState.progressMessage) || 'Detecting offset…';
-            return (
-              <div
-                className={`flex items-center gap-2 rounded-md border px-2.5 py-1 ${
-                  isError
-                    ? 'border-rose-200 bg-rose-50'
-                    : 'border-indigo-200 bg-indigo-50'
-                }`}
-                data-testid="topbar-offset-status"
-              >
-                {isError ? (
-                  <AlertCircle className="h-3 w-3 shrink-0 text-rose-600"/>
-                ) : (
-                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-indigo-600"/>
-                )}
-                <span className={`max-w-[200px] truncate text-[11px] font-medium ${isError ? 'text-rose-900' : 'text-indigo-900'}`} title={isError ? offsetState.message : label}>
-                  {label}
-                </span>
-                {isDetecting && (
-                  <div className="h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-indigo-100">
-                    <div
-                      className="h-full rounded-full bg-indigo-500 transition-all duration-300"
-                      style={{ width: `${Math.max(3, Math.round(offsetState.progress))}%` }}
-                    />
-                  </div>
-                )}
-                {!isError && protectedLexemeCount > 0 && (
-                  <span
-                    data-testid="topbar-offset-protected-badge"
-                    title={`${protectedLexemeCount} lexeme${protectedLexemeCount === 1 ? '' : 's'} locked — will be skipped by the offset`}
-                    className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700"
-                  >
-                    <Anchor className="h-2.5 w-2.5"/>
-                    {protectedLexemeCount} locked
-                  </span>
-                )}
-                {isError && offsetState.jobId && (
-                  <button
-                    onClick={() => openJobLogs(offsetState.jobId!)}
-                    className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-rose-700 underline hover:text-rose-800"
-                    data-testid="topbar-offset-view-log"
-                  >
-                    View crash log
-                  </button>
-                )}
-                {isError && (
-                  <button
-                    onClick={closeOffsetModal}
-                    className="rounded px-1 text-[11px] text-slate-500 hover:text-slate-700"
-                    aria-label="Dismiss offset status"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            );
-          })()}
-
           <div className="flex items-center gap-2">
             {/* Mode dropdown */}
             <div className="relative">
@@ -2604,7 +2530,7 @@ export function ParseUI() {
         onClose={modals.sourcesReport.close}
       />
       <OffsetAdjustmentModal
-        open={offsetState.phase !== 'idle'}
+        open={offsetState.phase !== 'idle' && offsetState.phase !== 'detecting' && offsetState.phase !== 'applying'}
         offsetState={offsetState}
         manualAnchors={manualAnchors}
         manualConsensus={manualConsensus}

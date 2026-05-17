@@ -4328,8 +4328,17 @@ describe("Actions menu — transcription run flow", () => {
     expect(mockMarkLexemeManuallyAdjusted).toHaveBeenCalledWith("Fail01", 8, 8.4);
   });
 
-  it("shows the offset status chip and detecting modal while timestamp detection is running", async () => {
+  it("shows detecting offset progress only in the generic header strip", async () => {
     vi.mocked(apiClient.detectTimestampOffset).mockResolvedValue({ job_id: "offset-job-1", jobId: "offset-job-1" });
+    vi.mocked(apiClient.listActiveJobs).mockResolvedValue([
+      {
+        jobId: "offset-job-1",
+        type: "compute:offset_detect",
+        status: "running",
+        progress: 0.42,
+        message: "Scanning anchors…",
+      },
+    ]);
     vi.mocked(apiClient.pollOffsetDetectJob).mockImplementation(
       async (_jobId, _jobType, handlers) => {
         handlers?.onProgress?.({ progress: 42, message: "Scanning anchors…" });
@@ -4342,13 +4351,12 @@ describe("Actions menu — transcription run flow", () => {
 
     fireEvent.click(screen.getByTestId("drawer-detect-offset"));
 
-    const statusChip = await screen.findByTestId("topbar-offset-status");
-    const offsetModal = screen.getByTestId("offset-modal");
-    expect(statusChip).toBeTruthy();
-    expect(offsetModal).toBeTruthy();
-    expect(screen.getByTestId("offset-detecting")).toBeTruthy();
-    expect(within(statusChip).getByText(/Scanning anchors/i)).toBeTruthy();
-    expect(within(offsetModal).getByText(/Scanning anchors/i)).toBeTruthy();
+    const row = await screen.findByTestId("topbar-job-strip-row-offset-job-1");
+    expect(row.textContent).toContain("Offset detect");
+    expect(row.textContent).toContain("42%");
+    expect(row.textContent).toContain("Scanning anchors");
+    expect(screen.queryByTestId("offset-modal")).toBeNull();
+    expect(screen.queryByTestId("offset-detecting")).toBeNull();
   });
 
   it("captures the current lexeme into the manual offset modal and shows the live consensus", async () => {
@@ -4375,27 +4383,32 @@ describe("Actions menu — transcription run flow", () => {
     expect(mockMarkLexemeManuallyAdjusted).toHaveBeenCalledWith("Fail01", 8, 8.4);
   });
 
-  it("shows the offset status chip and detecting modal while timestamp detection is running", async () => {
+  it("keeps the modal for detected results, then hides it while applying offset", async () => {
     vi.mocked(apiClient.detectTimestampOffset).mockResolvedValue({ job_id: "offset-job-1", jobId: "offset-job-1" });
-    vi.mocked(apiClient.pollOffsetDetectJob).mockImplementation(
-      async (_jobId, _jobType, handlers) => {
-        handlers?.onProgress?.({ progress: 42, message: "Scanning anchors…" });
-        return new Promise(() => {});
-      },
-    );
+    vi.mocked(apiClient.pollOffsetDetectJob).mockResolvedValue({
+      speaker: "Fail01",
+      offsetSec: 1.5,
+      confidence: 0.88,
+      nAnchors: 2,
+      totalAnchors: 2,
+      totalSegments: 12,
+      method: "auto",
+    });
+    vi.mocked(apiClient.applyTimestampOffset).mockImplementation(() => new Promise(() => {}));
 
     render(<ParseUI />);
     await switchToAnnotateMode();
 
     fireEvent.click(screen.getByTestId("drawer-detect-offset"));
 
-    const statusChip = await screen.findByTestId("topbar-offset-status");
-    const offsetModal = screen.getByTestId("offset-modal");
-    expect(statusChip).toBeTruthy();
-    expect(offsetModal).toBeTruthy();
-    expect(screen.getByTestId("offset-detecting")).toBeTruthy();
-    expect(within(statusChip).getByText(/Scanning anchors/i)).toBeTruthy();
-    expect(within(offsetModal).getByText(/Scanning anchors/i)).toBeTruthy();
+    expect(await screen.findByTestId("offset-modal")).toBeTruthy();
+    expect(screen.getByTestId("offset-value").textContent).toContain("+1.500 s");
+
+    fireEvent.click(screen.getByTestId("offset-apply"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("offset-modal")).toBeNull();
+    });
   });
 
   it("Reset Project resets the batch runner", () => {
