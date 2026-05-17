@@ -13,6 +13,7 @@ const mockRemoveTag = vi.fn();
 const mockUpdateTag = vi.fn();
 const mockSetConceptTag = vi.fn();
 const mockClearConceptTag = vi.fn();
+const mockFlushAutosave = vi.fn();
 let mockRecords: Record<string, AnnotationRecord> = {};
 let mockSelectedSpeakers: string[] = [];
 
@@ -57,6 +58,7 @@ vi.mock("../../stores/annotationStore", () => ({
       records: mockRecords,
       setConceptTag: mockSetConceptTag,
       clearConceptTag: mockClearConceptTag,
+      flushAutosave: mockFlushAutosave,
     }),
 }));
 
@@ -137,9 +139,12 @@ describe("TagManager", () => {
 
     fireEvent.click(screen.getByTestId("concept-chip-c3"));
     expect(mockSetConceptTag).toHaveBeenCalledWith("S1", "c3", "t1");
+    expect(mockFlushAutosave).toHaveBeenCalledWith("S1");
 
+    mockFlushAutosave.mockClear();
     fireEvent.click(screen.getByTestId("concept-chip-c1"));
     expect(mockClearConceptTag).toHaveBeenCalledWith("S1", "c1", "t1");
+    expect(mockFlushAutosave).toHaveBeenCalledWith("S1");
   });
 
   it("tags and untags all visible concepts across all configured speakers when none are selected", () => {
@@ -152,10 +157,15 @@ describe("TagManager", () => {
 
     expect(mockSetConceptTag).toHaveBeenCalledWith("S1", "c1", "t1");
     expect(mockSetConceptTag).toHaveBeenCalledWith("S2", "c1", "t1");
+    expect(mockFlushAutosave).toHaveBeenCalledWith("S1");
+    expect(mockFlushAutosave).toHaveBeenCalledWith("S2");
 
+    mockFlushAutosave.mockClear();
     fireEvent.click(screen.getByText("Untag all visible"));
     expect(mockClearConceptTag).toHaveBeenCalledWith("S1", "c1", "t1");
     expect(mockClearConceptTag).toHaveBeenCalledWith("S2", "c1", "t1");
+    expect(mockFlushAutosave).toHaveBeenCalledWith("S1");
+    expect(mockFlushAutosave).toHaveBeenCalledWith("S2");
   });
 
   it("search filters concept chips", () => {

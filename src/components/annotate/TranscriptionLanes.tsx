@@ -117,6 +117,7 @@ export function TranscriptionLanes({
   const addInterval = useAnnotationStore((s) => s.addInterval);
   const ensureSttTier = useAnnotationStore((s) => s.ensureSttTier);
   const ensureSttWordsTier = useAnnotationStore((s) => s.ensureSttWordsTier);
+  const flushAutosave = useAnnotationStore((s) => s.flushAutosave);
 
   const [pxPerSec, setPxPerSec] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -604,14 +605,17 @@ export function TranscriptionLanes({
               const ws = wsRef.current;
               const t = ws?.getCurrentTime() ?? 0;
               splitInterval(speaker, tierName, menu.index, t);
+              flushAutosave(speaker);
               setMenu(null);
             }}
             onMerge={() => {
               mergeIntervals(speaker, tierName, menu.index);
+              flushAutosave(speaker);
               setMenu(null);
             }}
             onDelete={() => {
               removeInterval(speaker, tierName, menu.index);
+              flushAutosave(speaker);
               setSelectedInterval(null);
               setMenu(null);
             }}

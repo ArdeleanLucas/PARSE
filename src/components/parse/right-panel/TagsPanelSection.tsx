@@ -21,6 +21,7 @@ export function TagsPanelSection({ conceptId, speaker }: TagsPanelSectionProps) 
   const records = useAnnotationStore((state) => state.records);
   const setConceptTag = useAnnotationStore((state) => state.setConceptTag);
   const clearConceptTag = useAnnotationStore((state) => state.clearConceptTag);
+  const flushAutosave = useAnnotationStore((state) => state.flushAutosave);
   const targetSpeaker = speaker ?? activeSpeaker;
   const activeTagIds = targetSpeaker ? records[targetSpeaker]?.concept_tags?.[conceptId] ?? [] : [];
   const appliedCount = tags.filter((tag) => activeTagIds.includes(tag.id)).length;
@@ -89,6 +90,7 @@ export function TagsPanelSection({ conceptId, speaker }: TagsPanelSectionProps) 
                   if (!targetSpeaker) return;
                   if (checked) clearConceptTag(targetSpeaker, conceptId, tag.id);
                   else setConceptTag(targetSpeaker, conceptId, tag.id);
+                  flushAutosave(targetSpeaker);
                 }}
               />
             );

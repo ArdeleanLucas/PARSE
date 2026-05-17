@@ -47,6 +47,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
   const records = useAnnotationStore((s) => s.records);
   const setConceptTag = useAnnotationStore((s) => s.setConceptTag);
   const clearConceptTag = useAnnotationStore((s) => s.clearConceptTag);
+  const flushAutosave = useAnnotationStore((s) => s.flushAutosave);
 
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -107,6 +108,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
     for (const speaker of targetSpeakers) {
       action(speaker, conceptId, selectedTagId);
     }
+    for (const s of targetSpeakers) flushAutosave(s);
   }
 
   function tagAllVisible() {
@@ -116,6 +118,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
         setConceptTag(speaker, concept.id, selectedTagId);
       }
     }
+    for (const s of targetSpeakers) flushAutosave(s);
   }
 
   function untagAllVisible() {
@@ -125,6 +128,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
         clearConceptTag(speaker, concept.id, selectedTagId);
       }
     }
+    for (const s of targetSpeakers) flushAutosave(s);
   }
 
   return (

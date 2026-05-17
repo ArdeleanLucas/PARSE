@@ -72,7 +72,8 @@ describe('TagsPanelSection', () => {
   it('toggles tag membership for the active speaker concept', () => {
     const setConceptTag = vi.fn();
     const clearConceptTag = vi.fn();
-    useAnnotationStore.setState({ setConceptTag, clearConceptTag });
+    const flushAutosave = vi.fn();
+    useAnnotationStore.setState({ setConceptTag, clearConceptTag, flushAutosave });
 
     render(<TagsPanelSection conceptId="sister" />);
 
@@ -83,9 +84,12 @@ describe('TagsPanelSection', () => {
 
     fireEvent.click(dialectalButton);
     expect(setConceptTag).toHaveBeenCalledWith('Fail01', 'sister', 't2');
+    expect(flushAutosave).toHaveBeenCalledWith('Fail01');
 
+    flushAutosave.mockClear();
     fireEvent.click(archaicButton);
     expect(clearConceptTag).toHaveBeenCalledWith('Fail01', 'sister', 't1');
+    expect(flushAutosave).toHaveBeenCalledWith('Fail01');
   });
 
   it('shows active-speaker applied count and global per-tag usage counts', () => {

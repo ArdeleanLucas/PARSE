@@ -26,6 +26,18 @@ export function createAnnotationAutosaveScheduler(get: AnnotationStoreGet): Sche
   };
 }
 
+export type FlushAnnotationAutosave = (speaker: string) => void;
+
+export function createAnnotationAutosaveFlusher(get: AnnotationStoreGet): FlushAnnotationAutosave {
+  return (speaker: string) => {
+    if (autosaveTimers[speaker]) {
+      clearTimeout(autosaveTimers[speaker]);
+      delete autosaveTimers[speaker];
+    }
+    void get().saveSpeaker(speaker);
+  };
+}
+
 
 function serializedIntervals(record: AnnotationRecord | null | undefined, tier: string): string {
   return JSON.stringify(record?.tiers?.[tier]?.intervals ?? []);

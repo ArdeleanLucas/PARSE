@@ -94,6 +94,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   const saveLexemeAnnotation = useAnnotationStore((s) => s.saveLexemeAnnotation);
   const createConceptInterval = useAnnotationStore((s) => s.createConceptInterval);
   const saveSpeaker = useAnnotationStore((s) => s.saveSpeaker);
+  const flushAutosave = useAnnotationStore((s) => s.flushAutosave);
   const undoAnnotation = useAnnotationStore((s) => s.undo);
   const redoAnnotation = useAnnotationStore((s) => s.redo);
   const undoRedoHistory = useAnnotationStore((s) => s.histories[speaker] ?? null);
@@ -1174,9 +1175,11 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                   data-testid="confirm-time"
                   aria-pressed={Boolean(confirmedAnchor)}
                   title="Confirms the lexeme boundaries without requiring transcription. Used by cross-speaker anchor discovery in lexeme_search Signal B, audio re-STT priors, forced-alignment training data, and future audio-similarity discovery."
-                  onClick={() => {
+                  disabled={timestampSaving}
+                  onClick={async () => {
                     if (confirmedAnchor) {
                       setConfirmedAnchor(speaker, concept.key, null);
+                      flushAutosave(speaker);
                       setTimestampMessage({ kind: "ok", text: "Boundary confirmation cleared." });
                       return;
                     }
@@ -1184,12 +1187,44 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                     const nextEnd = parseFloat(editEnd);
                     const start = Number.isFinite(nextStart) ? nextStart : conceptInterval.start;
                     const end = Number.isFinite(nextEnd) ? nextEnd : conceptInterval.end;
+                    const startChanged = Math.abs(start - conceptInterval.start) > 1e-6;
+                    const endChanged = Math.abs(end - conceptInterval.end) > 1e-6;
+                    if (startChanged || endChanged) {
+                      setTimestampSaving(true);
+                      try {
+                        const result = saveLexemeAnnotation({
+                          speaker,
+                          oldStart: conceptInterval.start,
+                          oldEnd: conceptInterval.end,
+                          newStart: start,
+                          newEnd: end,
+                          ipaText: ipa,
+                          orthoText: saveOrthoText,
+                          orthoEdited: orthoUserEdited,
+                          conceptName: concept.name,
+                        });
+                        if (!result.ok) {
+                          setTimestampMessage({ kind: "err", text: result.error });
+                          return;
+                        }
+                      } finally {
+                        setTimestampSaving(false);
+                      }
+                    }
                     setConfirmedAnchor(speaker, concept.key, {
                       start,
                       end,
                       source: "user+boundary_only",
                       confirmed_at: new Date().toISOString(),
                     });
+                    const saveResult = await saveSpeaker(speaker, record);
+                    const saved = saveResult?.record ? findAnnotationForConcept(saveResult.record, concept).conceptInterval : null;
+                    if (saved) {
+                      storedIntervalRef.current = { start: saved.start, end: saved.end };
+                      setEditStart(saved.start.toFixed(3));
+                      setEditEnd(saved.end.toFixed(3));
+                      addRegion(saved.start, saved.end);
+                    }
                     setTimestampMessage({ kind: "ok", text: "Boundary confirmed." });
                   }}
                   className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${confirmedAnchor ? "bg-emerald-600 text-white" : "border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"}`}

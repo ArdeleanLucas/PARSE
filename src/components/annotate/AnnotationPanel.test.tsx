@@ -13,6 +13,7 @@ let mockSelectedRegion: { start: number; end: number } | null = null;
 let mockRecords: Record<string, AnnotationRecord> = {};
 const mockAddInterval = vi.fn();
 const mockRemoveInterval = vi.fn();
+const mockFlushAutosave = vi.fn();
 
 vi.mock("../../stores/uiStore", () => ({
   useUIStore: (
@@ -32,6 +33,7 @@ vi.mock("../../stores/annotationStore", () => ({
       records: mockRecords,
       addInterval: mockAddInterval,
       removeInterval: mockRemoveInterval,
+      flushAutosave: mockFlushAutosave,
     }),
 }));
 
@@ -67,6 +69,7 @@ beforeEach(() => {
   mockRecords = {};
   mockAddInterval.mockClear();
   mockRemoveInterval.mockClear();
+  mockFlushAutosave.mockClear();
 });
 
 afterEach(cleanup);
@@ -140,6 +143,8 @@ describe("AnnotationPanel", () => {
       text: "ipa-val",
     });
 
+    expect(mockFlushAutosave).toHaveBeenCalledWith("spk1");
+
     expect(screen.getByText("Saved.")).toBeTruthy();
   });
 
@@ -159,6 +164,7 @@ describe("AnnotationPanel", () => {
 
     fireEvent.click(deleteButtons[1]);
     expect(mockRemoveInterval).toHaveBeenCalledWith("spk1", "ipa", 1);
+    expect(mockFlushAutosave).toHaveBeenCalledWith("spk1");
   });
 
   it("inputs clear and concept pre-fills when activeSpeaker changes", () => {

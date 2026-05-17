@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { createAnnotationActionsSlice } from "./annotation/actions";
 import {
+  createAnnotationAutosaveFlusher,
   createAnnotationAutosaveScheduler,
   createAnnotationPersistenceSlice,
 } from "./annotation/persistence";
@@ -17,6 +18,7 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => {
     dirty: {},
     loading: {},
     histories: {},
+    flushAutosave: createAnnotationAutosaveFlusher(get),
     ...createAnnotationPersistenceSlice(set, get),
     ...createAnnotationActionsSlice(set, get, scheduleAutosave),
   };
