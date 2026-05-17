@@ -94,6 +94,7 @@ describe('useOffsetState', () => {
         pollOffsetDetectJob: vi.fn(),
         applyTimestampOffset: vi.fn(),
         reloadSpeakerAnnotation: vi.fn(),
+        flushAutosave: vi.fn(),
       }),
     );
 
