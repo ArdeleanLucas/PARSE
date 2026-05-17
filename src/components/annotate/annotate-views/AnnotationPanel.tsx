@@ -37,6 +37,7 @@ export function AnnotationPanel({ onAnnotationSaved, onSeek }: AnnotationPanelPr
   const updateIntervalTimes = useAnnotationStore((s) => s.updateIntervalTimes);
   const mergeIntervals = useAnnotationStore((s) => s.mergeIntervals);
   const splitInterval = useAnnotationStore((s) => s.splitInterval);
+  const flushAutosave = useAnnotationStore((s) => s.flushAutosave);
   const selectedInterval = useTranscriptionLanesStore((s) => s.selectedInterval);
   const setSelectedInterval = useTranscriptionLanesStore((s) => s.setSelectedInterval);
 
@@ -76,6 +77,8 @@ export function AnnotationPanel({ onAnnotationSaved, onSeek }: AnnotationPanelPr
       }
     }
 
+    flushAutosave(activeSpeaker);
+
     setIpa("");
     setOrtho("");
     setConcept("");
@@ -85,7 +88,7 @@ export function AnnotationPanel({ onAnnotationSaved, onSeek }: AnnotationPanelPr
     if (savedIpaInterval) {
       onAnnotationSaved?.(activeSpeaker, "ipa", savedIpaInterval);
     }
-  }, [activeSpeaker, selectedRegion, ipa, ortho, concept, addInterval, onAnnotationSaved]);
+  }, [activeSpeaker, selectedRegion, ipa, ortho, concept, addInterval, flushAutosave, onAnnotationSaved]);
 
   const handleClear = useCallback(() => {
     setIpa("");
@@ -175,6 +178,7 @@ export function AnnotationPanel({ onAnnotationSaved, onSeek }: AnnotationPanelPr
         onDelete={(tier, index) => {
           if (!activeSpeaker) return;
           removeInterval(activeSpeaker, tier, index);
+          flushAutosave(activeSpeaker);
         }}
         onClearSelection={() => setSelectedInterval(null)}
       />
@@ -218,7 +222,10 @@ export function AnnotationPanel({ onAnnotationSaved, onSeek }: AnnotationPanelPr
                   variant="danger"
                   size="sm"
                   onClick={() => {
-                    if (activeSpeaker) removeInterval(activeSpeaker, "ipa", index);
+                    if (activeSpeaker) {
+                      removeInterval(activeSpeaker, "ipa", index);
+                      flushAutosave(activeSpeaker);
+                    }
                   }}
                 >
                   Delete

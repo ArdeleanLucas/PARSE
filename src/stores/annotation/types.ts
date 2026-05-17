@@ -80,9 +80,14 @@ export interface AnnotationStoreActionsSlice {
   redo: (speaker: string) => string | null;
 }
 
+export interface AnnotationStoreAutosaveSlice {
+  flushAutosave: (speaker: string) => void;
+}
+
 export type AnnotationStore = AnnotationStoreState
   & AnnotationStorePersistenceSlice
-  & AnnotationStoreActionsSlice;
+  & AnnotationStoreActionsSlice
+  & AnnotationStoreAutosaveSlice;
 
 export type AnnotationStoreSet = (
   partial: Partial<AnnotationStore> | ((state: AnnotationStore) => Partial<AnnotationStore>),

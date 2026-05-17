@@ -73,6 +73,7 @@ export const ManageTagsView: React.FC<ManageTagsViewProps> = ({
   const records = useAnnotationStore((state) => state.records);
   const setConceptTag = useAnnotationStore((state) => state.setConceptTag);
   const clearConceptTag = useAnnotationStore((state) => state.clearConceptTag);
+  const flushAutosave = useAnnotationStore((state) => state.flushAutosave);
   const selectedSpeakers = useUIStore((state) => state.selectedSpeakers) ?? [];
   const configSpeakers = useConfigStore((state) => state.config?.speakers ?? []);
   const targetSpeakers = selectedSpeakers.length > 0 ? selectedSpeakers : configSpeakers;
@@ -98,6 +99,7 @@ export const ManageTagsView: React.FC<ManageTagsViewProps> = ({
     for (const speaker of targetSpeakers) {
       action(speaker, conceptKey, selectedTagId);
     }
+    targetSpeakers.forEach(flushAutosave);
   };
 
   return (
