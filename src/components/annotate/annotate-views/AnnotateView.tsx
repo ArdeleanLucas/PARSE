@@ -32,7 +32,7 @@ import { SpectrogramSettings } from "../SpectrogramSettings";
 
 import { CreateLexemePanel } from "./CreateLexemePanel";
 import { SpeakerHeader } from "./SpeakerHeader";
-import { findAnnotationForConcept, formatPlaybackTime, formatPlayhead, pickOrthoIntervalForConcept } from "./shared";
+import { findAnnotationForConcept, formatPlaybackTime, formatPlayhead, formatSearchTime, pickOrthoIntervalForConcept } from "./shared";
 import type { AnnotateViewProps } from "./types";
 
 export { pickOrthoIntervalForConcept };
@@ -72,6 +72,7 @@ export function extractRerunError(error: unknown): string {
 export const AnnotateView: React.FC<AnnotateViewProps> = ({
   concept,
   speaker,
+  speakerConcepts,
   totalConcepts,
   onPrev,
   onNext,
@@ -232,6 +233,10 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   const [savingNote, setSavingNote] = useState(false);
   const [noteError, setNoteError] = useState<string | null>(null);
   const [quickRetimeMenu, setQuickRetimeMenu] = useState<{ x: number; y: number; start: number; end: number } | null>(null);
+  const [retimeAnotherMenu, setRetimeAnotherMenu] = useState<{ x: number; y: number; start: number; end: number } | null>(null);
+  const [retimeAnotherQuery, setRetimeAnotherQuery] = useState("");
+  const [retimeAnotherIndex, setRetimeAnotherIndex] = useState(0);
+  const retimeAnotherDialogRef = useRef<HTMLDivElement | null>(null);
   const [createLexemeMenu, setCreateLexemeMenu] = useState<{ x: number; y: number; start: number; end: number } | null>(null);
   const [rerunDialog, setRerunDialog] = useState<RerunDialogState>(null);
   const [rerunBusy, setRerunBusy] = useState<RerunField | null>(null);
@@ -251,6 +256,9 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     setNoteError(null);
     setSavingNote(false);
     setQuickRetimeMenu(null);
+    setRetimeAnotherMenu(null);
+    setRetimeAnotherQuery("");
+    setRetimeAnotherIndex(0);
     setCreateLexemeMenu(null);
     setRerunDialog(null);
     setRerunBusy(null);
@@ -494,6 +502,133 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     setQuickRetimeMenu(null);
   }, [clearQuickRetimeSelection]);
 
+  const cancelRetimeAnother = useCallback(() => {
+    setRetimeAnotherMenu(null);
+    setRetimeAnotherQuery("");
+    setRetimeAnotherIndex(0);
+  }, []);
+
+  const openRetimeAnother = useCallback(() => {
+    if (!quickRetimeMenu) return;
+    setRetimeAnotherMenu(quickRetimeMenu);
+    setRetimeAnotherQuery("");
+    setRetimeAnotherIndex(0);
+    setQuickRetimeMenu(null);
+  }, [quickRetimeMenu]);
+
+  const retimeAnotherChoices = useMemo(() => {
+    const conceptsForSpeaker = speakerConcepts && speakerConcepts.length > 0 ? speakerConcepts : [concept];
+    const query = retimeAnotherQuery.trim().toLowerCase();
+    return conceptsForSpeaker
+      .map((candidate) => {
+        const lookup = findAnnotationForConcept(record, candidate);
+        return {
+          concept: candidate,
+          currentInterval: lookup.conceptInterval,
+          ipaInterval: lookup.ipaInterval,
+          orthoInterval: lookup.directOrthoInterval,
+        };
+      })
+      .filter(({ concept: candidate }) => {
+        if (!query) return true;
+        const names = [
+          candidate.name,
+          ...(candidate.mergedVariants ?? []).map((variant) => variant.conceptEn ?? ""),
+          ...(candidate.variants ?? []).map((variant) => variant.conceptEn ?? ""),
+        ];
+        return names.some((name) => name.toLowerCase().includes(query));
+      });
+  }, [concept, record, retimeAnotherQuery, speakerConcepts]);
+
+  useEffect(() => {
+    if (retimeAnotherIndex < retimeAnotherChoices.length) return;
+    setRetimeAnotherIndex(Math.max(0, retimeAnotherChoices.length - 1));
+  }, [retimeAnotherChoices.length, retimeAnotherIndex]);
+
+  useEffect(() => {
+    if (!retimeAnotherMenu) return;
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (target && retimeAnotherDialogRef.current?.contains(target)) return;
+      cancelRetimeAnother();
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [cancelRetimeAnother, retimeAnotherMenu]);
+
+  const selectedRetimeAnotherChoice = retimeAnotherChoices[retimeAnotherIndex] ?? retimeAnotherChoices[0] ?? null;
+
+  const retimeAnotherStatus = useCallback((targetConcept: typeof concept, currentInterval: typeof conceptInterval) => {
+    if (!currentInterval) return "empty";
+    const tags = record?.concept_tags?.[targetConcept.key] ?? [];
+    if (tags.includes("problematic")) return "problematic";
+    if (tags.includes("review-needed") || tags.includes("review")) return "review";
+    return "annotated";
+  }, [record?.concept_tags]);
+
+  const retimeAnotherPillClasses = (status: string): string => {
+    switch (status) {
+      case "annotated":
+        return "bg-emerald-50 text-emerald-700 ring-emerald-100";
+      case "review":
+        return "bg-amber-50 text-amber-700 ring-amber-100";
+      case "problematic":
+        return "bg-rose-50 text-rose-700 ring-rose-100";
+      default:
+        return "bg-slate-100 text-slate-500 ring-slate-200";
+    }
+  };
+
+  const commitRetimeAnother = useCallback(async (choice = selectedRetimeAnotherChoice) => {
+    if (!retimeAnotherMenu || !choice) return;
+    try {
+      if (choice.currentInterval) {
+        const result = saveLexemeAnnotation({
+          speaker,
+          oldStart: choice.currentInterval.start,
+          oldEnd: choice.currentInterval.end,
+          newStart: retimeAnotherMenu.start,
+          newEnd: retimeAnotherMenu.end,
+          ipaText: choice.ipaInterval?.text ?? "",
+          orthoText: choice.orthoInterval?.text ?? "",
+          orthoEdited: false,
+          conceptName: choice.concept.name,
+        });
+        if (!result.ok) {
+          setTimestampMessage({ kind: "err", text: result.error });
+          return;
+        }
+      } else {
+        await createConceptInterval(speaker, choice.concept.key, retimeAnotherMenu.start, retimeAnotherMenu.end);
+      }
+      setTimestampMessage({ kind: "ok", text: choice.currentInterval ? `Updated ${choice.concept.name} timestamp` : `Created lexeme for ${choice.concept.name}` });
+      clearQuickRetimeSelection();
+      addRegion(retimeAnotherMenu.start, retimeAnotherMenu.end);
+      seek(retimeAnotherMenu.start);
+      cancelRetimeAnother();
+    } catch (err) {
+      setTimestampMessage({ kind: "err", text: err instanceof Error ? err.message : String(err || "Update failed.") });
+    }
+  }, [addRegion, cancelRetimeAnother, clearQuickRetimeSelection, createConceptInterval, retimeAnotherMenu, saveLexemeAnnotation, seek, selectedRetimeAnotherChoice, speaker]);
+
+  const handleRetimeAnotherKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setRetimeAnotherIndex((value) => Math.min(retimeAnotherChoices.length - 1, value + 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setRetimeAnotherIndex((value) => Math.max(0, value - 1));
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      void commitRetimeAnother();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      cancelRetimeAnother();
+    }
+  }, [cancelRetimeAnother, commitRetimeAnother, retimeAnotherChoices.length]);
+
+  const retimeAnotherDuration = retimeAnotherMenu ? Math.max(0, retimeAnotherMenu.end - retimeAnotherMenu.start) : 0;
+
   const commitCreateLexeme = useCallback(async () => {
     if (!createLexemeMenu) return;
     try {
@@ -532,16 +667,17 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   }, [concept.key, lexemeNotesBlock, saveEnrichments, speaker, userNote]);
 
   useEffect(() => {
-    if (!quickRetimeMenu && !createLexemeMenu) return;
+    if (!quickRetimeMenu && !createLexemeMenu && !retimeAnotherMenu) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       if (quickRetimeMenu) cancelQuickRetime();
       if (createLexemeMenu) cancelCreateLexeme();
+      if (retimeAnotherMenu) cancelRetimeAnother();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [cancelCreateLexeme, cancelQuickRetime, createLexemeMenu, quickRetimeMenu]);
+  }, [cancelCreateLexeme, cancelQuickRetime, cancelRetimeAnother, createLexemeMenu, quickRetimeMenu, retimeAnotherMenu]);
 
   const handlePlayToggle = useCallback(() => {
     if (currentConceptPastEoa) {
@@ -1037,11 +1173,115 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                 <button
                   type="button"
                   role="menuitem"
-                  className="block w-full border-t border-slate-100 px-3 py-2 text-left text-slate-600 hover:bg-slate-50"
+                  className="block w-full border-y border-slate-100 px-3 py-2 text-left text-slate-700 hover:bg-slate-50"
+                  onClick={openRetimeAnother}
+                >
+                  Update another timestamp…
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="block w-full px-3 py-2 text-left text-slate-600 hover:bg-slate-50"
                   onClick={cancelQuickRetime}
                 >
                   Cancel selection
                 </button>
+              </div>
+            )}
+            {retimeAnotherMenu && (
+              <div
+                ref={retimeAnotherDialogRef}
+                role="dialog"
+                aria-label="Move highlighted region to another concept"
+                className="fixed z-50 w-[420px] overflow-hidden rounded-xl border border-slate-200 bg-white text-sm shadow-xl"
+                style={{ left: retimeAnotherMenu.x, top: retimeAnotherMenu.y }}
+                onContextMenu={(event) => event.preventDefault()}
+                onKeyDown={handleRetimeAnotherKeyDown}
+              >
+                <div className="border-b border-slate-100 px-4 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-sm font-semibold text-slate-900">Move highlighted region to another concept</h2>
+                      <p className="mt-1 text-xs text-slate-500">
+                        New timestamp: {formatSearchTime(retimeAnotherMenu.start)} – {formatSearchTime(retimeAnotherMenu.end)} ({retimeAnotherDuration.toFixed(3)}s)
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Close concept picker"
+                      className="rounded-md px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      onClick={cancelRetimeAnother}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <input
+                    autoFocus
+                    value={retimeAnotherQuery}
+                    onChange={(event) => {
+                      setRetimeAnotherQuery(event.target.value);
+                      setRetimeAnotherIndex(0);
+                    }}
+                    placeholder="Search concepts on this speaker…"
+                    className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-300 focus:outline-none focus:ring-4 focus:ring-indigo-50"
+                  />
+                </div>
+                <div role="listbox" aria-label="Concepts on this speaker" className="max-h-72 overflow-y-auto py-1">
+                  {retimeAnotherChoices.length === 0 ? (
+                    <div className="px-4 py-5 text-center text-sm text-slate-500">No concepts match this search.</div>
+                  ) : retimeAnotherChoices.map((choice, index) => {
+                    const status = retimeAnotherStatus(choice.concept, choice.currentInterval);
+                    const selected = index === retimeAnotherIndex;
+                    return (
+                      <button
+                        key={choice.concept.key}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        className={`block w-full px-4 py-2.5 text-left transition ${selected ? "bg-indigo-50" : "hover:bg-slate-50"}`}
+                        onClick={() => setRetimeAnotherIndex(index)}
+                        onDoubleClick={() => void commitRetimeAnother(choice)}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate font-medium text-slate-900">{choice.concept.name}</div>
+                            {choice.currentInterval ? (
+                              <div className="mt-0.5 text-xs text-slate-500">
+                                current: {formatSearchTime(choice.currentInterval.start)} – {formatSearchTime(choice.currentInterval.end)}
+                                <span className="text-indigo-400"> → {formatSearchTime(retimeAnotherMenu.start)} – {formatSearchTime(retimeAnotherMenu.end)}</span>
+                              </div>
+                            ) : (
+                              <div className="mt-0.5 text-xs italic text-slate-400">no current timestamp</div>
+                            )}
+                          </div>
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${retimeAnotherPillClasses(status)}`}>
+                            {status}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
+                  <div className="text-[11px] text-slate-400">↑/↓ select · Enter update · Esc close</div>
+                  <div className="flex items-center gap-2">
+                    <button type="button" className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100" onClick={cancelRetimeAnother}>
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!selectedRetimeAnotherChoice}
+                      className={`rounded-lg px-3 py-1.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300 ${selectedRetimeAnotherChoice?.currentInterval ? "bg-indigo-600 hover:bg-indigo-700" : "bg-emerald-600 hover:bg-emerald-700"}`}
+                      onClick={() => void commitRetimeAnother()}
+                    >
+                      {selectedRetimeAnotherChoice?.currentInterval
+                        ? `Update ${selectedRetimeAnotherChoice.concept.name}`
+                        : selectedRetimeAnotherChoice
+                          ? `Create lexeme for ${selectedRetimeAnotherChoice.concept.name}`
+                          : "Update concept"}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>

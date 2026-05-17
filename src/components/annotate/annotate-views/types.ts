@@ -18,6 +18,7 @@ export interface Concept {
 export interface AnnotateViewProps {
   concept: Concept;
   speaker: string;
+  speakerConcepts?: Concept[];
   totalConcepts: number;
   onPrev: () => void;
   onNext: () => void;
