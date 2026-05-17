@@ -1391,6 +1391,38 @@ describe('AnnotateView', () => {
     expect(screen.getByText('No lexeme interval yet for this variant.')).toBeTruthy();
   });
 
+  it('re-confirms edited boundaries instead of clearing an existing Confirm time anchor', async () => {
+    mockRecord = makeRecord([{ conceptText: 'water', start: 1.3, end: 2.0 }]);
+    mockRecord = {
+      ...mockRecord,
+      confirmed_anchors: {
+        water: { start: 1.3, end: 2.0, source: 'user+boundary_only', confirmed_at: '2026-05-04T00:00:00.000Z' },
+      },
+    };
+
+    renderWaterAnnotateView();
+
+    fireEvent.change(screen.getByTestId('lexeme-start'), { target: { value: '78.0' } });
+    fireEvent.change(screen.getByTestId('lexeme-end'), { target: { value: '78.5' } });
+    fireEvent.click(screen.getByTestId('confirm-time'));
+
+    await waitFor(() => expect(mockSaveLexemeAnnotation).toHaveBeenCalledWith(expect.objectContaining({
+      speaker: 'Fail01',
+      oldStart: 1.3,
+      oldEnd: 2.0,
+      newStart: 78.0,
+      newEnd: 78.5,
+    })));
+    expect(mockSetConfirmedAnchor).toHaveBeenCalledWith('Fail01', 'water', expect.objectContaining({
+      start: 78.0,
+      end: 78.5,
+      source: 'user+boundary_only',
+      confirmed_at: expect.any(String),
+    }));
+    expect(mockSetConfirmedAnchor).not.toHaveBeenCalledWith('Fail01', 'water', null);
+    await waitFor(() => expect(screen.getByTestId('lexeme-timestamp-msg').textContent).toContain('Boundary confirmed.'));
+  });
+
   it('toggles Confirm time anchor without tagging or matched text', async () => {
     mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
 
