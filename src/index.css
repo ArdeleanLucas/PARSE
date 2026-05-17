@@ -2,6 +2,27 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Disable macOS rubber-band overscroll on the document chain.
+
+   The app's outermost layout div (ParseUI.tsx) uses `h-screen
+   overflow-hidden`, so the document is exactly 100vh tall and not
+   actually scrollable — verified live: `documentElement.scrollHeight ===
+   window.innerHeight`. But before this rule, the html/body/#root chain
+   had `overscroll-behavior: auto` (the default), which meant trackpad
+   scroll input that ran past an inner scroll container's edge
+   (AnnotateView <main>, concept list, right panel) chained up to the
+   document and triggered macOS's elastic rubber-band overscroll —
+   exposing the body canvas color below the clipped root for as long as
+   the user kept scrolling. `overscroll-behavior: none` blocks both the
+   chain and the rubber band. `height: 100%; overflow: hidden` is
+   belt-and-braces in case any future tree change tries to extend the
+   body. The app's own internal scroll containers are unaffected. */
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 /* Survey color swatches — selected indicator. */
 .survey-swatch {
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
