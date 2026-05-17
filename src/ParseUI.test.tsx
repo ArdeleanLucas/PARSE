@@ -31,6 +31,7 @@ const mockSetInterval = vi.fn();
 const mockSaveLexemeAnnotation = vi.fn().mockReturnValue({ ok: true, moved: 4 });
 const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockMarkLexemeManuallyAdjusted = vi.fn();
+const mockFlushAutosave = vi.fn();
 const mockSetConceptTag = vi.fn((speaker: string, conceptId: string, tagId: string) => {
   const record = mockRecords[speaker] ?? { speaker_id: speaker, intervals: {}, modified_at: '' };
   const nextTags = new Set(record.concept_tags?.[conceptId] ?? []);
@@ -149,6 +150,7 @@ vi.mock("./stores/annotationStore", () => {
       saveLexemeAnnotation: mockSaveLexemeAnnotation,
       saveSpeaker: mockSaveSpeaker,
       markLexemeManuallyAdjusted: mockMarkLexemeManuallyAdjusted,
+      flushAutosave: mockFlushAutosave,
       moveIntervalAcrossTiers: vi.fn(),
       undo: vi.fn(),
       redo: vi.fn(),
@@ -737,6 +739,7 @@ beforeEach(() => {
   mockSaveLexemeAnnotation.mockReturnValue({ ok: true, moved: 4 });
   mockSaveSpeaker.mockClear();
   mockMarkLexemeManuallyAdjusted.mockClear();
+  mockFlushAutosave.mockClear();
   mockSetConceptTag.mockClear();
   mockClearConceptTag.mockClear();
   mockSetConfirmedAnchor.mockClear();

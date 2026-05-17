@@ -54,6 +54,7 @@ interface UseOffsetStateArgs {
     protected?: number;
   }>;
   reloadSpeakerAnnotation: (speaker: string) => Promise<void>;
+  flushAutosave: (speaker: string) => void;
   onCloseActionsMenu?: () => void;
 }
 
@@ -87,6 +88,7 @@ export function useOffsetState({
   pollOffsetDetectJob,
   applyTimestampOffset,
   reloadSpeakerAnnotation,
+  flushAutosave,
   onCloseActionsMenu,
 }: UseOffsetStateArgs) {
   const [offsetState, setOffsetState] = useState<OffsetState>({ phase: 'idle' });
@@ -228,6 +230,7 @@ export function useOffsetState({
     setOffsetState({ phase: 'applying', result });
     try {
       const apply = await applyTimestampOffset(result.speaker, result.offsetSec);
+      await reloadSpeakerAnnotation(result.speaker);
       for (const anchor of manualAnchors) {
         const anchorConcept: OffsetWorkflowConcept = {
           id: 0,
@@ -239,7 +242,7 @@ export function useOffsetState({
           markLexemeManuallyAdjusted(result.speaker, interval.start, interval.end);
         }
       }
-      await reloadSpeakerAnnotation(result.speaker);
+      flushAutosave(result.speaker);
       setOffsetState({
         phase: 'applied',
         result,
@@ -254,7 +257,7 @@ export function useOffsetState({
         isBackendFailure: false,
       });
     }
-  }, [applyTimestampOffset, offsetState, reloadSpeakerAnnotation, manualAnchors, lookupConceptInterval, markLexemeManuallyAdjusted]);
+  }, [applyTimestampOffset, offsetState, reloadSpeakerAnnotation, manualAnchors, lookupConceptInterval, markLexemeManuallyAdjusted, flushAutosave]);
 
   const submitManualOffset = useCallback(async () => {
     if (!activeActionSpeaker) {
