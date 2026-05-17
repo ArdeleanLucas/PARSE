@@ -994,16 +994,29 @@ export function ParseUI() {
     }
   }, [selectedTagTargetSpeakers, setConceptTag]);
 
+  const activeSpeakerForSidebar = selectedSpeakers[0] ?? null;
+  const elicitedConceptKeys = useMemo(
+    () => speakerElicitedConceptKeys(activeSpeakerForSidebar ? annotationRecords[activeSpeakerForSidebar] : null),
+    [annotationRecords, activeSpeakerForSidebar],
+  );
+  const activeSpeakerFreshKeys = useMemo<ReadonlySet<string>>(() => {
+    if (!activeSpeakerForSidebar) return EMPTY_FRESH_KEYS;
+    return freshDuplicateKeysBySpeaker[activeSpeakerForSidebar] ?? EMPTY_FRESH_KEYS;
+  }, [freshDuplicateKeysBySpeaker, activeSpeakerForSidebar]);
+
   const concepts = useMemo<Concept[]>(() => {
     if (rawConcepts.length === 0) return [];
     const mergesForCurrentMode = currentMode === 'compare' ? conceptMerges : undefined;
     const resolveParentTag = (conceptKeys: readonly string[]) => {
-      const tags = conceptKeys.flatMap((conceptKey) => getTagsForConcept(conceptKey, activeTagScope));
+      const visibleKeys = scopedToSpeaker && elicitedConceptKeys.size > 0
+        ? conceptKeys.filter((key) => elicitedConceptKeys.has(key) || activeSpeakerFreshKeys.has(key))
+        : conceptKeys;
+      const tags = visibleKeys.flatMap((conceptKey) => getTagsForConcept(conceptKey, activeTagScope));
       return getConceptStatus(tags);
     };
     const resolveVariantTag = (conceptKey: string) => getConceptStatus(getTagsForConcept(conceptKey, activeTagScope));
     return groupConceptEntries(rawConcepts, resolveParentTag, mergesForCurrentMode, resolveVariantTag);
-  }, [rawConcepts, getTagsForConcept, activeTagScopeKey, conceptMerges, currentMode]);
+  }, [rawConcepts, getTagsForConcept, activeTagScopeKey, conceptMerges, currentMode, scopedToSpeaker, elicitedConceptKeys, activeSpeakerFreshKeys]);
 
   const sourceSortDisabled = selectedSpeakers.length !== 1;
   const effectiveSortParent: ConceptSortParent = sortParent === 'source' && sourceSortDisabled ? 'concept' : sortParent;
@@ -1337,16 +1350,6 @@ export function ParseUI() {
     if (!borrowingRoot) return null;
     return borrowingRoot[concept.key] ?? borrowingRoot[concept.name] ?? null;
   }, [concept, enrichmentData]);
-  const activeSpeakerForSidebar = selectedSpeakers[0] ?? null;
-  const elicitedConceptKeys = useMemo(
-    () => speakerElicitedConceptKeys(activeSpeakerForSidebar ? annotationRecords[activeSpeakerForSidebar] : null),
-    [annotationRecords, activeSpeakerForSidebar],
-  );
-  const activeSpeakerFreshKeys = useMemo<ReadonlySet<string>>(() => {
-    if (!activeSpeakerForSidebar) return EMPTY_FRESH_KEYS;
-    return freshDuplicateKeysBySpeaker[activeSpeakerForSidebar] ?? EMPTY_FRESH_KEYS;
-  }, [activeSpeakerForSidebar, freshDuplicateKeysBySpeaker]);
-
   const speakerScopedConcepts = useMemo(() => {
     if (!scopedToSpeaker || !activeSpeakerForSidebar) return filtered;
     if (elicitedConceptKeys.size === 0 && activeSpeakerFreshKeys.size === 0) return filtered;
