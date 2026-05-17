@@ -315,7 +315,7 @@ export function OffsetAdjustmentModal({
               <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
               <span data-testid="offset-error">{offsetState.message}</span>
             </div>
-            {offsetState.jobId && (
+            {offsetState.isBackendFailure && offsetState.jobId && (
               <div className="text-[11px] text-slate-500">
                 Job <span className="font-mono text-slate-700">{offsetState.jobId}</span>
                 {' — '}
@@ -324,7 +324,7 @@ export function OffsetAdjustmentModal({
                   onClick={() => onOpenJobLogs(offsetState.jobId!)}
                   data-testid="offset-error-view-log"
                 >
-                  View crash log
+                  View job log
                 </button>
               </div>
             )}

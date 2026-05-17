@@ -2540,7 +2540,7 @@ export function ParseUI() {
         onCaptureCurrentSelection={() => {
           const result = captureCurrentAnchor();
           if (!result.ok) {
-            setOffsetState({ phase: 'error', message: result.message });
+            setOffsetState({ phase: 'error', message: result.message, isBackendFailure: false });
           }
         }}
         onRemoveManualAnchor={removeManualAnchor}

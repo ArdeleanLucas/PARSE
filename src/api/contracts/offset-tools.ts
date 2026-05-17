@@ -114,16 +114,13 @@ export async function pollOffsetDetectJob(
   computeType: "offset_detect" | "offset_detect_from_pair" = "offset_detect",
   {
     intervalMs = 500,
-    timeoutMs = 600_000,
     onProgress,
   }: {
     intervalMs?: number;
-    timeoutMs?: number;
     onProgress?: (p: { progress: number; message?: string }) => void;
   } = {},
 ): Promise<OffsetDetectResult> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  while (true) {
     await new Promise<void>((r) => setTimeout(r, intervalMs));
     const status = await pollCompute(computeType, jobId);
     if (onProgress) {
@@ -137,7 +134,6 @@ export async function pollOffsetDetectJob(
       throw new OffsetJobError(jobId, reason, status.traceback);
     }
   }
-  throw new OffsetJobError(jobId, "Offset detection timed out (client-side deadline)");
 }
 
 export async function applyTimestampOffset(
