@@ -454,7 +454,7 @@ def _resolve_audio_path(project_root: Path) -> Callable[[str], Path]:
     return resolver
 
 
-def _run_ortho_interval(audio_path: Path, start: float, end: float, language: str | None = None) -> str:
+def _run_ortho_interval(audio_path: Path, start: float, end: float, language: str | None = None) -> dict[str, Any]:
     from server_routes.lexeme_rerun import _run_ortho_interval as _impl
 
     return _impl(audio_path=audio_path, start=start, end=end, language=language)
