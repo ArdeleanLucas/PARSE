@@ -1064,6 +1064,7 @@ export function ParseUI() {
     previousActiveRawKeyRef.current = activeRawKey;
   }, [activeRawKey]);
   const markLexemeManuallyAdjusted = useAnnotationStore((s) => s.markLexemeManuallyAdjusted);
+  const flushAnnotationAutosave = useAnnotationStore((s) => s.flushAutosave);
   const {
     offsetState,
     setOffsetState,
@@ -1094,6 +1095,7 @@ export function ParseUI() {
     pollOffsetDetectJob,
     applyTimestampOffset,
     reloadSpeakerAnnotation,
+    flushAutosave: flushAnnotationAutosave,
     onCloseActionsMenu: () => setActionsMenuOpen(false),
   });
 

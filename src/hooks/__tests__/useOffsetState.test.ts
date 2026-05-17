@@ -46,6 +46,7 @@ describe('useOffsetState', () => {
         pollOffsetDetectJob: vi.fn(),
         applyTimestampOffset: vi.fn(),
         reloadSpeakerAnnotation: vi.fn(),
+        flushAutosave: vi.fn(),
       }),
     );
 
@@ -95,6 +96,7 @@ describe('useOffsetState', () => {
         pollOffsetDetectJob,
         applyTimestampOffset: vi.fn(),
         reloadSpeakerAnnotation: vi.fn(),
+        flushAutosave: vi.fn(),
       }),
     );
 
@@ -148,6 +150,7 @@ describe('useOffsetState', () => {
           pollOffsetDetectJob,
           applyTimestampOffset,
           reloadSpeakerAnnotation,
+          flushAutosave: vi.fn(),
         }),
       { initialProps: { concept: selectedConcept, time: 9.5 } },
     );
@@ -201,6 +204,7 @@ describe('useOffsetState', () => {
           pollOffsetDetectJob,
           applyTimestampOffset,
           reloadSpeakerAnnotation: vi.fn().mockResolvedValue(undefined),
+          flushAutosave: vi.fn(),
         }),
       { initialProps: { concept: selectedConcept, time: 9.5 } },
     );
@@ -228,6 +232,68 @@ describe('useOffsetState', () => {
     ]);
     expect(markLexemeManuallyAdjusted).not.toHaveBeenCalledWith('Fail01', 8, 8.4);
   });
+
+  it('reloads first, then marks anchors, then flushes the autosave so flags persist', async () => {
+    const secondConcept: ConceptLike = { id: 2, key: '2', name: 'fire' };
+    const intervals: Record<string, { start: number; end: number }> = {
+      '1': { start: 8, end: 8.4 },
+      '2': { start: 10, end: 10.4 },
+    };
+    const callOrder: string[] = [];
+    const reloadSpeakerAnnotation = vi.fn().mockImplementation(async () => {
+      callOrder.push('reload');
+    });
+    const markLexemeManuallyAdjusted = vi.fn().mockImplementation((_speaker, start) => {
+      callOrder.push(`mark:${start}`);
+    });
+    const flushAutosave = vi.fn().mockImplementation(() => {
+      callOrder.push('flushAutosave');
+    });
+    const detectTimestampOffsetFromPairs = vi.fn().mockResolvedValue({ jobId: 'offset-job-order' });
+    const pollOffsetDetectJob = vi.fn().mockResolvedValue(makeDetectedResult({ offsetSec: 2.25, nAnchors: 2, totalAnchors: 2 }));
+    const applyTimestampOffset = vi.fn().mockResolvedValue({ shiftedIntervals: 2, protectedLexemes: 0 });
+
+    const { result, rerender } = renderHook(
+      ({ concept, time }: { concept: ConceptLike; time: number }) =>
+        useOffsetState({
+          activeActionSpeaker: 'Fail01',
+          selectedConcept: concept,
+          protectedLexemeCount: 0,
+          getCurrentTime: () => time,
+          lookupConceptInterval: (_speaker, conceptArg) => intervals[conceptArg.key] ?? null,
+          markLexemeManuallyAdjusted,
+          detectTimestampOffset: vi.fn(),
+          detectTimestampOffsetFromPairs,
+          pollOffsetDetectJob,
+          applyTimestampOffset,
+          reloadSpeakerAnnotation,
+          flushAutosave,
+        }),
+      { initialProps: { concept: selectedConcept, time: 9.5 } },
+    );
+
+    act(() => {
+      result.current.captureCurrentAnchor();
+    });
+    rerender({ concept: secondConcept, time: 12.5 });
+    act(() => {
+      result.current.captureCurrentAnchor();
+    });
+
+    await act(async () => {
+      await result.current.submitManualOffset();
+    });
+    await act(async () => {
+      await result.current.applyDetectedOffset();
+    });
+
+    // Reload MUST happen before any mark, so marks operate on the post-shift
+    // record and survive the reload. flushAutosave MUST be last so the flags
+    // persist to disk instead of being scheduled behind the 2s autosave debounce.
+    expect(callOrder).toEqual(['reload', 'mark:8', 'mark:10', 'flushAutosave']);
+    expect(flushAutosave).toHaveBeenCalledWith('Fail01');
+  });
+
   it('marks backend offset-detect errors as backend failures with propagated messages', async () => {
     const pollOffsetDetectJob = vi.fn().mockRejectedValue(
       new OffsetJobError('offset-job-error', 'Backend failed while detecting offset', 'traceback body'),
@@ -246,6 +312,7 @@ describe('useOffsetState', () => {
         pollOffsetDetectJob,
         applyTimestampOffset: vi.fn(),
         reloadSpeakerAnnotation: vi.fn(),
+        flushAutosave: vi.fn(),
       }),
     );
 
@@ -285,6 +352,7 @@ describe('useOffsetState', () => {
         pollOffsetDetectJob: vi.fn(),
         applyTimestampOffset,
         reloadSpeakerAnnotation,
+        flushAutosave: vi.fn(),
       }),
     );
 

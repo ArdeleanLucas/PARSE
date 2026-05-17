@@ -183,6 +183,80 @@ def test_chat_tools_apply_offset_skips_manually_adjusted(tmp_path) -> None:
     assert by_text["WATER"]["start"] == 25.0
 
 
+def test_apply_then_mark_round_trip_persists_flag(tmp_path) -> None:
+    """Simulate the frontend MC-410-B sequence:
+      (1) /api/offset/apply shifts every interval by offsetSec;
+      (2) the client reloads, marks each surviving anchor as manuallyAdjusted
+          using the post-shift positions, and POSTs the record back via
+          /api/annotations/{speaker}.
+    Verify the flag survives a normalize + JSON round-trip so a subsequent
+    apply will treat the anchor as protected."""
+    from server import _normalize_annotation_record, _read_json_file, _write_json_file
+
+    record = {
+        "speaker": "Test01",
+        "tiers": {
+            "concept": {
+                "type": "interval",
+                "display_order": 0,
+                "intervals": [
+                    {"start": 8.0, "end": 8.4, "text": "WATER"},
+                    {"start": 10.0, "end": 10.4, "text": "FIRE"},
+                ],
+            }
+        },
+    }
+
+    # (1) Backend apply: nothing flagged yet, so both shift by +2.25.
+    shifted, protected_, _ = _annotation_shift_intervals(record, 2.25)
+    assert shifted == 2
+    assert protected_ == 0
+
+    # Normalize once so the speaker/ipa/ortho mirror tiers exist — the real
+    # /api/annotations roundtrip always sees a normalized record, and the
+    # client's markLexemeManuallyAdjusted flags every tier whose interval
+    # matches the (start, end) pair.
+    record = _normalize_annotation_record(record, "Test01")
+
+    # (2) Simulate the client mark loop: flag every interval (across all
+    # tiers) at the post-shift anchor positions.
+    anchor_positions = [(10.25, 10.65), (12.25, 12.65)]
+    for tier in record["tiers"].values():
+        for iv in tier.get("intervals", []):
+            if any(
+                abs(iv["start"] - s) < 1e-3 and abs(iv["end"] - e) < 1e-3
+                for s, e in anchor_positions
+            ):
+                iv["manuallyAdjusted"] = True
+
+    # POST /api/annotations/{speaker} normalizes the body, then writes JSON.
+    normalized = _normalize_annotation_record(record, "Test01")
+    annotations_dir = tmp_path / "annotations"
+    annotations_dir.mkdir()
+    path = annotations_dir / "Test01.parse.json"
+    _write_json_file(path, normalized)
+
+    # GET /api/annotations/{speaker} re-reads from disk.
+    reloaded = _read_json_file(path, {})
+    persisted = {iv["text"]: iv for iv in reloaded["tiers"]["concept"]["intervals"]}
+    assert persisted["WATER"]["start"] == 10.25
+    assert persisted["WATER"]["manuallyAdjusted"] is True
+    assert persisted["FIRE"]["start"] == 12.25
+    assert persisted["FIRE"]["manuallyAdjusted"] is True
+
+    # A second apply must now skip the concept-tier anchors — proving the
+    # round-trip actually protected them rather than just preserving the
+    # field cosmetically. (The auto-mirrored speaker tier is rebuilt from
+    # concept on every save by _annotation_sync_speaker_tier and does not
+    # carry per-interval flags; that desync is a separate, pre-existing
+    # concern outside Lane B's scope.)
+    _, second_protected, _ = _annotation_shift_intervals(reloaded, 1.0)
+    assert second_protected >= 2
+    concept_after = {iv["text"]: iv for iv in reloaded["tiers"]["concept"]["intervals"]}
+    assert concept_after["WATER"]["start"] == 10.25
+    assert concept_after["FIRE"]["start"] == 12.25
+
+
 def test_chat_tools_apply_offset_reports_distinct_shifted_concepts(tmp_path) -> None:
     annotations_dir = tmp_path / "annotations"
     annotations_dir.mkdir()
