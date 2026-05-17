@@ -28,7 +28,6 @@ import type {
 } from '../../api/types';
 import {
   canonicalFor,
-  enumerateVariants,
   resolveActiveBucketForSpeaker,
 } from '../../lib/compareBundles';
 import type { SpeakerForm } from '../../lib/speakerForm';
@@ -87,9 +86,10 @@ const EMPTY_FILTERS: FilterState = {
 };
 
 function buildVariantList(bundle: CompareBundle, speaker: string): SpeakerFormsTableVariant[] {
-  return enumerateVariants(bundle)
-    .filter(({ variant }) => bundle.candidates?.[speaker]?.[variant.csv_row_id])
-    .map(({ variant }) => {
+  const variants = resolveActiveBucketForSpeaker(bundle, speaker)?.variants ?? [];
+  return variants
+    .filter((variant) => bundle.candidates?.[speaker]?.[variant.csv_row_id])
+    .map((variant) => {
       const candidate = bundle.candidates?.[speaker]?.[variant.csv_row_id] ?? null;
       const label = variant.variant_label ?? variant.concept_en ?? variant.label ?? variant.csv_row_id;
       const letterFromLabel = variant.label?.match(/\(([A-Z])\)/)?.[1] ?? '';
@@ -816,8 +816,8 @@ export function SpeakerFormsTable({
   // Build the filtered + sorted speaker list.
   const orderedSpeakers = useMemo(() => {
     const variantCountFor = (speaker: string): number => {
-      const variants = enumerateVariants(bundle);
-      return variants.filter(({ variant }) => bundle.candidates?.[speaker]?.[variant.csv_row_id]).length;
+      const variants = resolveActiveBucketForSpeaker(bundle, speaker)?.variants ?? [];
+      return variants.filter((variant) => bundle.candidates?.[speaker]?.[variant.csv_row_id]).length;
     };
     const filtered = speakers.filter((speaker) => {
       const form = formsBySpeaker.get(speaker);
@@ -985,8 +985,8 @@ export function SpeakerFormsTable({
               const isExpanded = expanded === speaker;
               const activeBucket = resolveActiveBucketForSpeaker(bundle, speaker);
               const surveyId = activeBucket?.survey_id ?? null;
-              const candidates = enumerateVariants(bundle).filter(
-                ({ variant }) => bundle.candidates?.[speaker]?.[variant.csv_row_id],
+              const candidates = (activeBucket?.variants ?? []).filter(
+                (variant) => bundle.candidates?.[speaker]?.[variant.csv_row_id],
               );
               const variantCount = candidates.length;
               const current = canonicalFor(bundle, speaker);

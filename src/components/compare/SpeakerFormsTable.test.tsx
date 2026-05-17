@@ -107,6 +107,9 @@ function makeBundle(overrides: Partial<CompareBundle> = {}): CompareBundle {
         realization_index: 0,
       },
     },
+    speaker_concept_survey_links: {
+      Saha01: { '150': { jbl: '169' } },
+    },
     ...overrides,
   };
 }
@@ -328,6 +331,75 @@ describe('SpeakerFormsTable row expansion', () => {
     expect(within(header).queryByText('1')).toBeNull();
     expect(header.textContent).not.toContain('hair (A)');
     expect(header.querySelector('[dir="rtl"]')).toBeNull();
+  });
+
+  it('dedupes Saha01 drawer variants across repeated active-bucket rows', () => {
+    const hairBundle = makeBundle({
+      bundle_id: 'hair',
+      label: 'hair',
+      row_ids: ['1', '624'],
+      buckets: [
+        {
+          bucket_key: 'klq\u00001.1',
+          survey_id: 'klq',
+          source_item: '1.1',
+          variants: [
+            { csv_row_id: '1', variant_label: 'A', concept_en: 'hair (A)', label: 'hair (A)' },
+            { csv_row_id: '624', variant_label: 'C', concept_en: 'hair (C)', label: 'hair (C)' },
+          ],
+        },
+        {
+          bucket_key: 'jbil\u000032',
+          survey_id: 'jbil',
+          source_item: '32',
+          variants: [
+            { csv_row_id: '1', variant_label: 'A', concept_en: 'hair (A)', label: 'hair (A)' },
+            { csv_row_id: '624', variant_label: 'C', concept_en: 'hair (C)', label: 'hair (C)' },
+          ],
+        },
+      ],
+      candidates: {
+        Saha01: {
+          '1': {
+            csv_row_id: '1',
+            ipa: 'muːsɛr',
+            ortho: 'میسەر',
+            start_sec: 1,
+            end_sec: 2,
+            source_wav: 'audio/working/Saha01.wav',
+            realization_index: 0,
+          },
+          '624': {
+            csv_row_id: '624',
+            ipa: 'ʁɛʒ',
+            ortho: 'گەیش',
+            start_sec: 3,
+            end_sec: 4,
+            source_wav: 'audio/working/Saha01.wav',
+            realization_index: 1,
+          },
+        },
+      },
+      canonical: { Saha01: null },
+      speaker_concept_survey_links: { Saha01: { '1': { jbil: '32' }, '624': { jbil: '32' } } },
+    });
+
+    render(
+      <SpeakerFormsTable
+        bundle={hairBundle}
+        speakers={['Saha01']}
+        speakerForms={[makeForm({ speaker: 'Saha01', ipa: 'muːsɛr', ortho: 'میسەر' })]}
+        primaryContactCodes={PRIMARY_CODES}
+        contactLanguageNames={CONTACT_NAMES}
+        conceptKey="hair"
+        initialExpandedSpeaker="Saha01"
+      />,
+    );
+
+    expect(screen.queryAllByTestId(/^variant-card-Saha01-/)).toHaveLength(2);
+    expect(screen.queryAllByTestId('variant-card-Saha01-1')).toHaveLength(1);
+    expect(screen.queryAllByTestId('variant-card-Saha01-624')).toHaveLength(1);
+    expect(screen.getByTestId('variant-count-Saha01').textContent).toMatch(/\+1 variant/);
   });
 
   it('clicking a row toggles its expansion', () => {
