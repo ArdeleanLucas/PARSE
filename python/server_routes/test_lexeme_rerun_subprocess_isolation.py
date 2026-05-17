@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
 import pytest
 
+from ai.provider import ConfidenceScore
 from app.http.lexeme_rerun_handlers import LexemeRerunSubprocessError
 from server_routes import lexeme_rerun
 
@@ -201,7 +203,7 @@ def test_child_stderr_reaches_parent_fd2(tmp_path: Path, monkeypatch: pytest.Mon
     with _capture_fd(2) as captured:
         result = lexeme_rerun._run_ortho_interval_in_subprocess(audio_path=audio_path, start=1.0, end=1.2)
 
-    assert result == "hello"
+    assert result == {"text": "hello"}
     assert line in captured()
 
 
@@ -221,7 +223,7 @@ def test_child_stdout_reaches_parent_fd1(tmp_path: Path, monkeypatch: pytest.Mon
     with _capture_fd(1) as captured:
         result = lexeme_rerun._run_ortho_interval_in_subprocess(audio_path=audio_path, start=1.0, end=1.2)
 
-    assert result == "hello"
+    assert result == {"text": "hello"}
     assert line in captured()
 
 
@@ -273,7 +275,11 @@ def test_lexeme_subprocess_success_cleans_child_log(
     process = _FakeProcess(target=lambda: None, name="", args=(), daemon=True, exitcode=0, write_success=True, write_log=True)
     _install_fake_process(monkeypatch, process)
 
-    assert runner(audio_path=audio_path, start=1.0, end=1.2) == "ʃ"
+    result = runner(audio_path=audio_path, start=1.0, end=1.2)
+    if kind == "ortho":
+        assert result == {"text": "ʃ"}
+    else:
+        assert result == "ʃ"
 
     assert not Path(f"/tmp/parse-lexeme-rerun-{kind}-{process.pid}.log").exists()
 
@@ -386,3 +392,51 @@ def test_lexeme_subprocess_child_reported_failure_is_503_failure(tmp_path: Path,
     assert exc_info.value.code == "subprocess_failed"
     assert exc_info.value.exit_code == 0
     assert "model exploded" in exc_info.value.message
+
+
+def test_ortho_subprocess_preserves_text_only_dict_across_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    audio_path = tmp_path / "audio.wav"
+    audio_path.write_bytes(b"fake")
+
+    def fake_ortho_interval(**kwargs: Any) -> dict[str, Any]:
+        _ = kwargs
+        return {"text": "یەک"}
+
+    monkeypatch.setattr(lexeme_rerun, "_run_ortho_interval", fake_ortho_interval)
+    _install_forked_process(monkeypatch)
+
+    result = lexeme_rerun._run_ortho_interval_in_subprocess(
+        audio_path=audio_path, start=1.0, end=1.2
+    )
+
+    assert isinstance(result, Mapping), f"subprocess collapsed the runner's dict to str: {result!r}"
+    assert result.get("text") == "یەک"
+
+
+def test_ortho_subprocess_preserves_confidence_score_across_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    audio_path = tmp_path / "audio.wav"
+    audio_path.write_bytes(b"fake")
+    confidence = ConfidenceScore(value=0.51, source="avg_logprob", n_tokens=4)
+
+    def fake_ortho_interval(**kwargs: Any) -> dict[str, Any]:
+        _ = kwargs
+        return {"text": "یەک", "confidence": confidence}
+
+    monkeypatch.setattr(lexeme_rerun, "_run_ortho_interval", fake_ortho_interval)
+    _install_forked_process(monkeypatch)
+
+    result = lexeme_rerun._run_ortho_interval_in_subprocess(
+        audio_path=audio_path, start=1.0, end=1.2
+    )
+
+    assert isinstance(result, Mapping), f"subprocess collapsed the runner's dict to str: {result!r}"
+    assert result.get("text") == "یەک"
+    reconstructed = result.get("confidence")
+    assert isinstance(reconstructed, ConfidenceScore)
+    assert reconstructed.value == pytest.approx(0.51)
+    assert reconstructed.source == "avg_logprob"
+    assert reconstructed.n_tokens == 4

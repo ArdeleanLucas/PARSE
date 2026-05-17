@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import server as _server
+from ai.provider import ConfidenceScore
 from ai.wav2vec2_runtime import resolve_wav2vec2_runtime_options
 from app.http.lexeme_rerun_handlers import (
     LexemeRerunHandlerError,
@@ -30,7 +31,7 @@ def _wav2vec2_options_with_safe_fallback() -> tuple[Optional[str], bool]:
         return None, False
 
 
-def _run_ortho_interval(*, audio_path: Path, start: float, end: float, language: Optional[str] = None) -> str:
+def _run_ortho_interval(*, audio_path: Path, start: float, end: float, language: Optional[str] = None) -> dict[str, Any]:
     from ai.stt_pipeline import run_ortho_on_interval
 
     device, allow_wsl_cuda = _wav2vec2_options_with_safe_fallback()
@@ -144,9 +145,21 @@ def _lexeme_rerun_subprocess_entry(kind: str, payload: dict[str, Any], result_pa
             result = _run_ortho_interval(audio_path=audio_path, start=start, end=end, language=language)
         else:
             raise ValueError("unknown lexeme rerun kind: {0}".format(kind))
-        # Contract: synchronous lexeme children serialize exactly one JSON string
+        # Contract: synchronous lexeme children serialize exactly one JSON-safe
         # result so the parent can map process crashes without sharing model state.
-        outcome = {"ok": True, "result": str(result or "")}
+        if kind == "ortho":
+            result_dict = result if isinstance(result, dict) else {"text": str(result or "")}
+            serialized: dict[str, Any] = {"text": str(result_dict.get("text") or "")}
+            confidence = result_dict.get("confidence")
+            if isinstance(confidence, ConfidenceScore):
+                serialized["confidence"] = {
+                    "value": confidence.value,
+                    "source": confidence.source,
+                    "n_tokens": confidence.n_tokens,
+                }
+            outcome = {"ok": True, "result": serialized}
+        else:
+            outcome = {"ok": True, "result": str(result or "")}
     except BaseException as exc:  # noqa: BLE001 - child must serialize recoverable failures for the parent.
         outcome = {"ok": False, "error": str(exc), "traceback": _traceback.format_exc()}
     try:
@@ -164,7 +177,7 @@ def _run_interval_in_subprocess(
     start: float,
     end: float,
     language: Optional[str] = None,
-) -> str:
+) -> Any:
     import json as _json
     import multiprocessing
     import tempfile
@@ -244,7 +257,27 @@ def _run_interval_in_subprocess(
 
     if bool(outcome.get("ok")):
         _cleanup_child_log(child_pid, kind)
-        return str(outcome.get("result") or "").strip()
+        result_payload = outcome.get("result")
+        if kind == "ortho":
+            if not isinstance(result_payload, dict):
+                return {"text": str(result_payload or "").strip()}
+            text = str(result_payload.get("text") or "").strip()
+            confidence_raw = result_payload.get("confidence")
+            if isinstance(confidence_raw, dict):
+                try:
+                    source = str(confidence_raw["source"])
+                    if source not in {"avg_logprob", "constant_fallback"}:
+                        raise ValueError("invalid confidence source")
+                    confidence = ConfidenceScore(
+                        value=float(confidence_raw["value"]),
+                        source=source,  # type: ignore[arg-type]
+                        n_tokens=int(confidence_raw["n_tokens"]),
+                    )
+                    return {"text": text, "confidence": confidence}
+                except (KeyError, TypeError, ValueError):
+                    pass
+            return {"text": text}
+        return str(result_payload or "").strip()
     raise LexemeRerunSubprocessError(
         code="subprocess_failed",
         exit_code=exit_code,
@@ -254,11 +287,15 @@ def _run_interval_in_subprocess(
 
 
 def _run_ipa_interval_in_subprocess(*, audio_path: Path, start: float, end: float, language: Optional[str] = None) -> str:
-    return _run_interval_in_subprocess(kind="ipa", tier_label="IPA", audio_path=audio_path, start=start, end=end, language=language)
+    result = _run_interval_in_subprocess(kind="ipa", tier_label="IPA", audio_path=audio_path, start=start, end=end, language=language)
+    return str(result or "").strip()
 
 
-def _run_ortho_interval_in_subprocess(*, audio_path: Path, start: float, end: float, language: Optional[str] = None) -> str:
-    return _run_interval_in_subprocess(kind="ortho", tier_label="ORTH", audio_path=audio_path, start=start, end=end, language=language)
+def _run_ortho_interval_in_subprocess(*, audio_path: Path, start: float, end: float, language: Optional[str] = None) -> dict[str, Any]:
+    result = _run_interval_in_subprocess(kind="ortho", tier_label="ORTH", audio_path=audio_path, start=start, end=end, language=language)
+    if isinstance(result, dict):
+        return result
+    return {"text": str(result or "").strip()}
 
 
 def _api_post_lexeme_run_ortho(self) -> None:
