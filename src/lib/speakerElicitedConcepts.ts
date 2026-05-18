@@ -24,7 +24,15 @@ export function conceptUnderlyingKeys(concept: ConceptKeyCarrier): string[] {
     const key = value == null ? '' : String(value).trim();
     if (key) keys.add(key);
   };
-  add(concept.key);
+  const hasVariants =
+    (concept.variants?.length ?? 0) > 0 ||
+    (concept.mergedVariants?.length ?? 0) > 0;
+  // concept.key for grouped rows is the source_item string identifier, not a real
+  // concept_id; including it in concept_id-keyed lookups (e.g. speakerSortKeys)
+  // produces collisions when a source_item happens to equal another concept's
+  // concept_id (e.g. "this JBIL 298" colliding with "dog (A)" concept_id 298).
+  // Only include concept.key for singleton rows where it IS the concept_id.
+  if (!hasVariants) add(concept.key);
   for (const key of concept.mergedKeys ?? []) add(key);
   for (const variant of concept.variants ?? []) add(variant.conceptKey);
   for (const variant of concept.mergedVariants ?? []) add(variant.conceptKey);
