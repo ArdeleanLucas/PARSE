@@ -603,5 +603,85 @@ class AnalyticalFieldsTests(unittest.TestCase):
         self.assertEqual(coverage["concepts_with_persian_ref"], 0)
 
 
+class SpeakerFilterTests(unittest.TestCase):
+    """Lane F: --speakers / speaker_filter restricts which speakers ship."""
+
+    @staticmethod
+    def _three_speaker_workspace(tmp: str) -> Path:
+        return _make_workspace(
+            Path(tmp),
+            concepts=[
+                {"id": "1", "concept_en": "ash", "source_item": "1.1", "source_survey": "KLQ"},
+            ],
+            speakers={
+                "Fail01": {
+                    "concept_intervals": [
+                        {"concept_id": "1", "start": 0.0, "end": 0.3, "ipa": "aʂ", "ortho": "aş"}
+                    ],
+                    "tagged_ids": ["1"],
+                },
+                "Fail02": {
+                    "concept_intervals": [
+                        {"concept_id": "1", "start": 1.0, "end": 1.4, "ipa": "aʃ", "ortho": "as"}
+                    ],
+                    "tagged_ids": ["1"],
+                },
+                "Khan01": {
+                    "concept_intervals": [
+                        {"concept_id": "1", "start": 2.0, "end": 2.5, "ipa": "ax", "ortho": "akh"}
+                    ],
+                    "tagged_ids": ["1"],
+                },
+            },
+        )
+
+    def test_speaker_filter_restricts_output(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = self._three_speaker_workspace(tmp)
+            review_data, clip_plan = build_review_data(
+                workspace=workspace,
+                speaker_filter=["Fail01", "Khan01"],
+            )
+
+        self.assertEqual(review_data["metadata"]["speakers"], ["Fail01", "Khan01"])
+        forms = review_data["concepts"][0]["forms"]
+        self.assertEqual([f["speaker"] for f in forms], ["Fail01", "Khan01"])
+        self.assertEqual(len(clip_plan), 2)
+        # Fail02 must not surface in either the schema or the clip plan.
+        all_clip_speakers = {spec["speaker"] for _, spec in clip_plan}
+        self.assertNotIn("Fail02", all_clip_speakers)
+
+    def test_speaker_filter_preserves_project_json_order(self) -> None:
+        # project.json insertion order is Fail01, Fail02, Khan01; filter input
+        # order Khan01, Fail01 should NOT reorder the output.
+        with TemporaryDirectory() as tmp:
+            workspace = self._three_speaker_workspace(tmp)
+            review_data, _ = build_review_data(
+                workspace=workspace,
+                speaker_filter=["Khan01", "Fail01"],
+            )
+
+        self.assertEqual(review_data["metadata"]["speakers"], ["Fail01", "Khan01"])
+
+    def test_unknown_speaker_raises_value_error(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = self._three_speaker_workspace(tmp)
+            with self.assertRaises(ValueError) as ctx:
+                build_review_data(
+                    workspace=workspace,
+                    speaker_filter=["Fail01", "Notreal99"],
+                )
+            self.assertIn("Notreal99", str(ctx.exception))
+
+    def test_empty_or_none_filter_keeps_all_speakers(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = self._three_speaker_workspace(tmp)
+            data_none, _ = build_review_data(workspace=workspace, speaker_filter=None)
+            data_empty, _ = build_review_data(workspace=workspace, speaker_filter=[])
+
+        self.assertEqual(data_none["metadata"]["speakers"], ["Fail01", "Fail02", "Khan01"])
+        self.assertEqual(data_empty["metadata"]["speakers"], ["Fail01", "Fail02", "Khan01"])
+
+
 if __name__ == "__main__":
     unittest.main()
