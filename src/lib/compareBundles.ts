@@ -137,11 +137,33 @@ export function normalizeBundles(payload: unknown): CompareBundlesResponse {
 
 export function findBundleForConcept(
   bundles: readonly CompareBundle[],
-  concept: { key: string; name: string },
+  concept: {
+    key: string;
+    name: string;
+    variants?: readonly { conceptKey: string }[];
+    mergedKeys?: readonly string[];
+  },
 ): CompareBundle | null {
-  const conceptKey = cleanString(concept.key);
-  if (conceptKey) {
-    const byRowId = bundles.find((bundle) => bundle.row_ids.some((rowId) => cleanString(rowId) === conceptKey));
+  // Match using csv-row-id values, never `concept.key` directly when the
+  // concept is grouped or user-merged. Grouped concepts key themselves by
+  // `sourceItem` (e.g. "92", "123") which shares an integer-string
+  // namespace with `bundle.row_ids` (csv row ids) and collides whenever
+  // a sourceItem happens to equal an unrelated concept's csv row id.
+  // See docs/reports/2026-05-19-compare-display-bugs-fix-plan.md.
+  const rowIdCandidates: string[] = [];
+  if (concept.mergedKeys?.length) {
+    rowIdCandidates.push(...concept.mergedKeys.map(cleanString).filter(Boolean));
+  }
+  if (concept.variants?.length) {
+    rowIdCandidates.push(...concept.variants.map((v) => cleanString(v.conceptKey)).filter(Boolean));
+  }
+  if (rowIdCandidates.length === 0) {
+    const conceptKey = cleanString(concept.key);
+    if (conceptKey) rowIdCandidates.push(conceptKey);
+  }
+
+  for (const rowId of rowIdCandidates) {
+    const byRowId = bundles.find((bundle) => bundle.row_ids.includes(rowId));
     if (byRowId) return byRowId;
   }
 
