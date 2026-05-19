@@ -28,6 +28,7 @@ import type {
 } from '../../api/types';
 import {
   canonicalFor,
+  collapsedIpaForSpeaker,
   resolveActiveBucketForSpeaker,
 } from '../../lib/compareBundles';
 import type { SpeakerForm } from '../../lib/speakerForm';
@@ -991,6 +992,7 @@ export function SpeakerFormsTable({
               const variantCount = candidates.length;
               const current = canonicalFor(bundle, speaker);
               const canonicalChosen = !!current;
+              const collapsedIpa = collapsedIpaForSpeaker(bundle, speaker, form?.ipa);
               return (
                 <Fragment key={speaker}>
                   <tr
@@ -1032,7 +1034,7 @@ export function SpeakerFormsTable({
                           only (no emerald canonical-chosen — that lives inside
                           the expanded VariantCard). See Bug 2. */}
                       <div className="font-mono text-[13px] text-slate-800">
-                        {form?.ipa ? `/${form.ipa}/` : '—'}
+                        {collapsedIpa ? `/${collapsedIpa}/` : '—'}
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-1">
                         {variantCount > 1 && (
