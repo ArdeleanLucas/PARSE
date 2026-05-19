@@ -214,6 +214,41 @@ export function activeCandidateFor(bundle: CompareBundle, speaker: string): Comp
   return bundle.candidates?.[speaker]?.[selection.csv_row_id] ?? null;
 }
 
+/**
+ * IPA to display in the Compare-mode collapsed row, derived from the
+ * bundle so it always matches the first variant card the user sees in
+ * the expanded panel.
+ *
+ * Precedence:
+ *   1. The canonical's IPA (manual selection or backend
+ *      `default:single-candidate` / `migration:canonical_realizations`).
+ *   2. The first non-null candidate IPA by `bundle.row_ids` order.
+ *   3. `fallbackIpa` (`SpeakerForm.ipa`) — only used when the bundle has
+ *      no candidate data at all for this speaker, e.g. the synthetic
+ *      `fallbackCompareBundle` constructed when the server returns no
+ *      bundles.
+ *
+ * Returns the raw IPA string (no surrounding slashes); the caller is
+ * responsible for formatting.
+ */
+export function collapsedIpaForSpeaker(
+  bundle: CompareBundle,
+  speaker: string,
+  fallbackIpa: string | null | undefined,
+): string | null {
+  const canonical = canonicalFor(bundle, speaker);
+  if (canonical) {
+    const ipa = bundle.candidates?.[speaker]?.[canonical.csv_row_id]?.ipa;
+    if (typeof ipa === "string" && ipa.length > 0) return ipa;
+  }
+  const byRow = bundle.candidates?.[speaker] ?? {};
+  for (const rowId of bundle.row_ids) {
+    const ipa = byRow[rowId]?.ipa;
+    if (typeof ipa === "string" && ipa.length > 0) return ipa;
+  }
+  return fallbackIpa && fallbackIpa.length > 0 ? fallbackIpa : null;
+}
+
 function linkMatchesBucket(link: ConceptSurveyLinks | undefined, bucket: CompareBucket): boolean {
   if (!link) return false;
   return Object.entries(link).some(([surveyId, sourceItem]) => surveyId.toLowerCase() === bucket.survey_id && String(sourceItem) === bucket.source_item);

@@ -202,14 +202,19 @@ describe('SpeakerFormsTable IPA column has NO audio chrome', () => {
 describe('SpeakerFormsTable IPA column has NO leaking ortho/concept text (Bug 1)', () => {
   it('renders only the IPA in slashes — no ortho subtitle, no concept-label text', () => {
     // ortho deliberately set to a value that, in the original screenshot,
-    // leaked as e.g. "five" next to /pent/. The IPA cell must render
-    // exactly /<ipa>/ and the pills row — and nothing else readable.
+    // leaked next to the IPA. The IPA cell must render exactly /<ipa>/
+    // and the pills row — and nothing else readable.
+    //
+    // Post-MC-414-B: the collapsed cell sources its IPA from
+    // bundle.candidates (so it always matches the first variant card the
+    // user sees on expand). makeBundle() seeds row 53 with ipa='gæwra'
+    // for Fail01.
     render(
       <SpeakerFormsTable
         bundle={makeBundle()}
         speakers={['Fail01']}
         speakerForms={[
-          makeForm({ speaker: 'Fail01', ipa: 'pent', ortho: 'five' }),
+          makeForm({ speaker: 'Fail01', ortho: 'five' }),
         ]}
         primaryContactCodes={PRIMARY_CODES}
         contactLanguageNames={CONTACT_NAMES}
@@ -219,9 +224,8 @@ describe('SpeakerFormsTable IPA column has NO leaking ortho/concept text (Bug 1)
     );
     const cell = screen.getByTestId('ipa-cell-Fail01');
     // The IPA itself shows up.
-    expect(cell.textContent).toContain('/pent/');
-    // The ortho value (which in the bug screenshot was the concept word
-    // "five") must NOT leak into the collapsed IPA cell.
+    expect(cell.textContent).toContain('/gæwra/');
+    // The ortho value must NOT leak into the collapsed IPA cell.
     expect(cell.textContent ?? '').not.toContain('five');
   });
 });
