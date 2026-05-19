@@ -1056,5 +1056,93 @@ class StemLabelParenStrippingTests(unittest.TestCase):
         self.assertEqual(form["audio_path"], "audio/Fail01/JBIL_141_A_egg_Fail01.wav")
 
 
+class StemLabelLeadingNumberPrefixTests(unittest.TestCase):
+    """MC-415-C: _stem_label must also strip a leading '<number> ' prefix.
+
+    PARSE's concepts.csv carries 2 rows where the Audition cue number escaped
+    parse_cue_name normalization and got glued onto concept_en: id=611
+    ``'56 skin'`` and id=610 ``'48 stomach (organ)'``. The exporter defends
+    against this so anchored matching reaches the canonical legacy gloss.
+    """
+
+    def test_strips_simple_numeric_prefix(self) -> None:
+        self.assertEqual(_stem_label("56 skin"), "skin")
+        self.assertEqual(_stem_label("1 ash"), "ash")
+        self.assertEqual(_stem_label("141 egg"), "egg")
+
+    def test_strips_dotted_numeric_prefix(self) -> None:
+        # Survey item ids can carry a dotted form (e.g. KLQ '1.1', '4.19').
+        self.assertEqual(_stem_label("1.1 ash"), "ash")
+        self.assertEqual(_stem_label("4.19 good"), "good")
+
+    def test_combines_prefix_and_trailing_paren_strip(self) -> None:
+        # Real-world id=610: "48 stomach (organ)" should fold to "stomach".
+        self.assertEqual(_stem_label("48 stomach (organ)"), "stomach")
+        self.assertEqual(_stem_label("169 big (A)"), "big")
+        self.assertEqual(_stem_label("32 hair (men)"), "hair")
+
+    def test_does_not_strip_alphabetic_prefix(self) -> None:
+        # Only leading runs of digits (with optional dots) qualify as a prefix.
+        # Don't accidentally swallow words that happen to start a label.
+        self.assertEqual(_stem_label("to bathe"), "to bathe")
+        self.assertEqual(_stem_label("the boy cut"), "the boy cut")
+        self.assertEqual(_stem_label("3rd person"), "3rd person")
+
+    def test_anchored_recovers_legacy_skin_via_leading_number_strip(self) -> None:
+        """Regression guard for the 2026-05-19 Khan02 'skin' miss: PARSE row
+        id=611 carries concept_en '56 skin' and the speaker's interval
+        references id=611. Anchored matching against legacy gloss 'skin'
+        only succeeds when the prefix is stripped."""
+        with TemporaryDirectory() as tmp:
+            workspace = _make_workspace(
+                Path(tmp),
+                concepts=[
+                    {"id": "277", "concept_en": "skin", "source_item": "56", "source_survey": "JBIL"},
+                    {"id": "611", "concept_en": "56 skin", "source_item": "56", "source_survey": "JBIL"},
+                ],
+                speakers={
+                    "Khan02": {
+                        "concept_intervals": [
+                            {"concept_id": "611", "start": 5330.0, "end": 5331.247, "text": "skin"}
+                        ],
+                        # Note: Khan02 did NOT tag concept 611 — only has the
+                        # interval. Anchored mode doesn't gate on the thesis tag.
+                        "tagged_ids": [],
+                        "ipa_intervals": [
+                            {"start": 5330.0, "end": 5331.247, "text": "puːse"}
+                        ],
+                        "ortho_intervals": [
+                            {"start": 5330.0, "end": 5331.247, "text": "پۊسە"}
+                        ],
+                    }
+                },
+            )
+            anchor = _write_legacy_anchor(
+                Path(tmp),
+                concepts=[
+                    {
+                        "concept_id": "56",
+                        "concept_en": "skin",
+                        "arabic": {"form": "جلد", "ipa": "ʒild"},
+                        "persian": {"form": "پوست", "ipa": "puːst"},
+                        "forms": [{"speaker": "Khan02", "source": "JBIL"}],
+                    }
+                ],
+            )
+            review_data, _ = build_review_data_anchored(
+                workspace=workspace,
+                legacy_anchor=anchor,
+            )
+
+        self.assertEqual(review_data["concepts"][0]["concept_en"], "skin")
+        # 'skin' is not in unmatched_legacy_concepts.
+        self.assertNotIn("skin", review_data["metadata"]["source"]["unmatched_legacy_concepts"])
+        # Khan02's form is populated despite tagging neither concept_id.
+        form = review_data["concepts"][0]["forms"][0]
+        self.assertEqual(form["ipa"], "puːse")
+        self.assertEqual(form["ortho"], "پۊسە")
+        self.assertEqual(form["audio_path"], "audio/Khan02/JBIL_56_A_skin_Khan02.wav")
+
+
 if __name__ == "__main__":
     unittest.main()
