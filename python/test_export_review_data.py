@@ -1144,5 +1144,190 @@ class StemLabelLeadingNumberPrefixTests(unittest.TestCase):
         self.assertEqual(form["audio_path"], "audio/Khan02/JBIL_56_A_skin_Khan02.wav")
 
 
+class AnchoredAuditionPrefixSelectionTests(unittest.TestCase):
+    """MC-415-D: when a speaker has multiple concept-tier intervals at the
+    same concept_id (PARSE collapses cross-survey readings together), the
+    anchored exporter must prefer the interval whose ``audition_prefix``
+    matches the legacy concept_id rather than blindly picking the longest.
+
+    Regression case: Fail01 'sister' had two intervals at concept_id=16, one
+    with audition_prefix='75' (JBIL 75 — the legacy source) and one with
+    audition_prefix='2.5' (KLQ 2.5). The longest was the KLQ one, whose
+    cross-tier IPA was 'xoʃokdubaːre' / ortho 'دو' — clearly wrong for
+    'sister'. The JBIL one carries the canonical 'xoʃkaɡam' / 'خوشکەگەم'.
+    """
+
+    @staticmethod
+    def _ws_with_two_sister_intervals(tmp: str) -> Path:
+        return _make_workspace(
+            Path(tmp),
+            concepts=[
+                {"id": "16", "concept_en": "sister", "source_item": "2.5", "source_survey": "KLQ"},
+            ],
+            speakers={
+                "Fail01": {
+                    "concept_intervals": [
+                        {"concept_id": "16", "start": 1503.554, "end": 1504.315,
+                         "text": "sister", "audition_prefix": "75"},
+                        {"concept_id": "16", "start": 6631.295, "end": 6632.249,
+                         "text": "sister", "audition_prefix": "2.5"},
+                    ],
+                    "tagged_ids": ["16"],
+                    "ipa_intervals": [
+                        {"start": 1503.554, "end": 1504.315, "text": "xoʃkaɡam", "conceptId": "16"},
+                        {"start": 6631.295, "end": 6632.249, "text": "xoʃokdubaːre", "conceptId": "16"},
+                    ],
+                    "ortho_intervals": [
+                        {"start": 1503.554, "end": 1504.315, "text": "خوشکەگەم", "conceptId": "16"},
+                        {"start": 6631.295, "end": 6632.249, "text": "دو", "conceptId": "16"},
+                    ],
+                },
+            },
+        )
+
+    def test_audition_prefix_matching_legacy_id_wins_over_longest(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = self._ws_with_two_sister_intervals(tmp)
+            anchor = _write_legacy_anchor(
+                Path(tmp),
+                concepts=[
+                    {
+                        "concept_id": "75",
+                        "concept_en": "sister",
+                        "arabic": {"form": "أخت", "ipa": "ʔuxt;uxut"},
+                        "persian": {"form": "خاهر", "ipa": "xaːhær"},
+                        "forms": [{"speaker": "Fail01", "source": "JBIL"}],
+                    }
+                ],
+            )
+            review_data, _ = build_review_data_anchored(
+                workspace=workspace,
+                legacy_anchor=anchor,
+            )
+
+        form = review_data["concepts"][0]["forms"][0]
+        self.assertEqual(form["ipa"], "xoʃkaɡam")
+        self.assertEqual(form["ortho"], "خوشکەگەم")
+        self.assertAlmostEqual(form["start_sec"], 1503.554)
+        self.assertAlmostEqual(form["duration_sec"], 0.761, places=2)
+        self.assertEqual(form["audio_path"], "audio/Fail01/JBIL_75_A_sister_Fail01.wav")
+
+    def test_falls_back_to_longest_when_no_audition_prefix_matches(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = _make_workspace(
+                Path(tmp),
+                concepts=[
+                    {"id": "16", "concept_en": "sister", "source_item": "2.5", "source_survey": "KLQ"},
+                ],
+                speakers={
+                    "Fail01": {
+                        "concept_intervals": [
+                            {"concept_id": "16", "start": 10.0, "end": 10.5,
+                             "text": "sister", "audition_prefix": "2.5"},
+                            {"concept_id": "16", "start": 20.0, "end": 21.2,
+                             "text": "sister", "audition_prefix": "2.17"},
+                        ],
+                        "tagged_ids": ["16"],
+                        "ipa_intervals": [
+                            {"start": 10.0, "end": 10.5, "text": "short_realization", "conceptId": "16"},
+                            {"start": 20.0, "end": 21.2, "text": "long_realization", "conceptId": "16"},
+                        ],
+                    },
+                },
+            )
+            anchor = _write_legacy_anchor(
+                Path(tmp),
+                concepts=[
+                    {
+                        "concept_id": "75",
+                        "concept_en": "sister",
+                        "arabic": {"form": "", "ipa": ""},
+                        "persian": {"form": "", "ipa": ""},
+                        "forms": [{"speaker": "Fail01", "source": "JBIL"}],
+                    }
+                ],
+            )
+            review_data, _ = build_review_data_anchored(
+                workspace=workspace,
+                legacy_anchor=anchor,
+            )
+
+        form = review_data["concepts"][0]["forms"][0]
+        self.assertEqual(form["ipa"], "long_realization")
+        self.assertAlmostEqual(form["duration_sec"], 1.2, places=2)
+
+    def test_audition_prefix_filter_picks_longest_within_matches(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = _make_workspace(
+                Path(tmp),
+                concepts=[
+                    {"id": "16", "concept_en": "sister", "source_item": "2.5", "source_survey": "KLQ"},
+                ],
+                speakers={
+                    "Fail01": {
+                        "concept_intervals": [
+                            {"concept_id": "16", "start": 10.0, "end": 10.5,
+                             "text": "sister", "audition_prefix": "75"},
+                            {"concept_id": "16", "start": 20.0, "end": 21.4,
+                             "text": "sister", "audition_prefix": "75"},
+                            {"concept_id": "16", "start": 30.0, "end": 32.0,
+                             "text": "sister", "audition_prefix": "2.5"},
+                        ],
+                        "tagged_ids": ["16"],
+                        "ipa_intervals": [
+                            {"start": 10.0, "end": 10.5, "text": "first_jbil", "conceptId": "16"},
+                            {"start": 20.0, "end": 21.4, "text": "second_jbil_longer", "conceptId": "16"},
+                            {"start": 30.0, "end": 32.0, "text": "klq_longest_but_wrong_survey", "conceptId": "16"},
+                        ],
+                    },
+                },
+            )
+            anchor = _write_legacy_anchor(
+                Path(tmp),
+                concepts=[
+                    {
+                        "concept_id": "75",
+                        "concept_en": "sister",
+                        "arabic": {"form": "", "ipa": ""},
+                        "persian": {"form": "", "ipa": ""},
+                        "forms": [{"speaker": "Fail01", "source": "JBIL"}],
+                    }
+                ],
+            )
+            review_data, _ = build_review_data_anchored(
+                workspace=workspace,
+                legacy_anchor=anchor,
+            )
+
+        form = review_data["concepts"][0]["forms"][0]
+        self.assertEqual(form["ipa"], "second_jbil_longer")
+        self.assertAlmostEqual(form["start_sec"], 20.0)
+
+    def test_legacy_id_unset_keeps_longest_fallback(self) -> None:
+        # Defensive: when legacy concept_id is empty, no filtering happens.
+        with TemporaryDirectory() as tmp:
+            workspace = self._ws_with_two_sister_intervals(tmp)
+            anchor = _write_legacy_anchor(
+                Path(tmp),
+                concepts=[
+                    {
+                        "concept_id": "",
+                        "concept_en": "sister",
+                        "arabic": {"form": "", "ipa": ""},
+                        "persian": {"form": "", "ipa": ""},
+                        "forms": [{"speaker": "Fail01", "source": "JBIL"}],
+                    }
+                ],
+            )
+            review_data, _ = build_review_data_anchored(
+                workspace=workspace,
+                legacy_anchor=anchor,
+            )
+
+        form = review_data["concepts"][0]["forms"][0]
+        # No filtering → longest wins → the KLQ interval (the bug case).
+        self.assertEqual(form["ipa"], "xoʃokdubaːre")
+
+
 if __name__ == "__main__":
     unittest.main()
