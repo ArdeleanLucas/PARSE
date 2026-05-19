@@ -578,6 +578,315 @@ def _form_from_interval(
     }
 
 
+def _crosstier_text(
+    payload: Mapping[str, Any],
+    tier_name: str,
+    concept_ids: set[str],
+    interval_start: float,
+    interval_end: float,
+) -> str | None:
+    """Return the ``text`` field of a tier interval aligned with the concept window.
+
+    The IPA and ortho tiers are temporally aligned with the concept tier (they
+    describe the same audio segment), and may carry an optional ``conceptId``
+    link from automated pipelines (e.g. ``concept_window_ipa``). When PARSE's
+    ``concepts.csv`` carries multiple polluted rows for one gloss, two
+    misalignments arise:
+
+    - Several IPA intervals across the recording may carry ``conceptId`` values
+      that are in ``concept_ids`` (one per per-speaker variant row), but only
+      one of them overlaps the chosen concept-tier window.
+    - Manually-adjusted intervals drop the ``conceptId`` link entirely and can
+      only be located by time overlap.
+
+    Strategy: require an overlap with ``[interval_start, interval_end]``; among
+    overlapping candidates, prefer ones whose ``conceptId`` is in
+    ``concept_ids`` (tiebreak by largest overlap), and otherwise fall back to
+    the plain largest-overlap interval. Returns ``None`` when no overlapping
+    candidate has a non-empty text.
+    """
+    tiers = payload.get("tiers")
+    if not isinstance(tiers, Mapping):
+        return None
+    tier = tiers.get(tier_name)
+    if not isinstance(tier, Mapping):
+        return None
+    intervals = tier.get("intervals")
+    if not isinstance(intervals, list):
+        return None
+
+    overlapping: list[tuple[float, Mapping[str, Any]]] = []
+    for raw in intervals:
+        if not isinstance(raw, Mapping):
+            continue
+        try:
+            iv_s = float(raw.get("start") or 0.0)
+            iv_e = float(raw.get("end") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        overlap = min(iv_e, interval_end) - max(iv_s, interval_start)
+        if overlap > 0:
+            overlapping.append((overlap, raw))
+
+    if not overlapping:
+        return None
+
+    with_cid = [
+        (ov, iv)
+        for ov, iv in overlapping
+        if str(iv.get("conceptId") or iv.get("concept_id") or "").strip() in concept_ids
+    ]
+    candidates = with_cid if with_cid else overlapping
+    candidates.sort(key=lambda pair: -pair[0])
+    for _ov, iv in candidates:
+        text = iv.get("text")
+        if text:
+            return str(text)
+    return None
+
+
+def _legacy_audio_filename(
+    *,
+    source: str,
+    legacy_concept_id: str,
+    gloss: str,
+    speaker: str,
+) -> str:
+    """Match the legacy review_tool's audio filename scheme.
+
+    Legacy convention (verified against ArdeleanLucas/review_tool's existing
+    paths): ``<source>_<concept_id>_A_<gloss>_<speaker>.wav`` — the ``A``
+    variant token is hardcoded because the legacy data collapsed every
+    speaker's per-variant realizations into a single canonical form.
+    """
+    survey = _slug_for_filename(source) if source else "JBIL"
+    item = _slug_for_filename(legacy_concept_id) if legacy_concept_id else "0"
+    gloss_token = _slug_for_filename(gloss) or "concept"
+    speaker_token = _slug_for_filename(speaker)
+    return f"{survey}_{item}_A_{gloss_token}_{speaker_token}.wav"
+
+
+def _legacy_concept_source(legacy_concept: Mapping[str, Any]) -> str:
+    """Pick the ``source`` to use for audio filenames of a legacy concept.
+
+    The legacy schema carries ``source`` only on per-speaker forms (most are
+    ``"JBIL"``, some are ``None`` for empty forms). Take the first non-empty
+    form source, or fall back to ``"JBIL"`` to match the deployed audio paths.
+    """
+    forms = legacy_concept.get("forms") or []
+    if isinstance(forms, list):
+        for f in forms:
+            if isinstance(f, Mapping):
+                src = f.get("source")
+                if src:
+                    return str(src)
+    return "JBIL"
+
+
+def build_review_data_anchored(
+    *,
+    workspace: Path,
+    legacy_anchor: Path,
+    tag_id: str = DEFAULT_TAG_ID,
+    speaker_filter: Iterable[str] | None = None,
+) -> tuple[dict[str, Any], list[tuple[str, dict[str, Any]]]]:
+    """Build review_data anchored to an existing legacy ``review_data.json``.
+
+    Iterates the legacy file's ``concepts`` list as the canonical concept set,
+    and re-derives each speaker's form from the current PARSE workspace:
+
+    - Concept identity (``concept_id``, ``concept_en``, ``arabic``, ``persian``)
+      comes from the legacy file unchanged. The thesis tag is consulted only as
+      a sanity guard: each legacy concept must match at least one PARSE row
+      whose ``concept_en`` shares the legacy gloss stem, otherwise we emit
+      empty forms and warn.
+    - Per-speaker form data (start_sec / duration_sec / IPA / ortho / audio
+      path) comes from the speaker's current concept-tier interval whose
+      ``concept_id`` is in the matched PARSE id set. IPA and ortho text come
+      via :func:`_crosstier_text` against the speaker's ipa / ortho tiers.
+    - Audio filenames match the legacy ``<source>_<id>_A_<gloss>_<speaker>.wav``
+      scheme so an in-place push to the review_tool clone keeps WAV references
+      coherent.
+
+    This mode is the workaround for PARSE issue #529 — the workspace's
+    ``concepts.csv`` carries per-speaker variant suffixes as separate rows
+    (e.g. ``big``, ``big (A)``, ``big (B)`` … all sharing ``source_item=4.1``),
+    so iterating ``concepts.csv`` produces 8 separate "big" entries with
+    spotty coverage. Anchoring to a stable 82-concept list collapses all
+    variants per gloss to one entry and recovers full-speaker coverage.
+    """
+    legacy = _load_json(legacy_anchor)
+    legacy_concepts = legacy.get("concepts") if isinstance(legacy.get("concepts"), list) else []
+
+    concepts_csv = workspace / "concepts.csv"
+    if not concepts_csv.exists():
+        raise FileNotFoundError(f"concepts.csv not found at {concepts_csv}")
+    parse_rows = read_concepts_csv_rows(concepts_csv)
+
+    # Index PARSE concepts.csv by stem (lowercase, variant suffix stripped).
+    parse_by_stem: dict[str, list[Mapping[str, str]]] = {}
+    for row in parse_rows:
+        stem = _stem_label(row.get("concept_en") or "").casefold()
+        if stem:
+            parse_by_stem.setdefault(stem, []).append(row)
+
+    speakers = _project_speakers(workspace)
+    if speaker_filter is not None:
+        speakers = _apply_speaker_filter(speakers, speaker_filter)
+
+    annotations_dir = workspace / "annotations"
+    annotation_payloads: dict[str, dict[str, Any]] = {}
+    thesis_ids_by_speaker: dict[str, set[str]] = {}
+    for path in _iter_annotation_files(annotations_dir):
+        speaker = _speaker_for_annotation(path)
+        if speakers and speaker not in speakers:
+            continue
+        try:
+            payload = _load_json(path)
+        except json.JSONDecodeError as exc:
+            print(f"warning: skipping unparseable annotation {path}: {exc}", file=sys.stderr)
+            continue
+        annotation_payloads[speaker] = payload
+        thesis_ids_by_speaker[speaker] = _tagged_concept_ids(payload, tag_id)
+
+    if not speakers:
+        speakers = sorted(annotation_payloads.keys())
+
+    enrichments = _load_enrichments(workspace)
+    cognate_sets = enrichments.get("cognate_sets", {})
+    similarity = enrichments.get("similarity", {})
+    borrowing_flags = enrichments.get("borrowing_flags", {})
+
+    clip_plan: list[tuple[str, dict[str, Any]]] = []
+    out_concepts: list[dict[str, Any]] = []
+    unmatched_legacy: list[str] = []
+
+    for legacy_c in legacy_concepts:
+        if not isinstance(legacy_c, Mapping):
+            continue
+        legacy_id = str(legacy_c.get("concept_id") or "").strip()
+        legacy_en = str(legacy_c.get("concept_en") or "").strip()
+        legacy_stem = _stem_label(legacy_en).casefold()
+        matched_rows = parse_by_stem.get(legacy_stem, [])
+        matched_ids: set[str] = {
+            str(r.get("id") or "").strip() for r in matched_rows if r.get("id")
+        }
+        if not matched_rows:
+            unmatched_legacy.append(legacy_en or legacy_id)
+        legacy_source = _legacy_concept_source(legacy_c)
+
+        forms: list[dict[str, Any]] = []
+        for speaker in speakers:
+            payload = annotation_payloads.get(speaker, {})
+            concept_tier_by_id = _concept_intervals_by_id(payload)
+
+            speaker_intervals: list[Mapping[str, Any]] = []
+            for cid in matched_ids:
+                speaker_intervals.extend(concept_tier_by_id.get(cid, []))
+
+            if not speaker_intervals:
+                forms.append(
+                    _empty_form(
+                        speaker,
+                        concept_id=legacy_id,
+                        label=legacy_en,
+                        cognate_sets=cognate_sets,
+                        similarity=similarity,
+                        borrowing_flags=borrowing_flags,
+                    )
+                )
+                continue
+
+            # Pick the longest-duration interval — manually-adjusted ones tend
+            # to be tighter, but for anchored output we want the most
+            # representative single realization per speaker per gloss.
+            interval = max(
+                speaker_intervals,
+                key=lambda iv: float(
+                    _interval_field(iv, "end", "end_sec") or 0.0
+                ) - float(_interval_field(iv, "start", "start_sec") or 0.0),
+            )
+            start_sec = float(_interval_field(interval, "start", "start_sec") or 0.0)
+            end_sec = float(_interval_field(interval, "end", "end_sec") or 0.0)
+            duration_sec = max(0.0, end_sec - start_sec)
+
+            ipa_text = _crosstier_text(payload, "ipa", matched_ids, start_sec, end_sec)
+            ortho_text = _crosstier_text(payload, "ortho", matched_ids, start_sec, end_sec)
+
+            audio_filename = _legacy_audio_filename(
+                source=legacy_source,
+                legacy_concept_id=legacy_id,
+                gloss=_stem_label(legacy_en) or legacy_en or legacy_id,
+                speaker=speaker,
+            )
+            audio_relpath = f"audio/{speaker}/{audio_filename}"
+            source_wav_rel = _source_wav_relative(payload, speaker)
+
+            form = {
+                "speaker": speaker,
+                "ipa": ipa_text or "",
+                "ortho": ortho_text or "",
+                "cognate_class": _cognate_class_for(cognate_sets, legacy_id, legacy_en, speaker),
+                "arabic_similarity": _similarity_score(similarity, legacy_id, legacy_en, speaker, "ar"),
+                "persian_similarity": _similarity_score(similarity, legacy_id, legacy_en, speaker, "fa"),
+                "borrowing_flag": _borrowing_flag_for(borrowing_flags, legacy_id, legacy_en, speaker),
+                "audio_path": audio_relpath,
+                "spectrogram_path": None,
+                "variants": None,
+                "source": legacy_source,
+                "verification": None,
+                "start_sec": start_sec,
+                "duration_sec": duration_sec,
+            }
+            forms.append(form)
+            clip_plan.append(
+                (
+                    source_wav_rel,
+                    {
+                        "speaker": speaker,
+                        "audio_path": audio_relpath,
+                        "start_sec": start_sec,
+                        "duration_sec": duration_sec,
+                        "concept_id": legacy_id,
+                        "concept_en": _stem_label(legacy_en) or legacy_en,
+                        "ipa": form["ipa"],
+                        "ortho": form["ortho"],
+                    },
+                )
+            )
+
+        out_concepts.append(
+            {
+                "concept_id": legacy_id,
+                "concept_en": legacy_en,
+                "arabic": legacy_c.get("arabic") if isinstance(legacy_c.get("arabic"), Mapping) else {"form": "", "ipa": ""},
+                "persian": legacy_c.get("persian") if isinstance(legacy_c.get("persian"), Mapping) else {"form": "", "ipa": ""},
+                "forms": forms,
+            }
+        )
+
+    metadata = {
+        "generated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "speakers": list(speakers),
+        "total_concepts": len(out_concepts),
+        "method": "parse_workspace_export_legacy_anchored",
+        "threshold": None,
+        "audio_linked": True,
+        "spectrograms": False,
+        "klq_merge": False,
+        "noisy_verification": False,
+        "version": LEGACY_SCHEMA_VERSION,
+        "phonetic_flags": {},
+        "source": {
+            "workspace": str(workspace),
+            "tag_id": tag_id,
+            "legacy_anchor": str(legacy_anchor),
+            "unmatched_legacy_concepts": unmatched_legacy,
+        },
+    }
+    return {"metadata": metadata, "concepts": out_concepts}, clip_plan
+
+
 def _write_timestamps_csv(
     out_dir: Path,
     speaker: str,
@@ -957,6 +1266,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "without mutating the workspace."
         ),
     )
+    parser.add_argument(
+        "--legacy-anchor",
+        type=Path,
+        default=None,
+        help=(
+            "Path to an existing legacy review_data.json to anchor the export "
+            "against. When set, the exporter iterates the legacy concepts list "
+            "(preserving concept_id / concept_en / arabic / persian) and rebuilds "
+            "each speaker's form from current PARSE workspace data, matching by "
+            "concept gloss stem. Use this to collapse PARSE issue #529's "
+            "duplicate concept rows down to one entry per gloss."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -969,18 +1291,30 @@ def main(argv: list[str] | None = None) -> int:
     workspace = args.workspace.resolve()
     out_dir = args.out.resolve()
     contact_config = args.contact_config.resolve() if args.contact_config else _default_contact_config()
+    legacy_anchor = args.legacy_anchor.resolve() if args.legacy_anchor else None
 
     if not workspace.exists():
         print(f"error: workspace not found: {workspace}", file=sys.stderr)
         return 2
+    if legacy_anchor is not None and not legacy_anchor.exists():
+        print(f"error: --legacy-anchor file not found: {legacy_anchor}", file=sys.stderr)
+        return 2
 
     try:
-        review_data, clip_plan = build_review_data(
-            workspace=workspace,
-            tag_id=args.tag_id,
-            contact_config=contact_config,
-            speaker_filter=args.speakers,
-        )
+        if legacy_anchor is not None:
+            review_data, clip_plan = build_review_data_anchored(
+                workspace=workspace,
+                legacy_anchor=legacy_anchor,
+                tag_id=args.tag_id,
+                speaker_filter=args.speakers,
+            )
+        else:
+            review_data, clip_plan = build_review_data(
+                workspace=workspace,
+                tag_id=args.tag_id,
+                contact_config=contact_config,
+                speaker_filter=args.speakers,
+            )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

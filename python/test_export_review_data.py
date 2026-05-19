@@ -17,7 +17,9 @@ from tempfile import TemporaryDirectory
 from export_review_data import (
     DEFAULT_TAG_ID,
     LEGACY_SCHEMA_VERSION,
+    _crosstier_text,
     build_review_data,
+    build_review_data_anchored,
     write_outputs,
 )
 
@@ -73,17 +75,24 @@ def _make_workspace(
     for speaker, payload in speakers.items():
         intervals = payload.get("concept_intervals") or []
         tagged = payload.get("tagged_ids") or []
+        ipa_intervals = payload.get("ipa_intervals") or []
+        ortho_intervals = payload.get("ortho_intervals") or []
+        tiers: dict[str, object] = {
+            "concept": {
+                "display_order": 3,
+                "type": "interval",
+                "intervals": list(intervals),
+            }
+        }
+        if ipa_intervals:
+            tiers["ipa"] = {"display_order": 1, "type": "interval", "intervals": list(ipa_intervals)}
+        if ortho_intervals:
+            tiers["ortho"] = {"display_order": 2, "type": "interval", "intervals": list(ortho_intervals)}
         annotation = {
             "version": 1,
             "speaker": speaker,
             "source_audio": f"audio/working/{speaker}/{speaker}.wav",
-            "tiers": {
-                "concept": {
-                    "display_order": 3,
-                    "type": "interval",
-                    "intervals": list(intervals),
-                }
-            },
+            "tiers": tiers,
             "concept_tags": {cid: [DEFAULT_TAG_ID] for cid in tagged},
         }
         (annotations / f"{speaker}.parse.json").write_text(
@@ -681,6 +690,277 @@ class SpeakerFilterTests(unittest.TestCase):
 
         self.assertEqual(data_none["metadata"]["speakers"], ["Fail01", "Fail02", "Khan01"])
         self.assertEqual(data_empty["metadata"]["speakers"], ["Fail01", "Fail02", "Khan01"])
+
+
+def _write_legacy_anchor(tmp_path: Path, concepts: list[dict[str, object]]) -> Path:
+    """Write a minimal legacy review_data.json and return its path."""
+    path = tmp_path / "legacy_review_data.json"
+    payload = {
+        "metadata": {"version": LEGACY_SCHEMA_VERSION, "speakers": []},
+        "concepts": concepts,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+class CrosstierTextTests(unittest.TestCase):
+    """The cross-tier IPA/ortho join is the load-bearing primitive of anchored mode."""
+
+    def _payload(self, ipa_intervals: list[dict[str, object]]) -> dict[str, object]:
+        return {"tiers": {"ipa": {"intervals": ipa_intervals}}}
+
+    def test_returns_text_when_conceptid_matches(self) -> None:
+        payload = self._payload([
+            {"start": 1.0, "end": 1.5, "text": "ɡap", "conceptId": "634"},
+        ])
+        self.assertEqual(_crosstier_text(payload, "ipa", {"634"}, 1.0, 1.5), "ɡap")
+
+    def test_falls_back_to_time_overlap_when_conceptid_absent(self) -> None:
+        # Manually-adjusted IPA intervals drop the conceptId link — they must
+        # still resolve via time-range overlap with the concept-tier interval.
+        payload = self._payload([
+            {"start": 3492.305, "end": 3493.186, "text": "ɡap", "manuallyAdjusted": True},
+        ])
+        self.assertEqual(_crosstier_text(payload, "ipa", {"634"}, 3492.305, 3493.186), "ɡap")
+
+    def test_prefers_conceptid_match_over_time_overlap(self) -> None:
+        # If both kinds of candidate exist, the conceptId match wins.
+        payload = self._payload([
+            {"start": 5.0, "end": 6.0, "text": "wrong"},
+            {"start": 5.0, "end": 6.0, "text": "right", "conceptId": "634"},
+        ])
+        self.assertEqual(_crosstier_text(payload, "ipa", {"634"}, 5.0, 6.0), "right")
+
+    def test_returns_none_when_no_match(self) -> None:
+        payload = self._payload([
+            {"start": 100.0, "end": 101.0, "text": "elsewhere"},
+        ])
+        self.assertIsNone(_crosstier_text(payload, "ipa", {"634"}, 5.0, 6.0))
+
+    def test_missing_tier_returns_none(self) -> None:
+        self.assertIsNone(_crosstier_text({"tiers": {}}, "ipa", {"634"}, 1.0, 2.0))
+        self.assertIsNone(_crosstier_text({}, "ipa", {"634"}, 1.0, 2.0))
+
+    def test_largest_overlap_wins_for_time_fallback(self) -> None:
+        # Two overlapping intervals — pick the one with the most overlap.
+        payload = self._payload([
+            {"start": 0.9, "end": 1.1, "text": "edge"},      # 0.1s overlap with [1.0, 2.0]
+            {"start": 1.0, "end": 2.0, "text": "center"},    # 1.0s overlap
+            {"start": 1.5, "end": 5.0, "text": "trailing"},  # 0.5s overlap
+        ])
+        self.assertEqual(_crosstier_text(payload, "ipa", set(), 1.0, 2.0), "center")
+
+
+class LegacyAnchoredTests(unittest.TestCase):
+    """End-to-end tests for build_review_data_anchored."""
+
+    def _ash_workspace_and_anchor(self, tmp: str) -> tuple[Path, Path]:
+        """Two PARSE rows for 'ash' (variant pollution); one speaker has data.
+
+        Legacy carries the canonical concept_id=132 for ash, with Arabic and
+        Persian reference forms. The exporter should collapse both PARSE rows
+        into one entry preserving the legacy concept_id and references.
+        """
+        workspace = _make_workspace(
+            Path(tmp),
+            concepts=[
+                # PARSE pollution: two rows for the same gloss, different concept_ids.
+                {"id": "1", "concept_en": "ash (A)", "source_item": "1.1", "source_survey": "KLQ"},
+                {"id": "2", "concept_en": "ash", "source_item": "1.1", "source_survey": "KLQ"},
+            ],
+            speakers={
+                "Fail01": {
+                    "concept_intervals": [
+                        # Speaker only tagged concept_id="2" — but legacy looks for "ash" globally.
+                        {"concept_id": "2", "start": 0.5, "end": 1.25}
+                    ],
+                    "tagged_ids": ["2"],
+                    "ipa_intervals": [
+                        {"start": 0.5, "end": 1.25, "text": "aʂ", "conceptId": "2"}
+                    ],
+                    "ortho_intervals": [
+                        {"start": 0.5, "end": 1.25, "text": "aş", "conceptId": "2"}
+                    ],
+                },
+                "Kalh01": {
+                    "concept_intervals": [],
+                    "tagged_ids": [],
+                },
+            },
+        )
+        anchor = _write_legacy_anchor(
+            Path(tmp),
+            concepts=[
+                {
+                    "concept_id": "132",
+                    "concept_en": "ash",
+                    "arabic": {"form": "رماد", "ipa": "ramaːd"},
+                    "persian": {"form": "خاکستر", "ipa": "xɑːkestær"},
+                    "forms": [
+                        {"speaker": "Fail01", "source": "JBIL"},
+                        {"speaker": "Kalh01", "source": "JBIL"},
+                    ],
+                }
+            ],
+        )
+        return workspace, anchor
+
+    def test_anchored_collapses_polluted_concepts_csv_to_one_entry(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace, anchor = self._ash_workspace_and_anchor(tmp)
+            review_data, clip_plan = build_review_data_anchored(
+                workspace=workspace,
+                legacy_anchor=anchor,
+            )
+
+        # ONE concept entry per legacy entry, not two for "ash" + "ash (A)".
+        self.assertEqual(len(review_data["concepts"]), 1)
+        concept = review_data["concepts"][0]
+        # Legacy concept identity preserved.
+        self.assertEqual(concept["concept_id"], "132")
+        self.assertEqual(concept["concept_en"], "ash")
+        self.assertEqual(concept["arabic"], {"form": "رماد", "ipa": "ramaːd"})
+        self.assertEqual(concept["persian"], {"form": "خاکستر", "ipa": "xɑːkestær"})
+
+    def test_anchored_recovers_per_speaker_ipa_and_ortho_via_crosstier_join(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace, anchor = self._ash_workspace_and_anchor(tmp)
+            review_data, _ = build_review_data_anchored(
+                workspace=workspace,
+                legacy_anchor=anchor,
+            )
+
+        forms = {f["speaker"]: f for f in review_data["concepts"][0]["forms"]}
+        # Fail01 had a single interval — cross-tier join finds the matching IPA/ortho.
+        self.assertEqual(forms["Fail01"]["ipa"], "aʂ")
+        self.assertEqual(forms["Fail01"]["ortho"], "aş")
+        self.assertEqual(forms["Fail01"]["source"], "JBIL")
+        self.assertEqual(
+            forms["Fail01"]["audio_path"],
+            "audio/Fail01/JBIL_132_A_ash_Fail01.wav",
+        )
+        # Kalh01 has no interval → legacy null defaults.
+        self.assertEqual(forms["Kalh01"]["ipa"], "?")
+        self.assertEqual(forms["Kalh01"]["ortho"], "")
+        self.assertIsNone(forms["Kalh01"]["audio_path"])
+
+    def test_anchored_picks_longest_interval_when_speaker_has_multiple(self) -> None:
+        # Polluted concepts.csv → speaker has intervals for both concept_ids
+        # (e.g. they tagged 'big' and 'big (A)' separately). Anchored mode
+        # picks the longest one as the representative realization.
+        with TemporaryDirectory() as tmp:
+            workspace = _make_workspace(
+                Path(tmp),
+                concepts=[
+                    {"id": "53", "concept_en": "big (A)", "source_item": "4.1", "source_survey": "KLQ"},
+                    {"id": "634", "concept_en": "big", "source_item": "4.1", "source_survey": "KLQ"},
+                ],
+                speakers={
+                    "Fail01": {
+                        "concept_intervals": [
+                            {"concept_id": "53", "start": 1000.0, "end": 1000.2},   # 0.2s
+                            {"concept_id": "634", "start": 3492.305, "end": 3493.186},  # 0.881s — longer
+                        ],
+                        "tagged_ids": ["53", "634"],
+                        "ipa_intervals": [
+                            {"start": 1000.0, "end": 1000.2, "text": "short", "conceptId": "53"},
+                            {"start": 3492.305, "end": 3493.186, "text": "ɡap", "manuallyAdjusted": True},
+                        ],
+                        "ortho_intervals": [
+                            {"start": 3492.305, "end": 3493.186, "text": "گەپ", "manuallyAdjusted": True},
+                        ],
+                    },
+                },
+            )
+            anchor = _write_legacy_anchor(
+                Path(tmp),
+                concepts=[
+                    {
+                        "concept_id": "169",
+                        "concept_en": "big",
+                        "arabic": {"form": "كبير", "ipa": "kabiːr"},
+                        "persian": {"form": "بزرگ", "ipa": "bozorɡ"},
+                        "forms": [{"speaker": "Fail01", "source": "JBIL"}],
+                    }
+                ],
+            )
+            review_data, _ = build_review_data_anchored(
+                workspace=workspace,
+                legacy_anchor=anchor,
+            )
+
+        form = review_data["concepts"][0]["forms"][0]
+        # Longest interval wins → IPA via time-overlap fallback ('ɡap') not 'short'.
+        self.assertEqual(form["ipa"], "ɡap")
+        self.assertEqual(form["ortho"], "گەپ")
+        self.assertAlmostEqual(form["start_sec"], 3492.305)
+        self.assertAlmostEqual(form["duration_sec"], 0.881, places=2)
+        self.assertEqual(
+            form["audio_path"],
+            "audio/Fail01/JBIL_169_A_big_Fail01.wav",
+        )
+
+    def test_anchored_unmatched_legacy_concept_emits_empty_forms(self) -> None:
+        # A legacy concept with no matching PARSE row (e.g. legacy 'egg' but
+        # PARSE has no 'egg' row) must still emit an entry — committee sees the
+        # concept's reference forms even when no speaker has annotated it.
+        with TemporaryDirectory() as tmp:
+            workspace = _make_workspace(
+                Path(tmp),
+                concepts=[
+                    {"id": "1", "concept_en": "ash", "source_item": "1.1", "source_survey": "KLQ"},
+                ],
+                speakers={
+                    "Fail01": {
+                        "concept_intervals": [],
+                        "tagged_ids": [],
+                    },
+                },
+            )
+            anchor = _write_legacy_anchor(
+                Path(tmp),
+                concepts=[
+                    {
+                        "concept_id": "141",
+                        "concept_en": "egg (e.g., chicken)",
+                        "arabic": {"form": "بيضة", "ipa": "bajdˤah"},
+                        "persian": {"form": "تخم‌مرغ", "ipa": ""},
+                        "forms": [{"speaker": "Fail01", "source": "JBIL"}],
+                    }
+                ],
+            )
+            review_data, _ = build_review_data_anchored(
+                workspace=workspace,
+                legacy_anchor=anchor,
+            )
+
+        # Concept retained even though no PARSE row matched.
+        self.assertEqual(len(review_data["concepts"]), 1)
+        concept = review_data["concepts"][0]
+        self.assertEqual(concept["concept_id"], "141")
+        self.assertEqual(concept["arabic"]["form"], "بيضة")
+        # Speaker's form is empty.
+        self.assertEqual(concept["forms"][0]["ipa"], "?")
+        self.assertIsNone(concept["forms"][0]["audio_path"])
+        # Metadata names the unmatched concept so callers can audit.
+        self.assertIn("egg (e.g., chicken)", review_data["metadata"]["source"]["unmatched_legacy_concepts"])
+
+    def test_anchored_metadata_carries_legacy_anchor_path_and_speaker_filter(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace, anchor = self._ash_workspace_and_anchor(tmp)
+            review_data, _ = build_review_data_anchored(
+                workspace=workspace,
+                legacy_anchor=anchor,
+                speaker_filter=["Fail01"],
+            )
+
+        meta = review_data["metadata"]
+        self.assertEqual(meta["method"], "parse_workspace_export_legacy_anchored")
+        self.assertEqual(meta["speakers"], ["Fail01"])
+        self.assertEqual(meta["source"]["legacy_anchor"], str(anchor))
+        # Speaker filter applied: Kalh01 excluded.
+        forms = review_data["concepts"][0]["forms"]
+        self.assertEqual([f["speaker"] for f in forms], ["Fail01"])
 
 
 if __name__ == "__main__":
