@@ -836,11 +836,24 @@ def build_review_data_anchored(
                 )
                 continue
 
-            # Pick the longest-duration interval — manually-adjusted ones tend
-            # to be tighter, but for anchored output we want the most
-            # representative single realization per speaker per gloss.
+            # PARSE collapses cross-survey readings under a single concept_id
+            # (e.g. JBIL 75 "sister" and KLQ 2.5 "sister" both live at
+            # concept_id=16, distinguished only by ``audition_prefix``). When
+            # multiple candidates exist, prefer the one whose audition_prefix
+            # matches the legacy concept_id — that is the survey item the
+            # legacy review_tool was built from, so its IPA/ortho match what
+            # the committee expects. Fall back to all candidates when no
+            # audition_prefix matches (the speaker only annotated via a
+            # different survey). Within the chosen pool, longest wins as a
+            # representativeness heuristic.
+            prefix_matches = [
+                iv
+                for iv in speaker_intervals
+                if legacy_id and str(iv.get("audition_prefix") or "").strip() == legacy_id
+            ]
+            candidate_pool = prefix_matches if prefix_matches else speaker_intervals
             interval = max(
-                speaker_intervals,
+                candidate_pool,
                 key=lambda iv: float(
                     _interval_field(iv, "end", "end_sec") or 0.0
                 ) - float(_interval_field(iv, "start", "start_sec") or 0.0),
