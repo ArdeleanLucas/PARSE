@@ -155,6 +155,36 @@ export function pickOrthoIntervalForConcept(
   return (record.tiers.ortho?.intervals ?? []).find((iv) => overlaps(iv, conceptInterval)) ?? null;
 }
 
+// IPA picker must agree with the save path's biggest-overlap target
+// (findBestOverlapIntervalIndex in stores/annotation/actions.ts). Picking the
+// first overlap by start time used to surface stray CTC chunks that partially
+// overlap a concept window, while saves silently retargeted the largest-overlap
+// interval — so user "clear + save" attempts never removed the visible IPA.
+export function pickIpaIntervalForConcept(
+  record: AnnotationRecord,
+  conceptInterval: AnnotationInterval,
+): AnnotationInterval | null {
+  const intervals = record.tiers.ipa?.intervals ?? [];
+  if (!intervals.length) return null;
+
+  const contained = intervals.find(
+    (iv) => iv.start >= conceptInterval.start && iv.end <= conceptInterval.end,
+  );
+  if (contained) return contained;
+
+  let bestOverlap = 0;
+  let best: AnnotationInterval | null = null;
+  for (const iv of intervals) {
+    if (iv.end <= conceptInterval.start || iv.start >= conceptInterval.end) continue;
+    const ov = Math.min(iv.end, conceptInterval.end) - Math.max(iv.start, conceptInterval.start);
+    if (ov > bestOverlap) {
+      bestOverlap = ov;
+      best = iv;
+    }
+  }
+  return best;
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

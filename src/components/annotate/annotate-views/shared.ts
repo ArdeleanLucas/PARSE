@@ -2,6 +2,7 @@ import type { AnnotationRecord } from "../../../api/types";
 import {
   conceptMatchesIntervalText,
   overlaps,
+  pickIpaIntervalForConcept,
   pickOrthoIntervalForConcept,
 } from "../../../lib/parseUIUtils";
 
@@ -32,7 +33,7 @@ export function findAnnotationForConcept(
     return { conceptInterval: null, ipaInterval: null, orthoInterval: null, directOrthoInterval: null };
   }
 
-  const ipaInterval = (record.tiers.ipa?.intervals ?? []).find((interval) => overlaps(interval, conceptInterval)) ?? null;
+  const ipaInterval = pickIpaIntervalForConcept(record, conceptInterval);
   const orthoInterval = pickOrthoIntervalForConcept(record, conceptInterval);
   const directOrthoInterval = (record.tiers.ortho?.intervals ?? []).find((interval) => overlaps(interval, conceptInterval)) ?? null;
 
