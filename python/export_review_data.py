@@ -67,26 +67,38 @@ def _empty_enrichments() -> dict[str, dict[str, Any]]:
 
 _VARIANT_SUFFIX_RE = re.compile(r"\s*\(([A-Za-z0-9]+)\)\s*$")
 _TRAILING_PAREN_RE = re.compile(r"\s*\([^)]*\)\s*$")
+_LEADING_NUMBER_PREFIX_RE = re.compile(r"^\s*\d[\d.]*\s+")
 _FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def _stem_label(label: str) -> str:
-    """Return the canonical gloss of ``label`` with trailing parens stripped.
+    """Return the canonical gloss of ``label`` with prefix + paren pollution stripped.
 
-    PARSE's concepts.csv carries two kinds of trailing parenthetical:
+    PARSE's ``concepts.csv`` can carry three kinds of pollution around the bare
+    gloss; all of them need to fold away before anchored-mode matching keys
+    against the legacy review_tool's curated 82-concept list:
 
-    1. **Variant suffix** — alphanumeric token, e.g. ``"dog (A)"``, ``"big (F)"``.
-    2. **Meaning qualifier** — free text, e.g. ``"egg (e.g., chicken)"``,
-       ``"fly (n.)"``, ``"you (sg.)"``, ``"to knock (at the door)"``. The
-       legacy review_tool's curated 82-concept list keys by the bare gloss
-       (``"egg"``, ``"fly"``, ``"you"``), so anchored-mode matching has to
-       fold both kinds of suffix away.
+    1. **Variant suffix** — alphanumeric token at end, e.g. ``"dog (A)"``,
+       ``"big (F)"``.
+    2. **Meaning qualifier** — free text at end, e.g. ``"egg (e.g., chicken)"``,
+       ``"fly (n.)"``, ``"you (sg.)"``, ``"to knock (at the door)"``.
+    3. **Leading numeric prefix** — Audition cue numbers that escaped the
+       importer's ``parse_cue_name`` normalization and glued onto the gloss,
+       e.g. ``"56 skin"`` (from concepts.csv id 611) or
+       ``"48 stomach (organ)"`` (id 610). Tracked separately as a PARSE
+       data-quality bug; this function defends the exporter against it.
 
-    Strips parentheticals iteratively so chained suffixes like
-    ``"egg (e.g., chicken) (A)"`` collapse to ``"egg"``. Returns the input
-    unchanged when no trailing paren is present.
+    The leading numeric prefix is stripped first (one shot — survey item ids
+    are well-formed `<digits>[.<digits>]` tokens), then trailing parentheticals
+    are stripped iteratively so chained suffixes like
+    ``"egg (e.g., chicken) (A)"`` collapse to ``"egg"`` and combined cases like
+    ``"48 stomach (organ)"`` collapse to ``"stomach"``. Returns the input
+    unchanged when neither pattern matches.
     """
     text = str(label or "").strip()
+    stripped_prefix = _LEADING_NUMBER_PREFIX_RE.sub("", text).strip()
+    if stripped_prefix:
+        text = stripped_prefix
     while True:
         stripped = _TRAILING_PAREN_RE.sub("", text).strip()
         if not stripped or stripped == text:
