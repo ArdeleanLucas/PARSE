@@ -786,3 +786,117 @@ describe('SpeakerFormsTable Play button wires audio src and play()', () => {
     }
   });
 });
+
+
+// Bug: when the user clicks play (cold cache, readyState < 1), the handler
+// registers a `loadedmetadata` listener that triggers seekAndPlay → audio.play()
+// once metadata arrives. If the user clicks AGAIN before metadata loads, the
+// toggle-off branch pauses and returns — but does NOT remove the listener.
+// When metadata eventually loads, the orphan listener fires audio.play()
+// with no rAF tick scheduled to stop at end_sec, so the audio plays to the
+// end of the source WAV (the speaker's entire recording).
+describe('SpeakerFormsTable orphaned loadedmetadata listener after toggle-off', () => {
+  it('does not call play() if user toggled off before metadata loaded', () => {
+    const playMock = vi.fn().mockResolvedValue(undefined);
+    const pauseMock = vi.fn();
+    const loadMock = vi.fn();
+
+    // Capture addEventListener so we can fire `loadedmetadata` manually
+    // (jsdom does not emit it from audio.load()).
+    const capturedListeners: Record<string, EventListener[]> = {};
+    const originalAddEventListener = HTMLMediaElement.prototype.addEventListener;
+    const originalRemoveEventListener = HTMLMediaElement.prototype.removeEventListener;
+    HTMLMediaElement.prototype.addEventListener = function (
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+    ) {
+      if (typeof listener === 'function') {
+        if (!capturedListeners[type]) capturedListeners[type] = [];
+        capturedListeners[type].push(listener as EventListener);
+      }
+    } as typeof HTMLMediaElement.prototype.addEventListener;
+    HTMLMediaElement.prototype.removeEventListener = function (
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+    ) {
+      if (capturedListeners[type] && typeof listener === 'function') {
+        capturedListeners[type] = capturedListeners[type].filter(
+          (l) => l !== (listener as EventListener),
+        );
+      }
+    } as typeof HTMLMediaElement.prototype.removeEventListener;
+
+    const originalPlay = HTMLMediaElement.prototype.play;
+    const originalPause = HTMLMediaElement.prototype.pause;
+    const originalLoad = HTMLMediaElement.prototype.load;
+    const originalSrcDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLMediaElement.prototype,
+      'src',
+    );
+
+    HTMLMediaElement.prototype.play = playMock as typeof HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.pause = pauseMock as typeof HTMLMediaElement.prototype.pause;
+    HTMLMediaElement.prototype.load = loadMock as typeof HTMLMediaElement.prototype.load;
+    Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+      configurable: true,
+      get() {
+        return (this as unknown as { _src?: string })._src ?? '';
+      },
+      set(value: string) {
+        (this as unknown as { _src?: string })._src = value;
+      },
+    });
+
+    try {
+      render(
+        <SpeakerFormsTable
+          bundle={makeBundle()}
+          speakers={['Fail01']}
+          speakerForms={[makeForm({ speaker: 'Fail01' })]}
+          primaryContactCodes={PRIMARY_CODES}
+          contactLanguageNames={CONTACT_NAMES}
+          conceptKey="big"
+          initialExpandedSpeaker="Fail01"
+        />,
+      );
+      const btn = screen.getByTestId('variant-play-Fail01-53');
+
+      // Click 1: cold cache. readyState defaults to 0 in jsdom, so the
+      // load-then-play branch registers a loadedmetadata listener.
+      fireEvent.click(btn);
+      expect(loadMock).toHaveBeenCalledTimes(1);
+      expect(capturedListeners['loadedmetadata']?.length ?? 0).toBeGreaterThan(0);
+
+      // Click 2: user clicks again before metadata arrives — toggle-off.
+      fireEvent.click(btn);
+      expect(pauseMock).toHaveBeenCalled();
+
+      // Now metadata finally loads. Fire the captured listeners.
+      const handlers = [...(capturedListeners['loadedmetadata'] ?? [])];
+      handlers.forEach((h) => h(new Event('loadedmetadata')));
+
+      // The bug: orphaned listener calls audio.play(), so the audio starts
+      // playing with no rAF tick to stop at end_sec.
+      expect(playMock).not.toHaveBeenCalled();
+    } finally {
+      HTMLMediaElement.prototype.play = originalPlay;
+      HTMLMediaElement.prototype.pause = originalPause;
+      HTMLMediaElement.prototype.load = originalLoad;
+      HTMLMediaElement.prototype.addEventListener = originalAddEventListener;
+      HTMLMediaElement.prototype.removeEventListener = originalRemoveEventListener;
+      if (originalSrcDescriptor) {
+        Object.defineProperty(HTMLMediaElement.prototype, 'src', originalSrcDescriptor);
+      } else {
+        Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+          configurable: true,
+          get() {
+            return (this as unknown as { _src?: string })._src ?? '';
+          },
+          set(value: string) {
+            (this as unknown as { _src?: string })._src = value;
+          },
+        });
+      }
+    }
+  });
+});

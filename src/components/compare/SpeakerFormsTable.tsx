@@ -425,6 +425,13 @@ function ExpandedPanel({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const currentSrcRef = useRef<string>('');
+  const playRequestIdRef = useRef(0);
+  const pendingListenersCleanupRef = useRef<(() => void) | null>(null);
+
+  const clearPendingListeners = useCallback(() => {
+    pendingListenersCleanupRef.current?.();
+    pendingListenersCleanupRef.current = null;
+  }, []);
 
   const cancelRaf = useCallback(() => {
     if (rafRef.current !== null) {
@@ -436,6 +443,8 @@ function ExpandedPanel({
   // Cleanup audio + rAF on unmount.
   useEffect(() => {
     return () => {
+      playRequestIdRef.current += 1;
+      clearPendingListeners();
       cancelRaf();
       const audio = audioRef.current;
       if (audio) {
@@ -446,7 +455,7 @@ function ExpandedPanel({
         }
       }
     };
-  }, [cancelRaf]);
+  }, [cancelRaf, clearPendingListeners]);
 
   const handlePlayToggle = useCallback(
     (variant: SpeakerFormsTableVariant) => {
@@ -459,6 +468,8 @@ function ExpandedPanel({
         audio.preload = 'auto';
         audioRef.current = audio;
       }
+      const requestId = ++playRequestIdRef.current;
+      clearPendingListeners();
       // Toggle off when the same variant is already playing.
       if (playingVariantId === variant.csv_row_id) {
         cancelRaf();
@@ -518,14 +529,21 @@ function ExpandedPanel({
         }
       };
       if (srcChanged && audio.readyState < 1 /* HAVE_METADATA */) {
+        const cleanupListeners = () => {
+          audio.removeEventListener('loadedmetadata', onLoaded);
+          audio.removeEventListener('error', onError);
+          if (pendingListenersCleanupRef.current === cleanupListeners) {
+            pendingListenersCleanupRef.current = null;
+          }
+        };
         const onLoaded = () => {
-          audio?.removeEventListener('loadedmetadata', onLoaded);
-          audio?.removeEventListener('error', onError);
+          cleanupListeners();
+          if (playRequestIdRef.current !== requestId) return;
           seekAndPlay();
         };
         const onError = () => {
-          audio?.removeEventListener('loadedmetadata', onLoaded);
-          audio?.removeEventListener('error', onError);
+          cleanupListeners();
+          if (playRequestIdRef.current !== requestId) return;
           const err = audio?.error;
           const msg = err
             ? `audio load failed (code ${err.code})`
@@ -536,6 +554,7 @@ function ExpandedPanel({
         };
         audio.addEventListener('loadedmetadata', onLoaded);
         audio.addEventListener('error', onError);
+        pendingListenersCleanupRef.current = cleanupListeners;
         try {
           audio.load();
         } catch (err) {
@@ -565,7 +584,7 @@ function ExpandedPanel({
       };
       rafRef.current = requestAnimationFrame(tick);
     },
-    [cancelRaf, playingVariantId],
+    [cancelRaf, clearPendingListeners, playingVariantId],
   );
 
   const handleCanonicalSelect = useCallback(
