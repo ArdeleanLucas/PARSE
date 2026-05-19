@@ -133,6 +133,32 @@ def _project_speakers(project_root: Path) -> list[str]:
     return []
 
 
+def _apply_speaker_filter(
+    project_speakers: list[str],
+    speaker_filter: Iterable[str],
+) -> list[str]:
+    """Restrict ``project_speakers`` to entries in ``speaker_filter``.
+
+    Order from ``project.json`` is preserved (downstream metadata.speakers,
+    annotation iteration, and form emission all key off the returned list).
+    Raises ``ValueError`` if any requested speaker is not in the workspace —
+    callers ship curated subsets and a typo should fail loudly rather than
+    silently produce a wrong export.
+    """
+    requested = [str(s).strip() for s in speaker_filter if str(s).strip()]
+    if not requested:
+        return list(project_speakers)
+    project_set = set(project_speakers)
+    missing = [s for s in requested if s not in project_set]
+    if missing:
+        raise ValueError(
+            f"--speakers includes entries not in project.json: {missing}. "
+            f"Workspace speakers: {sorted(project_set)}"
+        )
+    requested_set = set(requested)
+    return [s for s in project_speakers if s in requested_set]
+
+
 def _tagged_concept_ids(payload: Mapping[str, Any], tag_id: str) -> set[str]:
     concept_tags = payload.get("concept_tags")
     if not isinstance(concept_tags, Mapping):
@@ -581,6 +607,7 @@ def build_review_data(
     workspace: Path,
     tag_id: str = DEFAULT_TAG_ID,
     contact_config: Path | None = None,
+    speaker_filter: Iterable[str] | None = None,
 ) -> tuple[dict[str, Any], list[tuple[str, dict[str, Any]]]]:
     """Return ``(review_data_payload, clip_plan)``.
 
@@ -594,8 +621,14 @@ def build_review_data(
     ``<workspace>/parse-enrichments.json`` and ``contact_config`` when those
     sources carry data; otherwise the exporter falls back to the legacy
     null / zero / "?" defaults.
+
+    When ``speaker_filter`` is non-empty, only those speakers appear in the
+    output (project.json order preserved). Used by callers shipping a curated
+    subset of speakers to the review_tool without modifying the workspace.
     """
     speakers = _project_speakers(workspace)
+    if speaker_filter is not None:
+        speakers = _apply_speaker_filter(speakers, speaker_filter)
     concepts_csv = workspace / "concepts.csv"
     if not concepts_csv.exists():
         raise FileNotFoundError(f"concepts.csv not found at {concepts_csv}")
@@ -912,6 +945,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "to this script. Pass an explicit path or set to /dev/null to skip."
         ),
     )
+    parser.add_argument(
+        "--speakers",
+        nargs="+",
+        default=None,
+        metavar="SPEAKER",
+        help=(
+            "Restrict the export to this set of speakers (project.json order is "
+            "preserved). Errors if any name is not in the workspace. Omit to "
+            "export every speaker. Use to ship a curated review_tool subset "
+            "without mutating the workspace."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -929,11 +974,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: workspace not found: {workspace}", file=sys.stderr)
         return 2
 
-    review_data, clip_plan = build_review_data(
-        workspace=workspace,
-        tag_id=args.tag_id,
-        contact_config=contact_config,
-    )
+    try:
+        review_data, clip_plan = build_review_data(
+            workspace=workspace,
+            tag_id=args.tag_id,
+            contact_config=contact_config,
+            speaker_filter=args.speakers,
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     summary = write_outputs(
         workspace=workspace,
         out_dir=out_dir,
