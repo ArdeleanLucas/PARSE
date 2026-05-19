@@ -18,6 +18,8 @@ from export_review_data import (
     DEFAULT_TAG_ID,
     LEGACY_SCHEMA_VERSION,
     _crosstier_text,
+    _stem_label,
+    _variant_letter,
     build_review_data,
     build_review_data_anchored,
     write_outputs,
@@ -961,6 +963,97 @@ class LegacyAnchoredTests(unittest.TestCase):
         # Speaker filter applied: Kalh01 excluded.
         forms = review_data["concepts"][0]["forms"]
         self.assertEqual([f["speaker"] for f in forms], ["Fail01"])
+
+
+class StemLabelParenStrippingTests(unittest.TestCase):
+    """MC-415-B: _stem_label must strip arbitrary parenthetical qualifiers, not
+    only single-token variant suffixes, so anchored matching reaches legacy
+    glosses like 'egg' / 'fly' / 'you' that PARSE carries as 'egg (e.g., chicken)' etc."""
+
+    def test_strips_meaning_qualifier_with_punctuation(self) -> None:
+        self.assertEqual(_stem_label("egg (e.g., chicken)"), "egg")
+        self.assertEqual(_stem_label("fly (n.)"), "fly")
+        self.assertEqual(_stem_label("you (sg.)"), "you")
+        self.assertEqual(_stem_label("you (pl.)"), "you")
+        self.assertEqual(_stem_label("to knock (at the door)"), "to knock")
+        self.assertEqual(
+            _stem_label("hard (like a stone, opposite of soft 'nerm')"),
+            "hard",
+        )
+
+    def test_strips_chained_qualifier_then_variant(self) -> None:
+        # PARSE issue #529 produces chained suffixes like 'egg (e.g., chicken) (A)'.
+        # Both layers must fold away so the gloss matches legacy 'egg'.
+        self.assertEqual(_stem_label("egg (e.g., chicken) (A)"), "egg")
+        self.assertEqual(_stem_label("long (thing) (B)"), "long")
+
+    def test_preserves_simple_alphanumeric_variant_behaviour(self) -> None:
+        # MC-415-A behaviour stays intact for plain variant suffixes.
+        self.assertEqual(_stem_label("dog (A)"), "dog")
+        self.assertEqual(_stem_label("big (F)"), "big")
+        self.assertEqual(_stem_label("dog"), "dog")
+        self.assertEqual(_stem_label(""), "")
+
+    def test_variant_letter_unchanged_by_broadening(self) -> None:
+        # _variant_letter uses the narrow regex on purpose so meaning
+        # qualifiers don't surface as bogus variant codes.
+        self.assertEqual(_variant_letter("egg (e.g., chicken) (A)"), "A")
+        self.assertEqual(_variant_letter("egg (e.g., chicken)"), "")
+        self.assertEqual(_variant_letter("dog (A)"), "A")
+        self.assertEqual(_variant_letter("big (F)"), "F")
+        self.assertEqual(_variant_letter("dog"), "")
+
+    def test_anchored_recovers_legacy_egg_via_paren_qualifier_strip(self) -> None:
+        """Regression guard for the 2026-05-19 deploy: 'egg' was unmatched
+        because PARSE carried 'egg (e.g., chicken)' and the old narrow regex
+        couldn't fold the qualifier away."""
+        with TemporaryDirectory() as tmp:
+            workspace = _make_workspace(
+                Path(tmp),
+                concepts=[
+                    {"id": "1", "concept_en": "egg (e.g., chicken)", "source_item": "141", "source_survey": "JBIL"},
+                    {"id": "2", "concept_en": "egg (e.g., chicken) (A)", "source_item": "141", "source_survey": "JBIL"},
+                ],
+                speakers={
+                    "Fail01": {
+                        "concept_intervals": [
+                            {"concept_id": "1", "start": 100.0, "end": 100.6}
+                        ],
+                        "tagged_ids": ["1"],
+                        "ipa_intervals": [
+                            {"start": 100.0, "end": 100.6, "text": "hek", "conceptId": "1"}
+                        ],
+                        "ortho_intervals": [
+                            {"start": 100.0, "end": 100.6, "text": "هێک", "conceptId": "1"}
+                        ],
+                    }
+                },
+            )
+            anchor = _write_legacy_anchor(
+                Path(tmp),
+                concepts=[
+                    {
+                        "concept_id": "141",
+                        "concept_en": "egg",
+                        "arabic": {"form": "بيض", "ipa": "bajd"},
+                        "persian": {"form": "تخم مرغ", "ipa": ""},
+                        "forms": [{"speaker": "Fail01", "source": "JBIL"}],
+                    }
+                ],
+            )
+            review_data, _ = build_review_data_anchored(
+                workspace=workspace,
+                legacy_anchor=anchor,
+            )
+
+        self.assertEqual(review_data["concepts"][0]["concept_en"], "egg")
+        # 'egg' is no longer in unmatched_legacy.
+        self.assertNotIn("egg", review_data["metadata"]["source"]["unmatched_legacy_concepts"])
+        # Speaker's form is populated, not the legacy-null empty form.
+        form = review_data["concepts"][0]["forms"][0]
+        self.assertEqual(form["ipa"], "hek")
+        self.assertEqual(form["ortho"], "هێک")
+        self.assertEqual(form["audio_path"], "audio/Fail01/JBIL_141_A_egg_Fail01.wav")
 
 
 if __name__ == "__main__":

@@ -66,14 +66,41 @@ def _empty_enrichments() -> dict[str, dict[str, Any]]:
     return {"cognate_sets": {}, "similarity": {}, "borrowing_flags": {}}
 
 _VARIANT_SUFFIX_RE = re.compile(r"\s*\(([A-Za-z0-9]+)\)\s*$")
+_TRAILING_PAREN_RE = re.compile(r"\s*\([^)]*\)\s*$")
 _FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def _stem_label(label: str) -> str:
-    return _VARIANT_SUFFIX_RE.sub("", str(label or "").strip()).strip()
+    """Return the canonical gloss of ``label`` with trailing parens stripped.
+
+    PARSE's concepts.csv carries two kinds of trailing parenthetical:
+
+    1. **Variant suffix** — alphanumeric token, e.g. ``"dog (A)"``, ``"big (F)"``.
+    2. **Meaning qualifier** — free text, e.g. ``"egg (e.g., chicken)"``,
+       ``"fly (n.)"``, ``"you (sg.)"``, ``"to knock (at the door)"``. The
+       legacy review_tool's curated 82-concept list keys by the bare gloss
+       (``"egg"``, ``"fly"``, ``"you"``), so anchored-mode matching has to
+       fold both kinds of suffix away.
+
+    Strips parentheticals iteratively so chained suffixes like
+    ``"egg (e.g., chicken) (A)"`` collapse to ``"egg"``. Returns the input
+    unchanged when no trailing paren is present.
+    """
+    text = str(label or "").strip()
+    while True:
+        stripped = _TRAILING_PAREN_RE.sub("", text).strip()
+        if not stripped or stripped == text:
+            break
+        text = stripped
+    return text
 
 
 def _variant_letter(label: str) -> str:
+    """Return the variant code ``A``/``B``/``F`` from ``"big (A)"`` etc.
+
+    Deliberately uses the narrow alphanumeric-only regex so meaning qualifiers
+    (``"egg (e.g., chicken)"``) are NOT mistaken for a variant code.
+    """
     match = _VARIANT_SUFFIX_RE.search(str(label or "").strip())
     return match.group(1) if match else ""
 
