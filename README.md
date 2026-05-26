@@ -152,5 +152,9 @@ PARSE was developed for a **Southern Kurdish dialect phylogenetics thesis** at t
 
 See [Research Context](docs/research-context.md) for full citation guidance and research framing.
 
+### Talks & Presentations
+
+- **AI as a scout, not a judge: PARSE & Southern Kurdish dialect phylogenetics** (2026) — 15-minute talk demonstrating PARSE in an active thesis workflow. [Slides](https://ardeleanlucas.github.io/parse-ai-talk/) · [Repository](https://github.com/ArdeleanLucas/parse-ai-talk)
+
 ## License
 [MIT License](LICENSE)
