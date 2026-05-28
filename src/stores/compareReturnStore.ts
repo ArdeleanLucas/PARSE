@@ -9,7 +9,7 @@ import { create } from "zustand";
  * - `conceptId` drives `ConceptSidebar` selection (the numeric id ParseUI
  *   stores in its local `conceptId` state).
  * - `conceptKey` is the semantic identifier (`concept.key`); it is what
- *   ParseUI's `selectedConceptKey` state holds and what survives merges /
+ *   ParseUI's derived `selectedConceptKey` holds and what survives merges /
  *   variant resolution.
  * - `expandedSpeaker` is the speaker row that was expanded in the Speaker
  *   Forms table at the moment of click.

@@ -1,8 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import type { ConceptEntry } from '../api/types';
-import { findConceptByUnderlyingKey, groupConceptEntries } from './conceptGrouping';
+import { buildRealizationKey, findConceptByUnderlyingKey, groupConceptEntries, parseRealizationKey } from './conceptGrouping';
 
 const untagged = () => 'untagged' as const;
+
+
+describe('realization keys', () => {
+  it('formats and parses per-realization keys', () => {
+    const key = buildRealizationKey('247', 1);
+
+    expect(key).toBe('247:1');
+    expect(parseRealizationKey(key)).toEqual({ conceptId: '247', intervalIndex: 1 });
+  });
+
+  it('parses concept ids that contain colons by splitting at the final colon', () => {
+    expect(parseRealizationKey('source:JBIL:79:0')).toEqual({ conceptId: 'source:JBIL:79', intervalIndex: 0 });
+  });
+
+  it('returns null for empty or malformed keys', () => {
+    expect(parseRealizationKey(null)).toBeNull();
+    expect(parseRealizationKey('')).toBeNull();
+    expect(parseRealizationKey('247:not-a-number')).toBeNull();
+  });
+});
 
 describe('groupConceptEntries', () => {
   it('groups sibling concepts by source_item and derives the bare variant stem', () => {
