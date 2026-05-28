@@ -12,6 +12,14 @@ concept identity = (source_survey, source_item, canonical base label)
 
 Variant letters are computed when PARSE renders a speaker's intervals. Two different speakers can each have one elicitation of `big` and both see the bare label. A single speaker with multiple intervals on the same `concept_id` sees `A`, `B`, and later letters according to interval start-time order. The letter is not stored in `concepts.csv`, annotation JSON, or tags.
 
+## Known regression — default-mode export coverage (added 2026-05-28)
+
+Issue [#562](https://github.com/ArdeleanLucas/PARSE/issues/562) records a default-mode review export regression found after the MC-418 release-note PR merged. Against the canonical workspace, default-mode export currently produces 0% IPA coverage, 0% Arabic/Persian contact-reference forms, 17 duplicate `concept_en` entries, and 4 extra speakers compared with the anchored-mode reviewer output.
+
+MC-422 is in flight to repair the default-mode exporter and close the sub-bug catalog in #562. Until MC-422 closes, reviewer deployments must continue using anchored-mode export output and must not ship default-mode output to `review_tool` main.
+
+The currently deployed `review_tool` HEAD `2ac21dd` (MC-415-D anchored state) remains the active reviewer-facing build. As of this note, anchored-mode export remains available through the deprecated `--legacy-anchor` CLI surface in `python/export_review_data.py`; treat that path as the safe fallback until MC-422 replaces it.
+
 ## Task and PR inventory
 
 **MC Task:** MC-418 — Concept identity refactor  
@@ -29,7 +37,7 @@ Variant letters are computed when PARSE renders a speaker's intervals. Two diffe
 | MC-418-F | [#554](https://github.com/ArdeleanLucas/PARSE/pull/554) | Merged | Migration script core and issue #541 prefix handling. |
 | MC-418-G | [#556](https://github.com/ArdeleanLucas/PARSE/pull/556) | Merged | Migration verification, idempotence, MCP wrapper, and Fail01 regression. |
 | MC-418-H | [#548](https://github.com/ArdeleanLucas/PARSE/pull/548) | Merged | `export_review_data` MCP/chat tool exposure for issue #533. |
-| MC-418-I | [#558](https://github.com/ArdeleanLucas/PARSE/pull/558) | Merged | `--legacy-anchor` retirement and MC-415-C exporter-strip removal for issue #537. |
+| MC-418-I | [#558](https://github.com/ArdeleanLucas/PARSE/pull/558) | Merged | `--legacy-anchor` deprecation path and MC-415-C exporter-strip removal for issue #537. |
 | MC-418-J | [#559](https://github.com/ArdeleanLucas/PARSE/pull/559) | Merged | These release notes and board parent close-out. |
 | MC-418-K | [#557](https://github.com/ArdeleanLucas/PARSE/pull/557) | Merged | Post-live-run migration fix: canonicalize standalone `(X)` rows and re-key `survey-overlap.json`. |
 
@@ -98,7 +106,7 @@ MC-420 is closed with this release because the only board sublane present at clo
 | Deleting a concept row | Error copy referred to variants in a way that implied a duplicate-row workflow. | Error copy says the canonical concept row is annotated and cannot be deleted. |
 | Lexeme-note variant parsing | Bare-letter stripping covered only `[A-D]`. | Bare-letter stripping covers `[A-Z]` for cue files with later variants. |
 | Cross-survey gloss normalization | Some parenthetical variants, such as `big (A)`, survived normalization. | Shared canonicalization strips stored variant suffixes while preserving true clarifier parentheses. |
-| `export_review_data --legacy-anchor` | Legacy anchor mode remained a live workaround. | The flag is deprecated with a warning; default export handles migrated workspaces. |
+| `export_review_data --legacy-anchor` | Legacy anchor mode remained a live workaround. | The flag is deprecated with a warning; default export was expected to handle migrated workspaces, but [#562 shows this premise is currently false for reviewer deployments](#known-regression--default-mode-export-coverage-added-2026-05-28). |
 
 ### Clarifier parentheses are intentionally not stripped
 
