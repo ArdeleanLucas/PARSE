@@ -484,6 +484,50 @@ def _extract_form_from_contact_entry(entry: Any) -> str:
     return ""
 
 
+def _contact_lookup_keys(concept_id: str, label: str) -> tuple[str, ...]:
+    """Ordered direct keys for contact-language concept maps.
+
+    Live caches have appeared under both full labels (``"egg (e.g., chicken)"``)
+    and canonical bare labels (``"egg"``). Try the explicit id/label first for
+    backward compatibility, then the exporter canonicalizers before falling back
+    to a map scan by canonical equality.
+    """
+
+    seen: set[str] = set()
+    keys: list[str] = []
+    for candidate in (concept_id, label, strip_clarifier(label), _stem_label(label)):
+        key = str(candidate or "").strip()
+        if key and key not in seen:
+            seen.add(key)
+            keys.append(key)
+    return tuple(keys)
+
+
+def _contact_fallback_key(concepts: Mapping[str, Any], label: str) -> str | None:
+    """Find a deterministic same-canonical-label cache key, avoiding substrings."""
+
+    base = (
+        strip_clarifier(label).strip()
+        or _stem_label(label).strip()
+        or str(label or "").strip()
+    ).casefold()
+    if not base:
+        return None
+    matches = [
+        str(key)
+        for key in concepts
+        if (
+            strip_clarifier(str(key)).strip()
+            or _stem_label(str(key)).strip()
+            or str(key).strip()
+        ).casefold()
+        == base
+    ]
+    if not matches:
+        return None
+    return sorted(matches, key=lambda key: (-len(key), key))[0]
+
+
 def _contact_forms_for_concept(
     contact_langs: Mapping[str, Mapping[str, Any]],
     concept_id: str,
@@ -494,10 +538,12 @@ def _contact_forms_for_concept(
     PARSE's contact-lexeme fetcher keys ``concepts`` by ``concept_en`` label
     (confirmed by ``python/compare/contact_lexeme_fetcher.py``'s ``_load_concepts``
     + merge loop). We still try ``concept_id`` first as a defensive fallback in
-    case a future provider keys by id; label is the authoritative path. PARSE
-    does not currently store a separate IPA for contact-language forms, so
-    ``ipa`` stays empty — populating it is a fetcher-side change, not an export
-    change.
+    case a future provider keys by id. Live post-MC-418 caches can also key a
+    concept by a canonical bare label while ``concepts.csv`` carries a semantic
+    clarifier (or vice versa), so direct lookup falls back to canonical-label
+    equality rather than substring matching. PARSE does not currently store a
+    separate IPA for contact-language forms, so ``ipa`` stays empty — populating
+    it is a fetcher-side change, not an export change.
     """
     out: dict[str, dict[str, str]] = {
         "arabic": {"form": "", "ipa": ""},
@@ -511,9 +557,11 @@ def _contact_forms_for_concept(
         concepts = lang_entry.get("concepts")
         if not isinstance(concepts, Mapping):
             continue
-        for key in (concept_id, label):
-            if not key:
-                continue
+        lookup_keys = list(_contact_lookup_keys(concept_id, label))
+        fallback_key = _contact_fallback_key(concepts, label)
+        if fallback_key and fallback_key not in lookup_keys:
+            lookup_keys.append(fallback_key)
+        for key in lookup_keys:
             form = _extract_form_from_contact_entry(concepts.get(key))
             if form:
                 out[legacy_key] = {"form": form, "ipa": ""}
@@ -1220,10 +1268,9 @@ def build_review_data(
         entry_clip_plan_by_speaker: dict[str, tuple[str, dict[str, Any]]] = {}
         for speaker in speakers:
             payload = annotation_payloads.get(speaker, {})
-            tagged_for_speaker = thesis_ids_by_speaker.get(speaker, set())
             intervals = _concept_intervals_by_id(payload).get(concept_id, [])
 
-            if concept_id not in tagged_for_speaker or not intervals:
+            if not intervals:
                 forms.append(
                     _empty_form(
                         speaker,
