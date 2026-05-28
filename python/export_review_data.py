@@ -65,7 +65,7 @@ def _empty_enrichments() -> dict[str, dict[str, Any]]:
     """
     return {"cognate_sets": {}, "similarity": {}, "borrowing_flags": {}}
 
-_VARIANT_SUFFIX_RE = re.compile(r"\s*\(([A-Za-z0-9]+)\)\s*$")
+_REVIEW_VARIANT_CODE_RE = re.compile(r"\s*\(([A-Za-z0-9]+)\)\s*$")
 _TRAILING_PAREN_RE = re.compile(r"\s*\([^)]*\)\s*$")
 _LEADING_NUMBER_PREFIX_RE = re.compile(r"^\s*\d[\d.]*\s+")
 _FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -113,7 +113,7 @@ def _variant_letter(label: str) -> str:
     Deliberately uses the narrow alphanumeric-only regex so meaning qualifiers
     (``"egg (e.g., chicken)"``) are NOT mistaken for a variant code.
     """
-    match = _VARIANT_SUFFIX_RE.search(str(label or "").strip())
+    match = _REVIEW_VARIANT_CODE_RE.search(str(label or "").strip())
     return match.group(1) if match else ""
 
 

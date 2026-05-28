@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import csv
 import json
-import re
 from datetime import datetime, timezone
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from concept_canonical import variant_stem as _variant_stem, variant_suffix as _variant_suffix
 from concept_source_item import read_concepts_csv_rows, write_concepts_csv_rows
 from survey_overlap import load_survey_overlap_state, update_survey_overlap_state
 from canonical_lexemes import copy_canonical_references
-
-_VARIANT_SUFFIX_RE = re.compile(r"\(([A-Z]|\d+)\)\s*$")
 
 
 class ConceptDuplicateError(Exception):
@@ -39,15 +37,6 @@ class ConceptDeleteError(Exception):
 def _numeric_id(value: object) -> str:
     text = str(value or "").strip()
     return text if text.isdigit() else ""
-
-
-def _variant_suffix(label: str) -> str:
-    match = _VARIANT_SUFFIX_RE.search(str(label or "").strip())
-    return match.group(1) if match else ""
-
-
-def _variant_stem(label: str) -> str:
-    return _VARIANT_SUFFIX_RE.sub("", str(label or "").strip()).strip()
 
 
 def _backup_timestamp(now: datetime | None = None) -> str:

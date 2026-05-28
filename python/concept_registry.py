@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from concept_canonical import label_key
 from concept_source_item import concept_row_from_item, read_concepts_csv_rows, row_value, write_concepts_csv_rows
 
 
@@ -17,7 +18,7 @@ class ConceptRegistry:
 
 
 def concept_label_key(label: str) -> str:
-    return " ".join(str(label or "").strip().split()).casefold()
+    return label_key(label)
 
 
 def _normalize_integer_concept_id(value: object) -> str:

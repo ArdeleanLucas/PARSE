@@ -21,12 +21,12 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence
 
+from concept_canonical import BARE_VARIANT_RE as _TRAILING_VARIANT_PATTERN
 
 # Match leading Audition cue ids in "(1.1)- label", "[1.1]- label", or "9- label" form.
 _PAREN_ID_PATTERN = re.compile(r"^\s*\(\s*([0-9]+(?:\.[0-9]+)*)\s*\)\s*[-\u2013\u2014:]?\s*(.*)$")
 _BRACKET_ID_PATTERN = re.compile(r"^\s*\[\s*([0-9]+(?:\.[0-9]+)*)\s*\]\s*[-\u2013\u2014:]?\s*(.*)$")
 _PLAIN_ID_PATTERN = re.compile(r"^\s*([0-9]+)\s*[-\u2013\u2014:]\s*(.*)$")
-_TRAILING_VARIANT_PATTERN = re.compile(r"\s+([A-D])\s*$")
 
 
 @dataclass

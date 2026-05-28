@@ -15,22 +15,21 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from canonical_lexemes import load_canonical_lexemes, load_enrichments
+from concept_canonical import variant_stem, variant_suffix
 from concept_source_item import read_concepts_csv_rows, row_value
 from survey_overlap import concept_survey_links_for_row, load_survey_overlap_state, normalize_survey_id
 
-_VARIANT_SUFFIX_RE = re.compile(r"\s*\(([A-Z]|\d+)\)\s*$")
 _WS_RE = re.compile(r"\s+")
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 BUCKET_SEP = "\u0000"
 
 
 def _stem(label: str) -> str:
-    return _VARIANT_SUFFIX_RE.sub("", str(label or "").strip()).strip()
+    return variant_stem(label)
 
 
 def _variant_label(label: str) -> str:
-    match = _VARIANT_SUFFIX_RE.search(str(label or "").strip())
-    return match.group(1) if match else ""
+    return variant_suffix(label)
 
 
 def _stem_key(label: str) -> str:

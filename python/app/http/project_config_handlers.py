@@ -219,7 +219,12 @@ def build_concepts_import_response(
             target_idx = by_label[up_label.lower()]
         else:
             canonical_key = normalize_cross_survey_gloss(up_label)
-            candidates = canonical_index.get(canonical_key, []) if canonical_key else []
+            source_key = _source_identity_key(source_item_raw, source_survey_raw)
+            # Same source identity with a different variant label is handled by
+            # the explicit duplicate-source / allow_variant path below; do not
+            # let canonical gloss matching silently collapse sibling rows.
+            source_identity_collision = source_key is not None and bool(by_source_identity.get(source_key))
+            candidates = [] if source_identity_collision else (canonical_index.get(canonical_key, []) if canonical_key else [])
             if len(candidates) == 1 and survey_norm and source_item_raw:
                 target_cid = candidates[0]
                 target_idx = by_id.get(target_cid)
