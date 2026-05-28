@@ -33,6 +33,7 @@ export interface AnnotateViewProps {
   surveyColorCodingEnabled?: boolean;
   activeSpeaker?: string;
   conceptSurveyKey?: string;
+  selectedRealizationKey?: string | null;
   onSurveyChoiceChange?: (speaker: string, conceptKey: string, surveyId: string) => void;
   onDeleteConcept?: () => void;
 }

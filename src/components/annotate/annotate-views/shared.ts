@@ -21,13 +21,25 @@ export function formatPlaybackTime(t: number): string {
 export function findAnnotationForConcept(
   record: AnnotationRecord | null | undefined,
   concept: Concept,
+  options?: { focusedIntervalIndex?: number },
 ): AnnotationLookup {
   if (!record) {
     return { conceptInterval: null, ipaInterval: null, orthoInterval: null, directOrthoInterval: null };
   }
 
   const conceptIntervals = record.tiers.concept?.intervals ?? [];
-  const conceptInterval = conceptIntervals.find((interval) => conceptMatchesIntervalText(concept, interval.concept_id ?? null)) ?? null;
+  const matchingConceptIntervals = conceptIntervals
+    .filter((interval) => conceptMatchesIntervalText(concept, interval.concept_id ?? null))
+    .slice()
+    .sort((a, b) => a.start - b.start);
+  const focusedIntervalIndex = options?.focusedIntervalIndex;
+  const conceptInterval = (
+    typeof focusedIntervalIndex === "number" &&
+    focusedIntervalIndex >= 0 &&
+    focusedIntervalIndex < matchingConceptIntervals.length
+      ? matchingConceptIntervals[focusedIntervalIndex]
+      : matchingConceptIntervals[0]
+  ) ?? null;
 
   if (!conceptInterval) {
     return { conceptInterval: null, ipaInterval: null, orthoInterval: null, directOrthoInterval: null };

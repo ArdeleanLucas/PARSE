@@ -2087,6 +2087,7 @@ export function ParseUI() {
               surveyColorCodingEnabled={surveyColorCodingEnabled}
               activeSpeaker={selectedSpeakers[0]}
               conceptSurveyKey={activeResolvedSurvey.conceptKey}
+              selectedRealizationKey={selectedRealizationKey}
               onSurveyChoiceChange={handleSurveyChoiceChange}
               onDeleteConcept={() => {
                 setDeleteModalError(null);

@@ -143,6 +143,9 @@ vi.mock('../../stores/playbackStore', () => {
     currentTime: mockCurrentTime,
     duration: mockDuration,
     selectedRegion: mockSelectedRegion,
+    pendingSeek: null,
+    volume: 1,
+    setVolume: vi.fn(),
   });
   (usePlaybackStore as unknown as { setState: (...args: unknown[]) => void }).setState = vi.fn();
   return { usePlaybackStore };
@@ -274,8 +277,28 @@ describe('AnnotateView', () => {
     );
   }
 
+  function getIpaInput() {
+    return screen.getByPlaceholderText('Enter IPA…') as HTMLInputElement;
+  }
+
   function getOrthographicInput() {
     return screen.getByPlaceholderText('Enter orthographic form…') as HTMLInputElement;
+  }
+
+  function seedFail01HeadRealizations() {
+    mockRecord = makeRecord([
+      { conceptText: 'head', conceptId: '247', ipa: 'sar', ortho: 'سەر', start: 727.487, end: 728.211 },
+      { conceptText: 'head', conceptId: '247', ipa: 'kapul-b', ortho: 'کەپووڵ ب', start: 731.934, end: 732.612 },
+      { conceptText: 'head', conceptId: '247', ipa: 'kapul-c', ortho: 'کەپووڵ ج', start: 731.95, end: 732.705 },
+    ]);
+  }
+
+  function renderHeadAnnotateView(props: Partial<React.ComponentProps<typeof AnnotateView>> = {}) {
+    return renderWaterAnnotateView({
+      concept: { id: 247, key: '247', name: 'head' },
+      selectedRealizationKey: '247:0',
+      ...props,
+    });
   }
 
   function openQuickRetimeMenu(selection = { start: 14.2, end: 15.31 }) {
@@ -289,6 +312,86 @@ describe('AnnotateView', () => {
     { id: 3, key: 'brow', name: 'brow' },
   ];
 
+
+  it('pivots the IPA editor when selectedRealizationKey changes to interval B', async () => {
+    seedFail01HeadRealizations();
+
+    const { rerender } = renderHeadAnnotateView({ selectedRealizationKey: '247:0' });
+
+    expect(getIpaInput().value).toBe('sar');
+    fireEvent.change(getIpaInput(), { target: { value: 'unsaved ipa draft' } });
+    expect(getIpaInput().value).toBe('unsaved ipa draft');
+
+    rerender(
+      <AnnotateView
+        concept={{ id: 247, key: '247', name: 'head' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+        selectedRealizationKey="247:1"
+      />,
+    );
+
+    await waitFor(() => expect(getIpaInput().value).toBe('kapul-b'));
+  });
+
+  it('pivots the orthographic editor when selectedRealizationKey changes to interval B', async () => {
+    seedFail01HeadRealizations();
+
+    const { rerender } = renderHeadAnnotateView({ selectedRealizationKey: '247:0' });
+
+    expect(getOrthographicInput().value).toBe('سەر');
+
+    rerender(
+      <AnnotateView
+        concept={{ id: 247, key: '247', name: 'head' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+        selectedRealizationKey="247:1"
+      />,
+    );
+
+    await waitFor(() => expect(getOrthographicInput().value).toBe('کەپووڵ ب'));
+  });
+
+  it('pivots timestamp editors when selectedRealizationKey changes to interval C', async () => {
+    seedFail01HeadRealizations();
+
+    const { rerender } = renderHeadAnnotateView({ selectedRealizationKey: '247:0' });
+
+    expect((screen.getByTestId('lexeme-start') as HTMLInputElement).value).toBe('727.487');
+    expect((screen.getByTestId('lexeme-end') as HTMLInputElement).value).toBe('728.211');
+
+    rerender(
+      <AnnotateView
+        concept={{ id: 247, key: '247', name: 'head' }}
+        speaker="Fail01"
+        totalConcepts={2}
+        onPrev={() => {}}
+        onNext={() => {}}
+        audioUrl="/Fail01.wav"
+        selectedRealizationKey="247:2"
+      />,
+    );
+
+    await waitFor(() => expect((screen.getByTestId('lexeme-start') as HTMLInputElement).value).toBe('731.950'));
+    expect((screen.getByTestId('lexeme-end') as HTMLInputElement).value).toBe('732.705');
+  });
+
+  it('ignores selectedRealizationKey indices for a different concept', () => {
+    seedFail01HeadRealizations();
+
+    renderHeadAnnotateView({ selectedRealizationKey: '999:1' });
+
+    expect(getIpaInput().value).toBe('sar');
+    expect(getOrthographicInput().value).toBe('سەر');
+    expect((screen.getByTestId('lexeme-start') as HTMLInputElement).value).toBe('727.487');
+  });
 
   it('renders a destructive Delete concept button and calls its handler', () => {
     const onDeleteConcept = vi.fn();
