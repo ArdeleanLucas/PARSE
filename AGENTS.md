@@ -281,7 +281,7 @@ Use these exact invocations in PR validation. Paraphrasing breaks in subtle ways
 | Frontend tests (watch) | `npx vitest` |
 | TypeScript check | `./node_modules/.bin/tsc --noEmit` |
 | Frontend build | `npm run build` |
-| Backend tests (full, two known-baseline failures excluded) | `PYTHONPATH=python python3 -m pytest -q -k 'not test_ortho_section_defaults_cascade_guard and not test_ortho_explicit_override_beats_defaults'` |
+| Backend tests (full) | `PYTHONPATH=python python3 -m pytest python/ -q` |
 | Backend tests (targeted) | `PYTHONPATH=python python3 -m pytest python/path/to/test_*.py -q` |
 | Backend lint (pre-push, parse-back-end mandatory) | `uvx ruff check python/ --select E9,F63,F7,F82` |
 | Server boot smoke (script mode) | `python python/server.py` — must bind without NameError post-PR #139 |
@@ -769,15 +769,15 @@ npx vitest run
 ./node_modules/.bin/tsc --noEmit
 ```
 
-For backend/server changes, also run the relevant `PYTHONPATH=python python3 -m pytest ...` target and `uvx ruff check python/ --select E9,F63,F7,F82` before pushing. Current main after PR #224 validated at **83 files / 514 frontend tests** with clean TypeScript and build; current backend broad selection after PR #229 validated at **977 passed, 2 deselected, 1 warning** plus clean `uvx ruff check python/ --select E9,F63,F7,F82`. If those counts shift, explain why in the PR.
+For backend/server changes, also run the relevant `PYTHONPATH=python python3 -m pytest ...` target and `uvx ruff check python/ --select E9,F63,F7,F82` before pushing. Current main after PR #224 validated at **83 files / 514 frontend tests** with clean TypeScript and build; current backend full sweep after MC-419-A validated at **1733 passed, 6 skipped, 1 warning, 3 subtests passed** plus clean `uvx ruff check python/ --select E9,F63,F7,F82`. If those counts shift, explain why in the PR.
 
 **Full sweep before push for backend-touching PRs.** When a PR adds or modifies any file under `python/`, final verification must include the full backend sweep:
 
 ```bash
-PYTHONPATH=python python3 -m pytest -q -k 'not test_ortho_section_defaults_cascade_guard and not test_ortho_explicit_override_beats_defaults'
+PYTHONPATH=python python3 -m pytest python/ -q
 ```
 
-A narrow `-k` selector is appropriate during iteration, but never as the final pre-push gate. MC-384-Y codifies this after the MC-384-X/Y regression cycle: a narrow selector went green while the broader sweep exposed downstream `test_compute_speaker_ortho.py` failures.
+A narrow `-k` selector is appropriate during iteration, but never as the final pre-push gate. Do not deselect `test_ortho_section_defaults_cascade_guard` or `test_ortho_explicit_override_beats_defaults`: MC-419-A re-ran the full backend sweep in order and proved both tests pass without the old workaround. MC-384-Y codifies the broader principle after the MC-384-X/Y regression cycle: a narrow selector went green while the broader sweep exposed downstream `test_compute_speaker_ortho.py` failures.
 
 ## Baseline Architecture
 
