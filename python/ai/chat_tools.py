@@ -73,6 +73,7 @@ LEGACY_CURATED_MCP_TOOL_NAMES = (
     "import_processed_speaker",
     "csv_only_reimport",
     "revert_csv_reimport",
+    "export_review_data",
     "parse_memory_read",
     "parse_memory_upsert_section",
     "speakers_list",
@@ -117,6 +118,7 @@ WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "export_annotations_textgrid",
     "export_lingpy_tsv",
     "export_nexus",
+    "export_review_data",
     "import_tag_csv",
     "populate_cross_survey_links",
     "peaks_generate",
@@ -483,6 +485,7 @@ from ai.tools.export_tools import (
     export_annotations_textgrid as tool_export_annotations_textgrid,
     export_lingpy_tsv as tool_export_lingpy_tsv,
     export_nexus as tool_export_nexus,
+    export_review_data as tool_export_review_data,
 )
 from ai.tools.job_status_tools import (
     JOB_STATUS_TOOL_SPECS,
@@ -1291,6 +1294,9 @@ class ParseChatTools:
 
     def _tool_export_annotations_textgrid(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_export_annotations_textgrid(self, args)
+
+    def _tool_export_review_data(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        return tool_export_review_data(self, args)
 
     def _tool_phonetic_rules_apply(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_phonetic_rules_apply(self, args)

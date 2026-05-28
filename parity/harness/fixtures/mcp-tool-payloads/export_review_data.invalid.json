@@ -1,0 +1,6 @@
+{
+  "workspace": "${WORKSPACE_ROOT}",
+  "out": "${WORKSPACE_ROOT}/exports/review-tool-invalid",
+  "speakers": ["MissingSpeaker"],
+  "skip_audio": true
+}
