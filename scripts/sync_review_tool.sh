@@ -10,6 +10,7 @@
 #
 # Flags forwarded to export_review_data.py (env-gated):
 #   SKIP_AUDIO=1            → --skip-audio
+#   SPEAKERS="Fail01 Saha01" → --speakers Fail01 Saha01
 #
 # Does NOT auto-push. Prints next steps on success.
 
@@ -49,6 +50,12 @@ fi
 
 if [[ "${SKIP_AUDIO:-0}" == "1" ]]; then
   EXPORT_ARGS+=(--skip-audio)
+fi
+
+if [[ -n "${SPEAKERS:-}" ]]; then
+  # SPEAKERS is space-separated, e.g. SPEAKERS="Fail01 Saha01 Mand01".
+  # Unquoted expansion is intentional: each token becomes one --speakers arg.
+  EXPORT_ARGS+=(--speakers $SPEAKERS)
 fi
 
 echo "Running: python3 $REPO_ROOT/python/export_review_data.py ${EXPORT_ARGS[*]}"
