@@ -615,70 +615,70 @@ def export_annotations_textgrid(tools: "ParseChatTools", args: Dict[str, Any]) -
 
 
 def _review_export_invalid_args(message: str) -> Dict[str, Any]:
-        return {"ok": False, "error": message, "error_kind": "invalid_args"}
+    return {"ok": False, "error": message, "error_kind": "invalid_args"}
 
 
 def export_review_data(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
-        """Export a workspace to the legacy review_tool schema via the chat/MCP surface."""
-        try:
-            from export_review_data import (  # type: ignore[import]
-                DEFAULT_CONTACT_CONFIG_RELATIVE,
-                DEFAULT_TAG_ID,
-                build_review_data,
-                write_outputs,
-            )
-        except Exception as exc:
-            raise ChatToolExecutionError("export_review_data is not importable: {0}".format(exc)) from exc
+    """Export a workspace to the legacy review_tool schema via the chat/MCP surface."""
+    try:
+        from export_review_data import (  # type: ignore[import]
+            DEFAULT_CONTACT_CONFIG_RELATIVE,
+            DEFAULT_TAG_ID,
+            build_review_data,
+            write_outputs,
+        )
+    except Exception as exc:
+        raise ChatToolExecutionError("export_review_data is not importable: {0}".format(exc)) from exc
 
-        workspace_raw = str(args.get("workspace") or "").strip()
-        out_raw = str(args.get("out") or "").strip()
-        if not workspace_raw:
-            return _review_export_invalid_args("workspace is required")
-        if not out_raw:
-            return _review_export_invalid_args("out is required")
+    workspace_raw = str(args.get("workspace") or "").strip()
+    out_raw = str(args.get("out") or "").strip()
+    if not workspace_raw:
+        return _review_export_invalid_args("workspace is required")
+    if not out_raw:
+        return _review_export_invalid_args("out is required")
 
-        workspace = Path(workspace_raw).expanduser().resolve()
-        out_dir = Path(out_raw).expanduser().resolve()
-        if not workspace.exists():
-            return _review_export_invalid_args("workspace path does not exist: {0}".format(workspace_raw))
+    workspace = Path(workspace_raw).expanduser().resolve()
+    out_dir = Path(out_raw).expanduser().resolve()
+    if not workspace.exists():
+        return _review_export_invalid_args("workspace path does not exist: {0}".format(workspace_raw))
 
-        tag_id = str(args.get("tag_id") or DEFAULT_TAG_ID).strip() or DEFAULT_TAG_ID
-        contact_config_raw = str(args.get("contact_config") or "").strip()
-        if contact_config_raw:
-            contact_config = Path(contact_config_raw).expanduser().resolve()
-        else:
-            repo_root = Path(__file__).resolve().parents[3]
-            contact_config = repo_root / DEFAULT_CONTACT_CONFIG_RELATIVE
+    tag_id = str(args.get("tag_id") or DEFAULT_TAG_ID).strip() or DEFAULT_TAG_ID
+    contact_config_raw = str(args.get("contact_config") or "").strip()
+    if contact_config_raw:
+        contact_config = Path(contact_config_raw).expanduser().resolve()
+    else:
+        repo_root = Path(__file__).resolve().parents[3]
+        contact_config = repo_root / DEFAULT_CONTACT_CONFIG_RELATIVE
 
-        speakers_raw = args.get("speakers")
-        speakers = None
-        if isinstance(speakers_raw, list):
-            speakers = [str(speaker).strip() for speaker in speakers_raw if str(speaker).strip()]
+    speakers_raw = args.get("speakers")
+    speakers = None
+    if isinstance(speakers_raw, list):
+        speakers = [str(speaker).strip() for speaker in speakers_raw if str(speaker).strip()]
 
-        try:
-            review_data, clip_plan = build_review_data(
-                workspace=workspace,
-                tag_id=tag_id,
-                contact_config=contact_config,
-                speaker_filter=speakers,
-            )
-        except (FileNotFoundError, ValueError) as exc:
-            return _review_export_invalid_args(str(exc))
-        except Exception as exc:
-            raise ChatToolExecutionError("review_tool export failed: {0}".format(exc)) from exc
+    try:
+        review_data, clip_plan = build_review_data(
+            workspace=workspace,
+            tag_id=tag_id,
+            contact_config=contact_config,
+            speaker_filter=speakers,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        return _review_export_invalid_args(str(exc))
+    except Exception as exc:
+        raise ChatToolExecutionError("review_tool export failed: {0}".format(exc)) from exc
 
-        try:
-            summary = write_outputs(
-                workspace=workspace,
-                out_dir=out_dir,
-                review_data=review_data,
-                clip_plan=clip_plan,
-                skip_audio=bool(args.get("skip_audio", False)),
-            )
-        except Exception as exc:
-            raise ChatToolExecutionError("review_tool output write failed: {0}".format(exc)) from exc
+    try:
+        summary = write_outputs(
+            workspace=workspace,
+            out_dir=out_dir,
+            review_data=review_data,
+            clip_plan=clip_plan,
+            skip_audio=bool(args.get("skip_audio", False)),
+        )
+    except Exception as exc:
+        raise ChatToolExecutionError("review_tool output write failed: {0}".format(exc)) from exc
 
-        return {"ok": True, **summary}
+    return {"ok": True, **summary}
 
 
 EXPORT_TOOL_HANDLERS = {
