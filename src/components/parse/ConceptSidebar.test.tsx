@@ -1683,4 +1683,77 @@ describe('ConceptSidebar', () => {
     });
   });
 
+  describe('right-click → Delete this interval for elicitation chips', () => {
+    const pathOneConcept = {
+      id: 9,
+      key: 'source:SurveyA:head',
+      name: 'head',
+      tag: 'untagged' as const,
+      variants: [
+        { conceptKey: '247', conceptEn: 'head (A)', variantLabel: 'A' },
+        { conceptKey: '511', conceptEn: 'head (B)', variantLabel: 'B' },
+      ],
+    };
+
+    const pathTwoConcept = {
+      id: 247,
+      key: '247',
+      name: 'head',
+      tag: 'untagged' as const,
+      sourceItem: '247',
+    };
+
+    function renderIntervalChips(onDeleteInterval = vi.fn()) {
+      render(
+        <ConceptSidebar
+          query=""
+          onQueryChange={vi.fn()}
+          sortParent="concept"
+          conceptSub="az"
+          sourceSub="time"
+          onSortParentChange={vi.fn()}
+          onConceptSubChange={vi.fn()}
+          onSourceSubChange={vi.fn()}
+          sourceDisabled={false}
+          filteredConcepts={[pathOneConcept, pathTwoConcept]}
+          statusFilter="all"
+          onStatusFilterChange={vi.fn()}
+          selectedTagIds={new Set()}
+          onTagSelectionChange={vi.fn()}
+          tags={[]}
+          activeConceptId={247}
+          activeRealizationKey="247:0"
+          activeSpeaker="Fail01"
+          onConceptSelect={vi.fn()}
+          elicitationVariantLabelsByConceptKey={{ '247': ['A', 'B', 'C'] }}
+          onDeleteInterval={onDeleteInterval}
+        />,
+      );
+      return onDeleteInterval;
+    }
+
+    it('shows Delete this interval only for Path 2 per-interval chips', () => {
+      renderIntervalChips();
+
+      fireEvent.contextMenu(screen.getByRole('button', { name: 'head (C)' }));
+      expect(screen.getByRole('menuitem', { name: /Delete this interval/i })).toBeTruthy();
+
+      fireEvent.mouseDown(document.body);
+      fireEvent.contextMenu(screen.getByTestId('concept-variant-pill-511'));
+      expect(screen.queryByRole('menuitem', { name: /Delete this interval/i })).toBeNull();
+    });
+
+    it('confirms and calls onDeleteInterval with speaker, concept key, and interval index', () => {
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+      const onDeleteInterval = renderIntervalChips();
+
+      fireEvent.contextMenu(screen.getByRole('button', { name: 'head (B)' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /Delete this interval/i }));
+
+      expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Delete this interval'));
+      expect(onDeleteInterval).toHaveBeenCalledWith('Fail01', '247', 1);
+      confirmSpy.mockRestore();
+    });
+  });
+
 });

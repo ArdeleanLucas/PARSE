@@ -87,6 +87,7 @@ interface ConceptSidebarProps {
   onUnmergeConcept?: (concept: SidebarConcept) => void;
   onAddElicitation?: (concept: SidebarConcept) => void;
   onDeleteConcept?: (concept: SidebarConcept) => void;
+  onDeleteInterval?: (speaker: string, conceptKey: string, intervalIndex: number) => void | Promise<void>;
   /**
    * Optional grouped/source-item variant visibility predicate. ParseUI wires this to
    * src/lib/sidebarVisibility.ts so speaker-scope and tag filters are applied to each
@@ -201,6 +202,7 @@ export function ConceptSidebar({
   onUnmergeConcept,
   onAddElicitation,
   onDeleteConcept,
+  onDeleteInterval,
   isConceptVariantVisibleInSidebar,
   hideVariantPills = false,
   scopedToSpeaker = false,
@@ -210,7 +212,7 @@ export function ConceptSidebar({
   actionFeedback = null,
   onDismissActionFeedback,
 }: ConceptSidebarProps) {
-  const [contextMenu, setContextMenu] = useState<{ concept: SidebarConcept; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ concept: SidebarConcept; x: number; y: number; intervalIndex?: number; intervalLabel?: string } | null>(null);
   const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
   const [surveyLinkEditor, setSurveyLinkEditor] = useState<SurveyLinkEditorState | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -670,18 +672,24 @@ export function ConceptSidebar({
                       const realizationKey = buildRealizationKey(concept.key ?? String(concept.id), intervalIndex);
                       const childActive = concept.id === activeConceptId && activeRealizationKey === realizationKey;
                       return (
-                      <VariantChip
-                        as="button"
-                        key={`${concept.key ?? concept.id}:${letter}`}
-                        letter={letter}
-                        dotClassName={tagDot[concept.tag]}
-                        conceptEn={parentName}
-                        aria-label={`${parentName} (${letter})`}
-                        title={`${parentName} (${letter})`}
-                        active={childActive}
-                        onClick={() => onConceptSelect(concept.id, realizationKey)}
-                      />
-                    );
+                        <VariantChip
+                          as="button"
+                          key={`${concept.key ?? concept.id}:${letter}`}
+                          letter={letter}
+                          dotClassName={tagDot[concept.tag]}
+                          conceptEn={parentName}
+                          aria-label={`${parentName} (${letter})`}
+                          title={`${parentName} (${letter})`}
+                          active={childActive}
+                          data-testid={`concept-elicitation-pill-${concept.key ?? concept.id}-${intervalIndex}`}
+                          onClick={() => onConceptSelect(concept.id, realizationKey)}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setContextMenu({ concept, x: event.clientX, y: event.clientY, intervalIndex, intervalLabel: letter });
+                          }}
+                        />
+                      );
                     })}
                   </div>
                 )}
@@ -737,6 +745,23 @@ export function ConceptSidebar({
           >
             + Add elicitation
           </button>
+          {contextMenu.intervalIndex !== undefined && activeSpeaker && contextMenu.concept.key && onDeleteInterval && (
+            <button
+              type="button"
+              role="menuitem"
+              title="Delete only this elicitation interval; the concept row remains"
+              className="block w-full rounded px-2 py-1 text-left text-rose-700 hover:bg-rose-50"
+              onClick={() => {
+                const label = contextMenu.intervalLabel ? ` (${contextMenu.intervalLabel})` : '';
+                if (window.confirm(`Delete this interval${label} for "${contextMenu.concept.name}"? A backup file will be created.`)) {
+                  void onDeleteInterval(activeSpeaker, contextMenu.concept.key as string, contextMenu.intervalIndex as number);
+                }
+                setContextMenu(null);
+              }}
+            >
+              Delete this interval
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"

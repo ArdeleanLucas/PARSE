@@ -20,6 +20,33 @@ export interface ConceptDeleteConflict {
   blocking_speakers: string[];
 }
 
+export interface AnnotationIntervalDeleteRequest {
+  speaker: string;
+  concept_id: string;
+  start: number;
+  end: number;
+}
+
+export interface AnnotationIntervalDeleteResponse {
+  ok: true;
+  speaker: string;
+  concept_id: string;
+  start: number;
+  end: number;
+  removed: Record<"concept" | "ipa" | "ortho" | "ortho_words" | "speaker", number>;
+  backup_path: string;
+  tolerance_sec: number;
+}
+
+export async function deleteAnnotationInterval(
+  payload: AnnotationIntervalDeleteRequest,
+): Promise<AnnotationIntervalDeleteResponse> {
+  return apiFetch<AnnotationIntervalDeleteResponse>(
+    "/api/annotations/intervals/delete",
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
 export async function deleteConcept(conceptId: string): Promise<ConceptDeleteResponse> {
   return apiFetch<ConceptDeleteResponse>(
     `/api/concepts/${encodeURIComponent(conceptId)}`,

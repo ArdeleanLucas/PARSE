@@ -51,6 +51,7 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
         "/api/config",
         "/api/survey-overlap",
         "/api/annotations/{speaker}",
+        "/api/annotations/intervals/delete",
         "/api/annotations/{speaker}/ipa-candidates",
         "/api/annotations/{speaker}/ipa-review/{key}",
         "/api/stt-segments/{speaker}",
@@ -116,6 +117,44 @@ def test_build_openapi_document_omits_removed_concept_duplicate_contract() -> No
 
     assert "/api/concepts/{conceptId}/duplicate" not in spec["paths"]
     assert "ConceptDuplicateResponse" not in spec["components"]["schemas"]
+
+
+def test_build_openapi_document_covers_annotation_interval_delete_contract() -> None:
+    spec = build_openapi_document(base_url="http://127.0.0.1:8766")
+    operation = spec["paths"]["/api/annotations/intervals/delete"]["post"]
+
+    assert operation["operationId"] == "deleteAnnotationInterval"
+    assert operation["requestBody"]["required"] is True
+    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AnnotationIntervalDeleteRequest"
+    }
+    assert set(operation["responses"]) == {"200", "400", "404", "500"}
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AnnotationIntervalDeleteResponse"
+    }
+    assert operation["x-parse"] == {"idempotent": False, "destructive": True, "backup": "<speaker>.parse.json.bak-<UTC>-pre-interval-delete"}
+
+    components = spec["components"]["schemas"]
+    assert components["AnnotationIntervalDeleteRequest"] == {
+        "type": "object",
+        "required": ["speaker", "concept_id", "start", "end"],
+        "properties": {
+            "speaker": {"type": "string"},
+            "concept_id": {"type": "string"},
+            "start": {"type": "number"},
+            "end": {"type": "number"},
+        },
+        "additionalProperties": False,
+    }
+    assert components["AnnotationIntervalDeleteResponse"]["required"] == ["ok", "speaker", "concept_id", "start", "end", "removed", "backup_path", "tolerance_sec"]
+    assert components["AnnotationIntervalDeleteResponse"]["properties"]["removed"] == {"$ref": "#/components/schemas/AnnotationIntervalDeleteRemoved"}
+    assert components["AnnotationIntervalDeleteRemoved"]["properties"] == {
+        "concept": {"type": "integer"},
+        "ipa": {"type": "integer"},
+        "ortho": {"type": "integer"},
+        "ortho_words": {"type": "integer"},
+        "speaker": {"type": "integer"},
+    }
 
 
 def test_build_openapi_document_covers_concept_delete_contract() -> None:
