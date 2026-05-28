@@ -47,6 +47,35 @@ function variantLabelFor(conceptEn: string, index: number): string {
   return match?.[1] ?? match?.[2] ?? fallbackVariantLabel(index);
 }
 
+function letterForVariantRank(rank: number): string {
+  let n = rank;
+  let label = '';
+  do {
+    label = String.fromCharCode('A'.charCodeAt(0) + (n % 26)) + label;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return label;
+}
+
+/**
+ * Assign per-speaker variant letters to intervals for the same concept_id.
+ * Variant letters are computed from start-time rank and returned in input order.
+ */
+export function assignVariantLetters(intervals: ReadonlyArray<{ start: number }>): string[] {
+  if (intervals.length === 0) return [];
+  if (intervals.length === 1) return [''];
+
+  const indexed = intervals.map((interval, index) => ({ start: interval.start, index }));
+  // Break start-time ties by original index so assignment is stable across runtimes.
+  indexed.sort((a, b) => (a.start - b.start) || (a.index - b.index));
+
+  const letters = new Array<string>(intervals.length);
+  indexed.forEach(({ index }, rank) => {
+    letters[index] = letterForVariantRank(rank);
+  });
+  return letters;
+}
+
 function stripTrailingVariantSuffix(label: string): string {
   return label
     .replace(/\s*\(([A-Z]|\d+)\)\s*$/, '')

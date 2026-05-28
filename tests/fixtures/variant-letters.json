@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "description": "Per-speaker variant letter assignment fixture. Consumed by BE (python/test_concept_canonical.py) and FE (src/lib/__tests__/assignVariantLetters.test.ts). Each case: input is an array of {start} objects (input order); expected is an array of letters matching input order.",
+  "cases": [
+    { "name": "empty", "input": [], "expected": [] },
+    { "name": "single", "input": [{ "start": 0.0 }], "expected": [""] },
+    { "name": "two_sorted", "input": [{ "start": 0.0 }, { "start": 5.0 }], "expected": ["A", "B"] },
+    { "name": "two_unsorted", "input": [{ "start": 5.0 }, { "start": 0.0 }], "expected": ["B", "A"] },
+    { "name": "six", "input": [{ "start": 0 }, { "start": 1 }, { "start": 2 }, { "start": 3 }, { "start": 4 }, { "start": 5 }], "expected": ["A", "B", "C", "D", "E", "F"] },
+    { "name": "ties_stable", "input": [{ "start": 1.0 }, { "start": 1.0 }, { "start": 0.5 }], "expected": ["B", "C", "A"] }
+  ]
+}
