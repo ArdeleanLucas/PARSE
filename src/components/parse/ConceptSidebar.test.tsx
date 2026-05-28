@@ -20,6 +20,109 @@ afterEach(() => {
 describe('ConceptSidebar', () => {
 
 
+  it('Path 1: variant chip click emits realization key with interval_index 0', () => {
+    const onConceptSelect = vi.fn();
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={[{
+          id: 32,
+          key: 'source:JBIL:32',
+          name: 'hair',
+          tag: 'confirmed' as const,
+          sourceItem: '32',
+          sourceSurvey: 'JBIL',
+          variants: [
+            { conceptKey: '249', conceptEn: 'hair (men)', variantLabel: 'A', tag: 'confirmed' as const },
+            { conceptKey: '250', conceptEn: 'hair (women)', variantLabel: 'B', tag: 'review' as const },
+          ],
+        }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={32}
+        activeRealizationKey="249:0"
+        onConceptSelect={onConceptSelect}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('concept-variant-pill-250'));
+
+    expect(onConceptSelect).toHaveBeenCalledWith(32, '250:0');
+  });
+
+  it('Path 2: elicitation chip click emits realization key with explicit interval_index', () => {
+    const onConceptSelect = vi.fn();
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={[{ id: 247, key: '247', name: 'head', tag: 'confirmed' as const }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={247}
+        activeRealizationKey="247:0"
+        onConceptSelect={onConceptSelect}
+        elicitationVariantLabelsByConceptKey={{ '247': ['A', 'B', 'C'] }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'head (B)' }));
+
+    expect(onConceptSelect).toHaveBeenCalledWith(247, '247:1');
+  });
+
+  it('Path 2: per-chip active state reflects activeRealizationKey', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={[{ id: 247, key: '247', name: 'head', tag: 'confirmed' as const }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={247}
+        activeRealizationKey="247:1"
+        onConceptSelect={vi.fn()}
+        elicitationVariantLabelsByConceptKey={{ '247': ['A', 'B', 'C'] }}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'head (A)' }).className).not.toContain('bg-indigo-50');
+    expect(screen.getByRole('button', { name: 'head (B)' }).className).toContain('bg-indigo-50');
+    expect(screen.getByRole('button', { name: 'head (C)' }).className).not.toContain('bg-indigo-50');
+  });
+
+
   it('keeps singleton rows to one parent affordance and selects the singleton parent key', () => {
     const onConceptSelect = vi.fn();
     render(
@@ -40,7 +143,7 @@ describe('ConceptSidebar', () => {
         onTagSelectionChange={vi.fn()}
         tags={[]}
         activeConceptId={11}
-        activeConceptKey="single-11"
+        activeRealizationKey="single-11:0"
         onConceptSelect={onConceptSelect}
       />,
     );
@@ -52,7 +155,7 @@ describe('ConceptSidebar', () => {
     expect(row.querySelector('[data-testid^="concept-variant-pill-"]')).toBeNull();
 
     fireEvent.click(parentButton);
-    expect(onConceptSelect).toHaveBeenCalledWith(11, 'single-11');
+    expect(onConceptSelect).toHaveBeenCalledWith(11, 'single-11:0');
   });
 
   it('renders two grouped variants as flat pills with distinct per-variant tag dots', () => {
@@ -85,7 +188,7 @@ describe('ConceptSidebar', () => {
         onTagSelectionChange={vi.fn()}
         tags={[]}
         activeConceptId={79}
-        activeConceptKey="298"
+        activeRealizationKey="298:0"
         onConceptSelect={vi.fn()}
       />,
     );
@@ -128,7 +231,7 @@ describe('ConceptSidebar', () => {
         onTagSelectionChange={vi.fn()}
         tags={[]}
         activeConceptId={79}
-        activeConceptKey="298"
+        activeRealizationKey="298:0"
         onConceptSelect={onConceptSelect}
         hideVariantPills
       />,
@@ -140,7 +243,7 @@ describe('ConceptSidebar', () => {
     expect(parentLabel.toLowerCase()).not.toContain('variants a b');
 
     fireEvent.click(screen.getByTestId('concept-parent-button-79'));
-    expect(onConceptSelect).toHaveBeenCalledWith(79, '298');
+    expect(onConceptSelect).toHaveBeenCalledWith(79, '298:0');
   });
 
   it("clicking flat variant B selects variant B's conceptKey instead of the parent group key", () => {
@@ -174,15 +277,15 @@ describe('ConceptSidebar', () => {
         onTagSelectionChange={vi.fn()}
         tags={[]}
         activeConceptId={79}
-        activeConceptKey="298"
+        activeRealizationKey="298:0"
         onConceptSelect={onConceptSelect}
       />,
     );
 
     fireEvent.click(screen.getByTestId('concept-variant-pill-628'));
 
-    expect(onConceptSelect).toHaveBeenCalledWith(79, '628');
-    expect(onConceptSelect).not.toHaveBeenCalledWith(79, 'source:JBIL:79');
+    expect(onConceptSelect).toHaveBeenCalledWith(79, '628:0');
+    expect(onConceptSelect).not.toHaveBeenCalledWith(79, 'source:JBIL:79:0');
   });
 
   it('renders the action feedback banner when actionFeedback prop is set', () => {
@@ -424,7 +527,7 @@ describe('ConceptSidebar', () => {
         onTagSelectionChange={vi.fn()}
         tags={[]}
         activeConceptId={42}
-        activeConceptKey="hair-a"
+        activeRealizationKey="hair-a:0"
         onConceptSelect={vi.fn()}
       />,
     );
@@ -467,7 +570,7 @@ describe('ConceptSidebar', () => {
         onTagSelectionChange={vi.fn()}
         tags={[]}
         activeConceptId={44}
-        activeConceptKey="hair-a"
+        activeRealizationKey="hair-a:0"
         onConceptSelect={vi.fn()}
       />,
     );
@@ -505,7 +608,7 @@ describe('ConceptSidebar', () => {
         onTagSelectionChange={vi.fn()}
         tags={[]}
         activeConceptId={43}
-        activeConceptKey="hair-a"
+        activeRealizationKey="hair-a:0"
         onConceptSelect={vi.fn()}
       />,
     );
@@ -1156,7 +1259,7 @@ describe('ConceptSidebar', () => {
         onTagSelectionChange={vi.fn()}
         tags={[{ id: 'custom-sk-concept-list', name: 'Thesis', color: '#2563eb' }]}
         activeConceptId={1}
-        activeConceptKey="1"
+        activeRealizationKey="1:0"
         onConceptSelect={onSelect}
         activeSpeaker="Saha01"
         scopedToSpeaker
@@ -1169,7 +1272,7 @@ describe('ConceptSidebar', () => {
     expect(screen.queryByTestId('concept-variant-toggle-1')).toBeNull();
     expect(screen.queryByText('hair (collective)')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /hair/i }));
-    expect(onSelect).toHaveBeenCalledWith(1, '1');
+    expect(onSelect).toHaveBeenCalledWith(1, '1:0');
   });
 
   it('shows all master rows with no-data suffixes when unscoped', () => {
@@ -1371,7 +1474,7 @@ describe('ConceptSidebar', () => {
           onTagSelectionChange={vi.fn()}
           tags={[]}
           activeConceptId={3}
-          activeConceptKey="618"
+          activeRealizationKey="618:0"
           onConceptSelect={onSelect}
         />,
       );
@@ -1381,7 +1484,7 @@ describe('ConceptSidebar', () => {
       expect(rowB.textContent ?? '').toContain('B');
       expect(rowB.className).toContain('bg-indigo-50');
       fireEvent.click(rowB);
-      expect(onSelect).toHaveBeenCalledWith(3, '618');
+      expect(onSelect).toHaveBeenCalledWith(3, '618:0');
     });
 
     it('confines active highlight to the active variant button, not the wrapper or siblings', () => {
@@ -1403,7 +1506,7 @@ describe('ConceptSidebar', () => {
           onTagSelectionChange={vi.fn()}
           tags={[]}
           activeConceptId={3}
-          activeConceptKey="365"
+          activeRealizationKey="365:0"
           onConceptSelect={vi.fn()}
         />,
       );
@@ -1437,7 +1540,7 @@ describe('ConceptSidebar', () => {
           onTagSelectionChange={vi.fn()}
           tags={[]}
           activeConceptId={3}
-          activeConceptKey="365"
+          activeRealizationKey="365:0"
           onConceptSelect={vi.fn()}
         />,
       );
@@ -1452,7 +1555,7 @@ describe('ConceptSidebar', () => {
       expect(rowB.className).not.toContain('bg-indigo-50');
     });
 
-    it('auto-expands a grouped parent when activeConceptKey matches one of its variants', () => {
+    it('auto-expands a grouped parent when activeRealizationKey selects one of its variants', () => {
       render(
         <ConceptSidebar
           query=""
@@ -1471,7 +1574,7 @@ describe('ConceptSidebar', () => {
           onTagSelectionChange={vi.fn()}
           tags={[]}
           activeConceptId={3}
-          activeConceptKey="618"
+          activeRealizationKey="618:0"
           onConceptSelect={vi.fn()}
         />,
       );
@@ -1480,7 +1583,7 @@ describe('ConceptSidebar', () => {
       expect(screen.getByTestId('concept-variant-pill-618').textContent ?? '').toContain('B');
     });
 
-    it('does not auto-expand when activeConceptKey is null', () => {
+    it('does not auto-expand when activeRealizationKey is null', () => {
       render(
         <ConceptSidebar
           query=""
@@ -1499,7 +1602,7 @@ describe('ConceptSidebar', () => {
           onTagSelectionChange={vi.fn()}
           tags={[]}
           activeConceptId={3}
-          activeConceptKey={null}
+          activeRealizationKey={null}
           onConceptSelect={vi.fn()}
         />,
       );
@@ -1527,7 +1630,7 @@ describe('ConceptSidebar', () => {
           onTagSelectionChange={vi.fn()}
           tags={[]}
           activeConceptId={1}
-          activeConceptKey="1"
+          activeRealizationKey="1:0"
           onConceptSelect={vi.fn()}
         />,
       );

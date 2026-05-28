@@ -43,7 +43,7 @@ import { buildSpeakerForm } from './lib/speakerForm';
 import { findBundleForConcept, normalizeBundles } from './lib/compareBundles';
 import { conceptMatchesElicitedKeys, conceptUnderlyingKeys, speakerElicitedConceptKeys } from './lib/speakerElicitedConcepts';
 import { buildSpeakerSortKeys } from './lib/speakerSortKeys';
-import { assignVariantLetters, findConceptByUnderlyingKey, groupConceptEntries } from './lib/conceptGrouping';
+import { assignVariantLetters, buildRealizationKey, findConceptByUnderlyingKey, groupConceptEntries, parseRealizationKey } from './lib/conceptGrouping';
 import { isConceptVariantVisibleInSidebar as evaluateConceptVariantVisibleInSidebar } from './lib/sidebarVisibility';
 import type { Concept, SpeakerForm } from './lib/speakerForm';
 import {
@@ -243,7 +243,14 @@ export function ParseUI() {
   const [statusFilter, setStatusFilter] = useState<ConceptStatusFilter>('all');
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(() => new Set());
   const [conceptId, setConceptId] = useState(1);
-  const [selectedConceptKey, setSelectedConceptKey] = useState<string | null>(null);
+  const [selectedRealizationKey, setSelectedRealizationKey] = useState<string | null>(null);
+  const selectedConceptKey = useMemo(() => {
+    const parsed = parseRealizationKey(selectedRealizationKey);
+    return parsed?.conceptId ?? null;
+  }, [selectedRealizationKey]);
+  const selectConceptKey = useCallback((key: string | null) => {
+    setSelectedRealizationKey(key ? buildRealizationKey(key, 0) : null);
+  }, []);
   const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>([]);
   const [speakerPicker, setSpeakerPicker] = useState<string | null>(null);
   const [computeMode, setComputeMode] = useState<CompareComputeMode>('cognates');
@@ -459,7 +466,7 @@ export function ParseUI() {
   const compareReturn = useCompareReturnRestore({
     currentMode,
     setConceptId,
-    setSelectedConceptKey,
+    setSelectedConceptKey: selectConceptKey,
   });
   const readStoredSidebarScope = (mode: AppMode): boolean => {
     const fallback = mode === 'annotate';
@@ -1027,7 +1034,7 @@ export function ParseUI() {
     if (!rawKeyToResolve) return;
     const next = findConceptByUnderlyingKey(concepts, rawKeyToResolve);
     if (next && next.id !== conceptId) setConceptId(next.id);
-    if (next && selectedConceptKey !== rawKeyToResolve) setSelectedConceptKey(rawKeyToResolve);
+    if (next && selectedConceptKey !== rawKeyToResolve) setSelectedRealizationKey(buildRealizationKey(rawKeyToResolve, 0));
   }, [concepts, currentMode]);
 
   useEffect(() => {
@@ -1487,7 +1494,7 @@ export function ParseUI() {
   }, [conceptId, concepts, navigationConcepts]);
 
   const goToConceptOffset = useCallback((offset: number) => {
-    setSelectedConceptKey(null);
+    setSelectedRealizationKey(null);
     setConceptId((id) => {
       const list = navigationConcepts.length > 0 ? navigationConcepts : concepts;
       if (list.length === 0) return id;
@@ -1878,10 +1885,10 @@ export function ParseUI() {
           onTagSelectionChange={setSelectedTagIds}
           tags={tagsList}
           activeConceptId={conceptId}
-          activeConceptKey={activeRawKey}
-          onConceptSelect={(nextConceptId, nextConceptKey) => {
+          activeRealizationKey={selectedRealizationKey}
+          onConceptSelect={(nextConceptId, nextRealizationKey) => {
             setConceptId(nextConceptId);
-            setSelectedConceptKey(nextConceptKey ?? null);
+            setSelectedRealizationKey(nextRealizationKey ?? null);
           }}
           activeSpeaker={activeSpeakerForSidebar}
           surveySettings={surveySettings}
@@ -2526,7 +2533,7 @@ export function ParseUI() {
                         if (pending.navigateAfterDeleteTo) {
                           previousActiveRawKeyRef.current = pending.navigateAfterDeleteTo.conceptKey;
                           setConceptId(pending.navigateAfterDeleteTo.conceptId);
-                          setSelectedConceptKey(pending.navigateAfterDeleteTo.conceptKey);
+                          setSelectedRealizationKey(pending.navigateAfterDeleteTo.conceptKey ? buildRealizationKey(pending.navigateAfterDeleteTo.conceptKey, 0) : null);
                         }
                         setDeleteConfirmation(null);
                       } catch (err) {

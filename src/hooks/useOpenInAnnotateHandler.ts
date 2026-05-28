@@ -33,7 +33,7 @@ export interface UseOpenInAnnotateHandlerParams {
   conceptId: number;
   /**
    * The semantic key of the same concept. ParseUI holds this in
-   * `selectedConceptKey` (a local `useState` around line 270). Stored so the
+   * `selectedRealizationKey` (with derived `selectedConceptKey`) in ParseUI. Stored so the
    * restore hook can resolve back to the same merged/variant-aware concept
    * even if the numeric id changes.
    */
@@ -62,7 +62,7 @@ export interface UseOpenInAnnotateHandlerParams {
  * 3. Flips ParseUI into annotate mode via the passed-in setter.
  *
  * Wiring note for MC-388-C: this hook depends on three values that live in
- * ParseUI's local component state (`conceptId`, `selectedConceptKey`,
+ * ParseUI's local component state (`conceptId`, derived `selectedConceptKey`,
  * `setCurrentMode`). The integration PR must pass them in via the params
  * object on every render.
  */

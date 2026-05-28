@@ -8,6 +8,7 @@ import { conceptMatchesElicitedKeys } from '../../lib/speakerElicitedConcepts';
 import { resolveSurveyLinksForSpeaker, surveyRowIdsForConcept, type SpeakerSurveyLinkBucket } from '../../lib/surveyLinksForSpeaker';
 import { SurveyBadge } from '../shared/SurveyBadge';
 import { VariantChip } from '../shared/VariantChip';
+import { buildRealizationKey, parseRealizationKey } from '../../lib/conceptGrouping';
 import { defaultSurveySettings, normalizeSurveyId, resolveConceptSurvey, surveyLabelFor } from '../../lib/surveyOverlap';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
@@ -72,8 +73,8 @@ interface ConceptSidebarProps {
   onTagSelectionChange: (selected: Set<string>) => void;
   tags: SidebarTag[];
   activeConceptId: number;
-  activeConceptKey?: string | null;
-  onConceptSelect: (conceptId: number, conceptKey?: string) => void;
+  activeRealizationKey?: string | null;
+  onConceptSelect: (conceptId: number, realizationKey?: string) => void;
   activeSpeaker?: string | null;
   surveySettings?: SurveySettingsMap;
   conceptSurveyLinks?: ConceptSurveyLinksByConcept;
@@ -186,7 +187,7 @@ export function ConceptSidebar({
   onTagSelectionChange,
   tags,
   activeConceptId,
-  activeConceptKey = null,
+  activeRealizationKey = null,
   onConceptSelect,
   activeSpeaker = null,
   surveySettings = {},
@@ -584,6 +585,8 @@ export function ConceptSidebar({
           const hasVariants = !hideVariantPills && visibleVariants.length > 1;
           const hasElicitationVariants = elicitationLabels.length > 1;
           const firstVariantKey = visibleVariants[0]?.conceptKey ?? variants[0]?.conceptKey ?? null;
+          const activeRealization = parseRealizationKey(activeRealizationKey);
+          const activeConceptKey = activeRealization?.conceptId ?? null;
           const parentActive = !!(concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey)));
           const parentName = concept.name;
           const noDataSuffix = !isElicited && !scopedToSpeaker && hasElicitedScope ? ' no data' : '';
@@ -601,7 +604,8 @@ export function ConceptSidebar({
                   aria-label={parentButtonLabel}
                   data-testid={`concept-parent-button-${concept.id}`}
                   onClick={() => {
-                    if (firstVariantKey ?? concept.key) onConceptSelect(concept.id, firstVariantKey ?? concept.key);
+                    const firstKey = firstVariantKey ?? concept.key;
+                    if (firstKey) onConceptSelect(concept.id, buildRealizationKey(firstKey, 0));
                     else onConceptSelect(concept.id);
                   }}
                   onContextMenu={(event) => {
@@ -626,7 +630,8 @@ export function ConceptSidebar({
                 {hasVariants && (
                   <div className="ml-1 flex shrink-0 items-center gap-0.5" aria-label={`${parentName} variants`}>
                     {visibleVariants.map((variant) => {
-                      const childActive = concept.id === activeConceptId && activeConceptKey === variant.conceptKey;
+                      const realizationKey = buildRealizationKey(variant.conceptKey, 0);
+                      const childActive = concept.id === activeConceptId && activeRealizationKey === realizationKey;
                       const childConcept: SidebarConcept = {
                         ...concept,
                         key: variant.conceptKey,
@@ -648,7 +653,7 @@ export function ConceptSidebar({
                           aria-label={`${parentName} variant ${variant.variantLabel} ${variant.conceptEn}`}
                           title={`${variant.conceptEn} (${variant.conceptKey})`}
                           data-testid={`concept-variant-pill-${variant.conceptKey}`}
-                          onClick={() => onConceptSelect(concept.id, variant.conceptKey)}
+                          onClick={() => onConceptSelect(concept.id, realizationKey)}
                           onContextMenu={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
@@ -661,7 +666,10 @@ export function ConceptSidebar({
                 )}
                 {hasElicitationVariants && (
                   <div className="ml-1 flex shrink-0 items-center gap-0.5" aria-label={`${parentName} elicitations`}>
-                    {elicitationLabels.map((letter) => (
+                    {elicitationLabels.map((letter, intervalIndex) => {
+                      const realizationKey = buildRealizationKey(concept.key ?? String(concept.id), intervalIndex);
+                      const childActive = concept.id === activeConceptId && activeRealizationKey === realizationKey;
+                      return (
                       <VariantChip
                         as="button"
                         key={`${concept.key ?? concept.id}:${letter}`}
@@ -670,13 +678,11 @@ export function ConceptSidebar({
                         conceptEn={parentName}
                         aria-label={`${parentName} (${letter})`}
                         title={`${parentName} (${letter})`}
-                        active={parentActive}
-                        onClick={() => {
-                          if (concept.key) onConceptSelect(concept.id, concept.key);
-                          else onConceptSelect(concept.id);
-                        }}
+                        active={childActive}
+                        onClick={() => onConceptSelect(concept.id, realizationKey)}
                       />
-                    ))}
+                    );
+                    })}
                   </div>
                 )}
                 <SurveyBadge

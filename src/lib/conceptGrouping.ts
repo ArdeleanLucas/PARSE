@@ -5,6 +5,27 @@ import type { ConceptTag } from './parseUIUtils';
 type ResolveConceptTag = (conceptKeys: readonly string[]) => ConceptTag;
 type ResolveVariantTag = (conceptKey: string) => ConceptTag;
 
+/**
+ * Format a per-realization selection key. A realization is one annotation
+ * interval on one (speaker, concept_id) pair. The interval_index is the
+ * position in the speaker's intervals on that concept_id sorted by start
+ * (matches assignVariantLetters input ordering, so chip letter A maps to
+ * interval_index 0).
+ */
+export function buildRealizationKey(conceptId: string, intervalIndex: number): string {
+  return `${conceptId}:${intervalIndex}`;
+}
+
+export function parseRealizationKey(key: string | null): { conceptId: string; intervalIndex: number } | null {
+  if (!key) return null;
+  const separatorIndex = key.lastIndexOf(':');
+  if (separatorIndex <= 0 || separatorIndex === key.length - 1) return null;
+  const conceptId = key.slice(0, separatorIndex);
+  const intervalIndex = Number(key.slice(separatorIndex + 1));
+  if (!conceptId || !Number.isFinite(intervalIndex)) return null;
+  return { conceptId, intervalIndex };
+}
+
 function withVariantTag(
   variant: Omit<ConceptVariant, 'tag'>,
   resolveVariantTag: ResolveVariantTag | undefined,
