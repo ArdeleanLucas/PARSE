@@ -10,6 +10,7 @@ from concept_canonical import (
     canonicalize_label,
     label_key,
     strip_bare_variant_suffix,
+    strip_clarifier,
     strip_cue_prefix,
     variant_stem,
     variant_suffix,
@@ -89,6 +90,22 @@ def test_canonicalize_label_strips_cue_prefix_and_variant_forms() -> None:
     assert canonicalize_label("48 stomach (organ) (A)") == "stomach (organ)"
     assert canonicalize_label("(4.1)- big Z") == "big"
     assert canonicalize_label("hair (women)") == "hair (women)"
+
+
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        ("hair (men)", "hair"),
+        ("salt (eating)", "salt"),
+        ("egg (e.g., chicken)", "egg"),
+        ("dry", "dry"),
+        ("big (A)", "big"),
+        ("hair (women) (B)", "hair"),
+        ("", ""),
+    ],
+)
+def test_strip_clarifier_strips_all_parenthetical_content(label: str, expected: str) -> None:
+    assert strip_clarifier(label) == expected
 
 
 def test_label_key_preserves_existing_registry_semantics() -> None:

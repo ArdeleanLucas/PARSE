@@ -26,6 +26,12 @@ BARE_VARIANT_RE = re.compile(r"\s+([A-Z])\s*$")
 # "48 stomach", "(4.1)- big", "[5.1]- the boy", "63: bread".
 LEADING_CUE_PREFIX_RE = re.compile(r"^\s*[\(\[]?\s*\d+(?:\.\d+)*\s*[\)\]]?\s*[-–—:]?\s+")
 
+# Match any parenthetical clarifier chunk. Unlike ``VARIANT_SUFFIX_RE``, this
+# intentionally strips free-text clarifiers and variant-like chunks wherever
+# callers need a clarifier-tolerant comparison surface rather than data-model
+# canonicalization.
+CLARIFIER_PAREN_RE = re.compile(r"\s*\([^)]*\)\s*")
+
 
 def variant_suffix(label: str) -> str:
     """Return a trailing parenthetical variant label, or ``""`` if absent."""
@@ -50,6 +56,20 @@ def strip_cue_prefix(label: str) -> str:
     """Strip a leading Audition cue prefix from ``label`` if present."""
 
     return LEADING_CUE_PREFIX_RE.sub("", str(label or "").strip()).strip()
+
+
+def strip_clarifier(label: str) -> str:
+    """Strip all parenthetical content from ``label``.
+
+    This is deliberately broader than :func:`variant_stem`: it removes semantic
+    clarifiers such as ``"hair (men)"`` / ``"salt (eating)"`` as well as
+    variant-like chunks such as ``"big (A)"``. Keep it out of
+    :func:`canonicalize_label` until PARSE intentionally performs a data-model
+    re-merge; use it only at tolerant comparison/export surfaces.
+    """
+
+    text = CLARIFIER_PAREN_RE.sub(" ", str(label or "").strip())
+    return " ".join(text.split())
 
 
 def canonicalize_label(label: str) -> str:
@@ -114,12 +134,14 @@ def _letter_for_rank(rank: int) -> str:
 
 __all__ = [
     "BARE_VARIANT_RE",
+    "CLARIFIER_PAREN_RE",
     "LEADING_CUE_PREFIX_RE",
     "VARIANT_SUFFIX_RE",
     "assign_variant_letters",
     "canonicalize_label",
     "label_key",
     "strip_bare_variant_suffix",
+    "strip_clarifier",
     "strip_cue_prefix",
     "variant_stem",
     "variant_suffix",
