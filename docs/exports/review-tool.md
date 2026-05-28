@@ -33,6 +33,7 @@ From the PARSE repo root:
 ```bash
 PARSE_WORKSPACE=/home/lucas/parse-workspace \
 REVIEW_TOOL_CLONE=$HOME/gh/ardeleanlucas/review_tool \
+SPEAKERS="Fail01 Saha01 Mand01 Qasr01 Kalh01 Khan02" \
   bash scripts/sync_review_tool.sh
 ```
 
@@ -42,8 +43,13 @@ Useful env-gated flags:
   ffmpeg clip materialization step (much faster while iterating on
   metadata).
 - `CONTACT_CONFIG=/path/to/sil_contact_languages.json` — override the
-  default config location (only forwarded if the export script advertises
-  `--contact-config`).
+  default config location. If unset, the wrapper prefers
+  `$PARSE_WORKSPACE/config/sil_contact_languages.json` when present, then
+  falls back to the repo-local config.
+- `SPEAKERS="Fail01 Saha01"` — restrict the export to a space-separated
+  speaker subset, forwarded as repeated `--speakers` arguments. Use this
+  when preparing the reviewer parity subset rather than every project
+  speaker.
 
 The wrapper validates inputs, prints the export's summary JSON, stages
 all changes in the clone, and commits with the message `Update review

@@ -12,15 +12,15 @@ The skills are generic by design:
 
 ## Live catalog snapshot
 
-Reference catalog snapshot for the current hand-curated skill set: `2026-05-10T17:37:02Z`, produced by `python/external_api/catalog.py::build_mcp_http_catalog(project_root=<temporary_project>, mode="all")`. The skill docs are authored by hand and reviewed in PRs; this timestamp records which catalog state they were written against.
+Reference catalog snapshot for the current hand-curated skill set: `2026-05-28T19:43:41Z`, produced by `python/external_api/catalog.py::build_mcp_http_catalog(project_root=<temporary_project>, mode="all")`. The skill docs are authored by hand and reviewed in PRs; this timestamp records which catalog state they were written against.
 
 | Surface | Count |
 |---|---:|
-| Parse chat/task tools | 60 |
+| Parse chat/task tools | 63 |
 | Workflow macros | 3 |
 | Adapter tools | 1 |
-| Full/default MCP surface | 64 |
-| Legacy curated opt-out surface (`expose_all_tools=false`) | 44 |
+| Full/default MCP surface | 67 |
+| Legacy curated opt-out surface (`expose_all_tools=false`) | 47 |
 
 `index.md` lists every tool skill and links to the per-tool pages under `skills/<bucket>/` (annotation, comparison, export, project, advanced).
 

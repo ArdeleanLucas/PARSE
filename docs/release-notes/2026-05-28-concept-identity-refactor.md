@@ -12,13 +12,13 @@ concept identity = (source_survey, source_item, canonical base label)
 
 Variant letters are computed when PARSE renders a speaker's intervals. Two different speakers can each have one elicitation of `big` and both see the bare label. A single speaker with multiple intervals on the same `concept_id` sees `A`, `B`, and later letters according to interval start-time order. The letter is not stored in `concepts.csv`, annotation JSON, or tags.
 
-## Known regression — default-mode export coverage (added 2026-05-28)
+## Default-mode export regression status (updated 2026-05-28)
 
-Issue [#562](https://github.com/ArdeleanLucas/PARSE/issues/562) records a default-mode review export regression found after the MC-418 release-note PR merged. Against the canonical workspace, default-mode export currently produces 0% IPA coverage, 0% Arabic/Persian contact-reference forms, 17 duplicate `concept_en` entries, and 4 extra speakers compared with the anchored-mode reviewer output.
+Issue [#562](https://github.com/ArdeleanLucas/PARSE/issues/562) recorded a default-mode review export regression found after the MC-418 release-note PR merged: default export initially had empty IPA/contact-reference coverage, duplicate `concept_en` entries, and an over-broad speaker set compared with the anchored reviewer output.
 
-MC-422 is in flight to repair the default-mode exporter and close the sub-bug catalog in #562. Until MC-422 closes, reviewer deployments must continue using anchored-mode export output and must not ship default-mode output to `review_tool` main.
+That warning is now superseded by MC-422/MC-424 fixes and acceptance evidence: PRs [#568](https://github.com/ArdeleanLucas/PARSE/pull/568), [#569](https://github.com/ArdeleanLucas/PARSE/pull/569), [#570](https://github.com/ArdeleanLucas/PARSE/pull/570), [#572](https://github.com/ArdeleanLucas/PARSE/pull/572), [#573](https://github.com/ArdeleanLucas/PARSE/pull/573), and [#574](https://github.com/ArdeleanLucas/PARSE/pull/574) restored default-mode parity for the reviewer subset. The acceptance report at [`docs/reports/2026-05-28-mc-422-acceptance.md`](../reports/2026-05-28-mc-422-acceptance.md) records 82 concepts / 6 speakers, 492/492 IPA forms, 486/492 ortho/audio forms, 81/82 Arabic refs, 81/82 Persian refs, and zero anchored-present/default-missing rows after MC-424-A.
 
-The currently deployed `review_tool` HEAD `2ac21dd` (MC-415-D anchored state) remains the active reviewer-facing build. As of this note, anchored-mode export remains available through the deprecated `--legacy-anchor` CLI surface in `python/export_review_data.py`; treat that path as the safe fallback until MC-422 replaces it.
+The deployed `review_tool` HEAD `2ac21dd` (MC-415-D anchored state) remains the rollback baseline until Lucas pushes the prepared default-mode review_tool commit. Anchored-mode export still exists through deprecated `--legacy-anchor`, but it is no longer the only safe data path.
 
 ## Task and PR inventory
 
@@ -106,11 +106,11 @@ MC-420 is closed with this release because the only board sublane present at clo
 | Deleting a concept row | Error copy referred to variants in a way that implied a duplicate-row workflow. | Error copy says the canonical concept row is annotated and cannot be deleted. |
 | Lexeme-note variant parsing | Bare-letter stripping covered only `[A-D]`. | Bare-letter stripping covers `[A-Z]` for cue files with later variants. |
 | Cross-survey gloss normalization | Some parenthetical variants, such as `big (A)`, survived normalization. | Shared canonicalization strips stored variant suffixes while preserving true clarifier parentheses. |
-| `export_review_data --legacy-anchor` | Legacy anchor mode remained a live workaround. | The flag is deprecated with a warning; default export was expected to handle migrated workspaces, but [#562 shows this premise is currently false for reviewer deployments](#known-regression--default-mode-export-coverage-added-2026-05-28). |
+| `export_review_data --legacy-anchor` | Legacy anchor mode remained a live workaround. | The flag is deprecated with a warning; default-mode export has since been repaired and acceptance-tested for the reviewer subset; anchored output remains only the rollback path until the prepared review_tool commit is pushed. |
 
-### Clarifier parentheses are intentionally not stripped
+### Clarifier parentheses after MC-425
 
-The canonicalizer removes variant suffixes such as `big (A)` and cue prefixes such as `1.2 big`. It does not remove semantic clarifiers such as `wide (road)`, `long (thing)`, `hair (men)`, or `salt (eating)`. Treating those clarifiers as metadata instead of identity is a future data-model decision, not part of MC-418.
+The MC-418 canonicalizer removes variant suffixes such as `big (A)` and cue prefixes such as `1.2 big`; singleton semantic clarifiers such as `green (grass)` or `to bathe (wash oneself)` remain concept labels when there is no same-slot sibling to merge. MC-425-A/B extended the migration with a same-slot clarifier-collapse pass: rows sharing `(source_survey, source_item, strip_clarifier(concept_en))` collapse to one canonical id, references are re-keyed, and the removed labels are preserved in δ-format notes under `parseui-compare-notes-v1.json`. Live acceptance is recorded in [`docs/reports/2026-05-28-mc-425-clarifier-collapse-acceptance.md`](../reports/2026-05-28-mc-425-clarifier-collapse-acceptance.md).
 
 ## Migration invocation
 
@@ -159,7 +159,7 @@ The strict MC-418 invariant is met: concept labels should no longer carry stored
 2. **Text-vs-`concept_en` inconsistencies.** Some annotation interval `text` values do not match their referenced canonical `concept_en`. These are annotation-tier data-quality issues for manual triage, not migration blockers.
 3. **KLQ 4.18 hard/soft duplicate-row quirk.** The live data contains a pre-existing duplicate/truncated row case that is outside MC-418's suffix-pollution target.
 
-Recommended follow-up: a future clarifier-tolerant identity/validator lane can decide whether parenthetical clarifiers should remain concept identity or move into metadata.
+Current follow-up status: MC-422-D added clarifier-tolerant validation/export de-dup, and MC-425-A/B applied same-slot clarifier collapse with δ-format provenance notes. Singleton parenthetical rows are still intentionally preserved when there is no same-slot sibling group.
 
 ## Cross-references
 

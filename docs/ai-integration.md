@@ -312,9 +312,9 @@ The current README describes it as a **domain-specific assistant**, not a genera
 - export and downstream-pipeline assistance
 - troubleshooting across the PARSE workflow
 
-## Full built-in chat tool surface (60 tools)
+## Full built-in chat tool surface (63 tools)
 
-The in-app assistant currently exposes **60 PARSE-specific tools**.
+The in-app assistant currently exposes **63 PARSE-specific tools**.
 
 ### Read-only / preview tools (16)
 
@@ -383,7 +383,7 @@ The in-app assistant currently exposes **60 PARSE-specific tools**.
 | `prepare_tag_import` | Validate and preview a tag CSV before import |
 | `import_tag_csv` | Import tags from a prepared CSV file |
 
-### Write / export / merge tools (19)
+### Write / export / merge tools (21)
 
 | Tool | Description |
 |---|---|
@@ -395,6 +395,8 @@ The in-app assistant currently exposes **60 PARSE-specific tools**.
 | `revert_csv_reimport` | Restore the files captured by a csv-only reimport backup, defaulting to the latest per-speaker backup (`dryRun=true` first) |
 | `set_concept_field` | Set one source/order column (`source_item`, `source_survey`, or `custom_order`) to a constant value across an id range, id list, or all concept rows |
 | `populate_cross_survey_links` | Populate concept-level cross-survey links from a reference lexeme CSV (`dryRun=true` first; merge mode by default, `replace=true` rebuilds only `concept_survey_links`) |
+| `export_review_data` | Export a PARSE workspace to the legacy review_tool schema, with optional speaker subset, contact config, and audio clipping controls |
+| `migrate_concept_suffix_pollution` | Dry-run, apply, or verify the concept-identity migration, including suffix canonicalization and same-slot clarifier collapse |
 | `parse_memory_upsert_section` | Create or replace a `## Section` block in `parse-memory.md` (`dryRun=true` first) |
 | `enrichments_write` | Shallow-merge or replace computed enrichments |
 | `lexeme_notes_write` | Write or delete lexeme notes for a speaker/concept pair |
@@ -426,15 +428,15 @@ Multi-source speakers may still require manual or virtual-timeline coordination 
 
 ## MCP subset versus in-app tool surface
 
-Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow-only macros plus read-only `mcp_get_exposure_mode` outside the built-in 61-tool chat surface.
+Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow-only macros plus read-only `mcp_get_exposure_mode` outside the built-in 63-tool chat surface.
 
-- **Built-in chat tools**: 61
-- **Default MCP task tools**: 61
-- **Default MCP adapter surface including workflow macros + `mcp_get_exposure_mode`**: 65
-- **Legacy curated opt-out surface with explicit `expose_all_tools=false`**: 45
-- **Full MCP adapter surface with `expose_all_tools=true`**: 65
+- **Built-in chat tools**: 63
+- **Default MCP task tools**: 63
+- **Default MCP adapter surface including workflow macros + `mcp_get_exposure_mode`**: 67
+- **Legacy curated opt-out surface with explicit `expose_all_tools=false`**: 47
+- **Full MCP adapter surface with `expose_all_tools=true`**: 67
 
-The shipped default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus write-capable `clef_clear_data`, `csv_only_reimport`, `revert_csv_reimport`, and `populate_cross_survey_links`. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` opts back into the legacy curated 41-tool parse-task subset preserved in `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES`. The underlying boundary-constrained STT compute path also accepts `bnd_stt` as an HTTP/worker alias, but `bnd_stt` is not a separate `ParseChatTools` registration.
+The shipped default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus write-capable `clef_clear_data`, `csv_only_reimport`, `revert_csv_reimport`, and `populate_cross_survey_links`, plus export/migration tools `export_review_data` and `migrate_concept_suffix_pollution`. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` opts back into the legacy curated 43-tool parse-task subset preserved in `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES`. The underlying boundary-constrained STT compute path also accepts `bnd_stt` as an HTTP/worker alias, but `bnd_stt` is not a separate `ParseChatTools` registration.
 
 Task 5 adds an HTTP MCP bridge on top of that same schema surface:
 - `GET /api/mcp/exposure`

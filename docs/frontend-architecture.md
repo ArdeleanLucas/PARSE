@@ -15,3 +15,9 @@ At a high level, the concept sidebar applies the same rules that PR #316 introdu
 3. variants remain visible by default when neither rule rejects them.
 
 `ParseUI.tsx` owns the current UI state and passes those state values into the pure helper. `ConceptSidebar.tsx` receives the resulting predicate through `isConceptVariantVisibleInSidebar` and uses it only to derive visible child rows and the first selectable visible variant, preserving the component as a render surface rather than a state owner.
+
+## Realization selection and elicitation intervals
+
+`ParseUI.tsx` now stores the active concept as a `selectedRealizationKey` (`<concept_id>:<interval_index>`) and derives the older concept-level key from it. `ConceptSidebar` emits these keys from A/B/C realization chips, right-panel speaker forms consume the interval index to show the matching IPA/ORTH/audio data, and `AnnotateView` threads the same focus into its editable interval lookup.
+
+Adding another elicitation creates a new interval on the same canonical `concept_id`; deleting an elicitation calls `POST /api/annotations/intervals/delete` and removes only that realization plus same-time mirror-tier rows. The legacy duplicate-concept row path is intentionally gone from the current UI contract.

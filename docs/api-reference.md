@@ -125,6 +125,7 @@ WebSocket streaming is additive. Clients can continue polling `/api/stt/status`,
 | Endpoint | Purpose | Notes |
 |---|---|---|
 | `POST /api/annotations/{speaker}` | Save one speaker annotation record | Writes normalized annotation JSON |
+| `POST /api/annotations/intervals/delete` | Delete one elicitation interval | Removes the selected concept-tier interval plus same-time IPA/ortho/ortho_words/speaker mirror rows; creates a `.bak-<UTC>-pre-interval-delete` backup; does not delete the canonical concept row |
 | `POST /api/onboard/speaker` | Upload raw audio and optional CSV for one speaker | Multipart upload; Audition marker CSV/TSV fallback can seed `concept` and `ortho_words` intervals from `Name`/`Start` rows; optional `commentsCsv` imports companion notes by row index |
 | `POST /api/onboard/speaker/status` | Poll onboarding job status | Background-job status endpoint |
 | `POST /api/concepts/import` | Import concepts CSV | Multipart form upload |
@@ -153,6 +154,8 @@ Successful ORTH result entries may include the confidence triplet defined in Ope
 `POST /api/concepts/relink-by-gloss` consolidates duplicate concepts that resolve to the same canonical gloss across surveys. Dry-run (`apply` omitted or `false`) returns `groups` of strict matches and `fuzzy_candidates` for manual review. `apply=true` requires `accepted_groups` and refuses to apply fuzzy candidates automatically; it backs up `concepts.csv`, `parse-enrichments.json`, and any annotation files it touches, unions survey links, rewrites `concept_id` references in annotations and enrichments, and removes the merged rows from `concepts.csv`.
 
 `POST /api/concepts/by-tag` is a pure read: it walks each requested speaker's annotation file once, applies the requested tag-match semantics, and returns `{ totalConcepts, perSpeaker, unknownTags, ambiguousTags }` without acquiring speaker locks or mutating state. `match='all'` rejects any unknown or ambiguous label with HTTP 400 (an AND query against partially-resolved tags would silently degrade to an intersection over the resolved subset). `match='any'` returns the unresolved labels in `unknownTags` / `ambiguousTags` so the caller can surface them.
+
+`POST /api/annotations/intervals/delete` is the Path-2 elicitation-delete endpoint. Clients send a speaker, `concept_id`, `start`, and `end`; PARSE removes exactly that realization and mirror-tier rows at the same time range, writes a pre-delete backup, then returns the refreshed annotation payload. Use canonical concept deletion only when the whole concept row should disappear.
 
 `POST /api/lexemes/rerun-by-tag` reuses the same tag-resolution logic, then by default starts compute type `lexemes_rerun_by_tag` and returns `202` with a non-null `jobId` for frontend/API polling. When that job runs, it loops the matched concept windows through the same per-interval ORTH/IPA machinery as `/api/lexeme/run_*`, persists successful tier writes back to the active annotation record, and rebuilds affected `tiers.ortho_words` after ORTH output. Each per-concept call respects the same speaker lock and 60-second window cap as the per-interval endpoints. Per-concept errors are collected into `results[*]` (with `status: "error"`, the original HTTP `statusCode`, and a message) without aborting the batch. Ambiguous labels return HTTP 409 before any job or rerun starts so the endpoint never spends GPU on a concept set the caller did not explicitly approve. `async=false` preserves the old immediate `resolved` / `total` / `results` response with `jobId: null`; do not use that mode for new UI or agent workflows.
 
@@ -501,8 +504,8 @@ Task 5 adds a discovery/execution bridge so external Python tooling can use the 
 
 `mode` query parameter accepts:
 - `active` — obey `config/mcp_config.json` (or fallback root `mcp_config.json`)
-- `default` — force the shipped default 65-tool surface
-- `all` — force the full tool surface (currently also 65 tools unless a future explicit all-only surface diverges)
+- `default` — force the shipped default 67-tool surface
+- `all` — force the full tool surface (currently also 67 tools unless a future explicit all-only surface diverges)
 
 ### Tool schema payload
 
@@ -526,7 +529,7 @@ Each tool entry returned by the bridge includes:
 
 ## MCP server mode
 
-PARSE can also run as a stdio MCP server by exposing the shipped **61-tool** `ParseChatTools` default plus the **3** workflow macros through `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`). Read-only `mcp_get_exposure_mode` is added by the adapter itself, so the default published MCP surface is **65 tools** total and the `expose_all_tools=true` surface is also **65**. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the legacy curated 41-tool subset, which still becomes **45** adapter tools once the 3 workflow macros and adapter helper are included.
+PARSE can also run as a stdio MCP server by exposing the shipped **63-tool** `ParseChatTools` default plus the **3** workflow macros through `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`). Read-only `mcp_get_exposure_mode` is added by the adapter itself, so the default published MCP surface is **67 tools** total and the `expose_all_tools=true` surface is also **67**. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the legacy curated 43-tool subset, which still becomes **47** adapter tools once the 3 workflow macros and adapter helper are included.
 
 ### Start the adapter
 
@@ -562,7 +565,7 @@ pip install 'mcp[cli]'
 
 If no explicit environment block is passed, the adapter also reads repo-local overrides from `.parse-env`.
 
-## Legacy curated MCP task surface (41 `ParseChatTools` + 3 workflow macros; 45 adapter tools including `mcp_get_exposure_mode`)
+## Legacy curated MCP task surface (43 `ParseChatTools` + 3 workflow macros; 47 adapter tools including `mcp_get_exposure_mode`)
 
 ### Inspection / preview / preflight
 
@@ -578,6 +581,7 @@ If no explicit environment block is passed, the adapter also reads repo-local ov
 | `speakers_list` | Enumerate speakers for batch/preflight workflows |
 | `pipeline_state_read` | Read one speaker's coverage-aware pipeline state |
 | `pipeline_state_batch` | Read preflight state for multiple speakers |
+| `list_concepts_by_tag` | Resolve tag queries to matched concepts per speaker without launching compute work |
 
 ### Job control
 
@@ -625,6 +629,8 @@ If no explicit environment block is passed, the adapter also reads repo-local ov
 | `import_tag_csv` | Import a CSV as a PARSE tag list |
 | `prepare_tag_import` | Preview and validate a tag import |
 | `populate_cross_survey_links` | Populate concept-level cross-survey links from a reference lexeme CSV (`dryRun=true` first; merge by default, `replace=true` rebuilds only `concept_survey_links`) |
+| `export_review_data` | Export review_tool-compatible `review_data.json`, timestamps, and optional audio clips from a PARSE workspace |
+| `migrate_concept_suffix_pollution` | Dry-run, apply, or verify the concept-identity migration; rewrites concepts/annotations/tags/survey sidecars with backups when applied |
 | `onboard_speaker_import` | Import one speaker from on-disk audio/CSV into the workspace |
 | `import_processed_speaker` | Import one speaker from existing processed artifacts |
 | `csv_only_reimport` | Re-import an existing speaker from refreshed cue/comments CSV files using the registered WAV and a mandatory backup |
@@ -679,7 +685,7 @@ The stdio MCP adapter does not add a separate network auth layer. Access is gove
 
 ## MCP usage notes
 
-The shipped MCP default exposes the full safe 61-tool PARSE task surface plus 3 high-level workflow macros and `mcp_get_exposure_mode`; `expose_all_tools=false` is the legacy curated opt-out.
+The shipped MCP default exposes the full safe 63-tool PARSE task surface plus 3 high-level workflow macros and `mcp_get_exposure_mode`; `expose_all_tools=false` is the legacy curated opt-out.
 
 Operational rules that remain important:
 - use `dryRun=true` first for gated mutating tools such as `contact_lexeme_lookup`, `clef_clear_data`, `onboard_speaker_import`, `csv_only_reimport`, `revert_csv_reimport`, and timestamp/application workflows

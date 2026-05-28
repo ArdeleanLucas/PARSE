@@ -439,10 +439,10 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
 ## MCP adapter note
 
 - `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`) now supports `config/mcp_config.json` for explicit MCP surface selection.
-- Shipped default MCP adapter surface is **65 tools** total: **61** default `ParseChatTools` from `python/ai/chat_tools.py::DEFAULT_MCP_TOOL_NAMES`, the **3** high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, plus read-only `mcp_get_exposure_mode` for self-inspection.
-- `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES` preserves the previous **41**-tool parse-task subset; explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the adapter on that legacy **45**-tool published surface.
-- Setting `expose_all_tools=true` expands `active` mode back to the full **65**-tool adapter surface, which now matches the shipped default.
-- The shipped default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus the write-capable `clef_clear_data`, `csv_only_reimport`, `revert_csv_reimport`, and `populate_cross_survey_links` tools; the underlying boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is not a standalone MCP tool name in `REGISTRY`.
+- Shipped default MCP adapter surface is **67 tools** total: **63** default `ParseChatTools` from `python/ai/chat_tools.py::DEFAULT_MCP_TOOL_NAMES`, the **3** high-level `WorkflowTools` macros from `python/ai/workflow_tools.py`, plus read-only `mcp_get_exposure_mode` for self-inspection.
+- `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES` preserves the previous **43**-tool parse-task subset; explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` keeps the adapter on that legacy **47**-tool published surface.
+- Setting `expose_all_tools=true` expands `active` mode back to the full **67**-tool adapter surface, which now matches the shipped default.
+- The shipped default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus the write/export-capable `clef_clear_data`, `csv_only_reimport`, `revert_csv_reimport`, `populate_cross_survey_links`, `export_review_data`, and `migrate_concept_suffix_pollution` tools; the underlying boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is not a standalone MCP tool name in `REGISTRY`.
 - The workflow macros are:
   - `run_full_annotation_pipeline`
   - `prepare_compare_mode`

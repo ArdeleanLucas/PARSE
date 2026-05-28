@@ -117,9 +117,9 @@ The adapter ships with the full safe PARSE tool surface by default and supports 
 
 | Mode | What you get |
 |---|---|
-| **Default** | 65 MCP tools total: 61 default `ParseChatTools` + 3 workflow macros + `mcp_get_exposure_mode` |
-| **Legacy curated opt-out** | 45 MCP tools total: 41 curated `ParseChatTools` + 3 workflow macros + `mcp_get_exposure_mode` via explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` |
-| **Expose all** | 65 MCP tools total: all 61 `ParseChatTools`, all 3 workflow macros, plus `mcp_get_exposure_mode` |
+| **Default** | 67 MCP tools total: 63 default `ParseChatTools` + 3 workflow macros + `mcp_get_exposure_mode` |
+| **Legacy curated opt-out** | 47 MCP tools total: 43 curated `ParseChatTools` + 3 workflow macros + `mcp_get_exposure_mode` via explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` |
+| **Expose all** | 67 MCP tools total: all 63 `ParseChatTools`, all 3 workflow macros, plus `mcp_get_exposure_mode` |
 
 The shipped default already exposes the full safe ParseChatTools surface. Create `config/mcp_config.json` (preferred) or root-level `mcp_config.json` only when you want to force a specific active mode:
 
@@ -143,6 +143,7 @@ Examples:
 - “List active jobs, then show logs for the stalled job.”
 - “Run `compute_boundaries_start` for one speaker, then `retranscribe_with_boundaries_start` after `tiers.ortho_words` is ready.”
 - “Export the complete LingPy dataset after refreshing contact lexeme references.”
+- “Run `export_review_data` to prepare a review_tool bundle in a temporary output directory, or dry-run `migrate_concept_suffix_pollution` before applying a workspace identity migration.”
 
 ## 2. Use the local HTTP API for custom automation
 
@@ -264,7 +265,7 @@ Keep only the essentials in the client config and move the rest into repo-local 
 
 ### I expected fewer or more tools than I see by default
 
-Current PARSE defaults to the full safe 65-tool adapter surface: 61 `ParseChatTools`, 3 workflow macros, and `mcp_get_exposure_mode`. If you need the older smaller surface, set `{"expose_all_tools": false}` in `config/mcp_config.json`; that publishes the legacy 45-tool adapter surface.
+Current PARSE defaults to the full safe 67-tool adapter surface: 63 `ParseChatTools`, 3 workflow macros, and `mcp_get_exposure_mode`. If you need the older smaller surface, set `{"expose_all_tools": false}` in `config/mcp_config.json`; that publishes the legacy 47-tool adapter surface.
 
 The default set includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus write-capable `clef_clear_data`, `csv_only_reimport`, `revert_csv_reimport`, and `populate_cross_survey_links` tools for dry-run-capable CLEF reset and Audition CSV reimport/revert workflows. The shorter name `bnd_stt` is only a compute-type alias for the HTTP/background-job path, not a separately registered MCP tool name.
 
@@ -281,7 +282,7 @@ For most local agent setups, the **stdio MCP adapter** is still the simplest pla
 
 After you are up and running:
 
-- inspect the default 65-tool MCP surface from your client; set `expose_all_tools=false` only when you intentionally need the legacy curated opt-out
+- inspect the default 67-tool MCP surface from your client; set `expose_all_tools=false` only when you intentionally need the legacy curated opt-out
 - try the workflow macros first: `run_full_annotation_pipeline`, `prepare_compare_mode`, and `export_complete_lingpy_dataset`
 - use `mcp_get_exposure_mode` to confirm which MCP surface the current project is publishing
 - move from this guide into the API and AI docs below when you need full schema and tool-reference detail

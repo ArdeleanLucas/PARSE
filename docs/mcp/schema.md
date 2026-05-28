@@ -41,15 +41,15 @@ PARSE now exposes three closely related machine-facing surfaces:
 - `all` — expose the full tool surface
 
 Verified current counts from `python/ai/chat_tools.py`, `python/ai/workflow_tools.py`, and `python/adapters/mcp_adapter.py`:
-- **60** built-in `ParseChatTools`
-- **60** default MCP task tools from `DEFAULT_MCP_TOOL_NAMES`
+- **63** built-in `ParseChatTools`
+- **63** default MCP task tools from `DEFAULT_MCP_TOOL_NAMES`
 - **3** workflow macros from `python/ai/workflow_tools.py`
-- **64** total default adapter tools including read-only `mcp_get_exposure_mode`
-- **64** total adapter tools when `expose_all_tools=true`
-- **40** legacy curated opt-out task tools from `LEGACY_CURATED_MCP_TOOL_NAMES`
-- **44** total adapter tools when `config/mcp_config.json` explicitly sets `expose_all_tools=false`
+- **67** total default adapter tools including read-only `mcp_get_exposure_mode`
+- **67** total adapter tools when `expose_all_tools=true`
+- **43** legacy curated opt-out task tools from `LEGACY_CURATED_MCP_TOOL_NAMES`
+- **47** total adapter tools when `config/mcp_config.json` explicitly sets `expose_all_tools=false`
 
-The shipped default includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus write-capable `clef_clear_data`, `csv_only_reimport`, and `revert_csv_reimport`. The boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is an HTTP/worker compute alias rather than a separately registered MCP tool name.
+The shipped default includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus write/export-capable `clef_clear_data`, `csv_only_reimport`, `revert_csv_reimport`, `populate_cross_survey_links`, `export_review_data`, and `migrate_concept_suffix_pollution`. The boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is an HTTP/worker compute alias rather than a separately registered MCP tool name.
 
 ## Tool schema shape
 

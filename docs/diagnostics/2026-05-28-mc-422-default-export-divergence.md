@@ -1,6 +1,6 @@
 # MC-422-A diagnostic: default-mode export divergence vs anchored mode (#562)
 
-This is a diagnostic-only PR for MC-422-A. It documents the current divergence points between `build_review_data` and `build_review_data_anchored` so MC-422-B/C/D/E can patch the correct seams. Sub-bug D is intentionally excluded; MC-422-D owns clarifier de-duplication via #561 Option 1 plus export-time de-dup.
+This is a diagnostic-only PR for MC-422-A. It documents the divergence points that existed before the MC-422/MC-424 fix sequence. **Supersession note (2026-05-28):** PRs #568, #569, #570, #572, #573, and #574 fixed and acceptance-tested these default-mode export gaps; see `docs/reports/2026-05-28-mc-422-acceptance.md` for current metrics. Sub-bug D was handled by MC-422-D/#570 via #561 Option 1 plus export-time de-dup, then the data-model follow-up landed in MC-425-A/#575 and MC-425-B/#576.
 
 ## Summary table
 

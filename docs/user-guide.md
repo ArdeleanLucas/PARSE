@@ -352,7 +352,7 @@ The current Compare interface provides:
 - grouped source-item variant rows when multiple concepts share the same `source_item`, with A/B/C realization pills in speaker forms
 - per-speaker canonical realization picks persisted under `manual_overrides.canonical_realizations`
 - manual concept merge/unmerge overrides persisted under `manual_overrides.concept_merges`, combining forms for review without rewriting source concepts or annotation intervals; merge overrides are Compare-mode-only and do not collapse Annotate navigation
-- right-click concept duplication that rewrites the selected row to `X (A)` and appends a new `X (B)` row with the same `source_item` / `source_survey` and a fresh numeric id; repeated calls on the same source item produce `(C)`, `(D)`, … so n-ary variants are built up by repeating the duplicate action rather than as a single batched operation
+- per-speaker elicitation chips on the same canonical `concept_id`: **+ Add elicitation** adds another interval, render-time A/B/C labels come from interval order, and **Delete this interval** removes one selected realization plus same-time mirror-tier rows without deleting the concept row
 - **cognate controls** for accept, split, merge, and cycle
 - per-row cognate-group editing
 - speaker flags and secondary-action controls
@@ -370,13 +370,14 @@ Typical use:
 
 1. Open a concept row across speakers
 2. Review the forms side by side
-3. Review grouped source-item variants and choose canonical speaker-specific realizations when a form has multiple IPA/ORTH observations
+3. Review grouped source-item variants and choose canonical speaker-specific realizations when a form has multiple IPA/ORTH observations; selecting an A/B/C chip pivots the right-panel and Annotate editor to that realization
 4. Use concept merge/unmerge when two source concepts should be compared as one analytical row, while preserving the original concept ids underneath
-5. Duplicate a concept into multiple variant rows when a single source item needs parallel lexical realizations rather than a reversible Compare-only merge; the first duplicate produces an `X (A)` / `X (B)` pair, and repeating the action on any row sharing that `source_item` extends the variant series with `(C)`, `(D)`, … until the alphabet is exhausted
-6. Accept, split, merge, or cycle cognate groups
-7. Mark speaker-level irregularities or flags where needed
-8. Consult enrichment overlays and contact-language evidence
-9. Preserve manual adjudications for export
+5. Add another elicitation when one speaker has multiple intervals for the same canonical concept, or delete only the selected realization when an interval is wrong; the canonical concept row and other speakers stay intact
+6. Use ArrowDown/ArrowUp to walk realization chips before moving concepts, or PageDown/PageUp to jump concept-to-concept
+7. Accept, split, merge, or cycle cognate groups
+8. Mark speaker-level irregularities or flags where needed
+9. Consult enrichment overlays and contact-language evidence
+10. Preserve manual adjudications for export
 
 The goal is not just visualization — it is structured decision-making for downstream comparative analysis.
 
