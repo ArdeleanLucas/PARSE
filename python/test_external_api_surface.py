@@ -91,7 +91,6 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
         "/api/concepts/import",
         "/api/concepts/relink-by-gloss",
         "/api/concepts/{conceptId}",
-        "/api/concepts/{conceptId}/duplicate",
         "/api/concepts/{conceptId}/promote-survey-primary",
         "/api/concepts/{conceptId}/survey-links",
         "/api/concepts/by-tag",
@@ -112,30 +111,11 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
     }
 
 
-def test_build_openapi_document_covers_concept_duplicate_contract() -> None:
+def test_build_openapi_document_omits_removed_concept_duplicate_contract() -> None:
     spec = build_openapi_document(base_url="http://127.0.0.1:8766")
-    operation = spec["paths"]["/api/concepts/{conceptId}/duplicate"]["post"]
 
-    assert operation["operationId"] == "duplicateConcept"
-    assert operation["parameters"] == [
-        {
-            "name": "conceptId",
-            "in": "path",
-            "required": True,
-            "schema": {"type": "string", "pattern": "^[0-9]+$"},
-        }
-    ]
-    assert operation["requestBody"]["required"] is False
-    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
-        "type": "object",
-        "maxProperties": 0,
-        "additionalProperties": False,
-    }
-    assert set(operation["responses"]) == {"200", "400", "404", "409", "500"}
-    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
-        "$ref": "#/components/schemas/ConceptDuplicateResponse"
-    }
-    assert operation["x-parse"] == {"idempotent": False}
+    assert "/api/concepts/{conceptId}/duplicate" not in spec["paths"]
+    assert "ConceptDuplicateResponse" not in spec["components"]["schemas"]
 
 
 def test_build_openapi_document_covers_concept_delete_contract() -> None:

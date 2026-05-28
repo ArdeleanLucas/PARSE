@@ -13,7 +13,6 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-import concepts_io  # noqa: E402
 import server  # noqa: E402
 from survey_overlap import SURVEY_OVERLAP_FILENAME, load_survey_overlap_state, update_survey_overlap_state  # noqa: E402
 
@@ -59,11 +58,6 @@ def _seed_concepts(tmp_path: pathlib.Path, rows: list[dict[str, str]]) -> None:
         writer.writeheader()
         for row in rows:
             writer.writerow({key: row.get(key, "") for key in FIELDNAMES})
-
-
-def _read_concepts(tmp_path: pathlib.Path) -> list[dict[str, str]]:
-    with (tmp_path / "concepts.csv").open(newline="", encoding="utf-8") as handle:
-        return list(csv.DictReader(handle))
 
 
 def _seed_overlap(tmp_path: pathlib.Path, payload: dict) -> None:
@@ -231,39 +225,3 @@ def test_delete_speaker_override_prunes_empty_maps(tmp_path: pathlib.Path, monke
     assert handler.status == HTTPStatus.OK
     assert handler.wfile.payload()["speaker_surveys"] == {}
     assert _read_overlap(tmp_path)["speaker_concept_survey_links"] == {}
-
-
-def test_duplicate_copies_speaker_overrides_to_new_sibling(tmp_path: pathlib.Path) -> None:
-    _seed_concepts(tmp_path, [{"id": "53", "concept_en": "nose", "source_item": "169", "source_survey": "jbil", "custom_order": "53"}])
-    _seed_overlap(
-        tmp_path,
-        {**_base_overlap(), "speaker_concept_survey_links": {"Saha01": {"53": {"jbil": "169"}}, "Anto02": {"53": {"klq": "4.1"}}}},
-    )
-
-    payload = concepts_io.duplicate_concept_variant(tmp_path, "53")
-
-    sibling_id = payload["sibling"]["id"]
-    assert sibling_id == "54"
-    assert _read_overlap(tmp_path)["speaker_concept_survey_links"] == {
-        "Anto02": {"53": {"klq": "4.1"}, "54": {"klq": "4.1"}},
-        "Saha01": {"53": {"jbil": "169"}, "54": {"jbil": "169"}},
-    }
-
-
-def test_duplicate_restores_csv_if_speaker_override_copy_fails(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _seed_concepts(tmp_path, [{"id": "53", "concept_en": "nose", "source_item": "169", "source_survey": "jbil", "custom_order": "53"}])
-    prewrite = (tmp_path / "concepts.csv").read_bytes()
-    _seed_overlap(tmp_path, {**_base_overlap(), "speaker_concept_survey_links": {"Saha01": {"53": {"jbil": "169"}}}})
-
-    def fail_update(*_args, **_kwargs):  # type: ignore[no-untyped-def]
-        raise OSError("simulated survey-overlap write failure")
-
-    monkeypatch.setattr(concepts_io, "update_survey_overlap_state", fail_update)
-
-    with pytest.raises(concepts_io.ConceptDuplicateError):
-        concepts_io.duplicate_concept_variant(tmp_path, "53")
-
-    assert (tmp_path / "concepts.csv").read_bytes() == prewrite
-    assert _read_concepts(tmp_path) == [
-        {"id": "53", "concept_en": "nose", "source_item": "169", "source_survey": "jbil", "custom_order": "53"}
-    ]

@@ -279,15 +279,6 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
                 },
                 "additionalProperties": True,
             },
-            "ConceptDuplicateResponse": {
-                "type": "object",
-                "required": ["primary", "sibling"],
-                "properties": {
-                    "primary": _schema_ref("ConceptCsvRow"),
-                    "sibling": _schema_ref("ConceptCsvRow"),
-                },
-                "additionalProperties": False,
-            },
             "ConceptDeleteResponse": {
                 "type": "object",
                 "required": ["ok", "deleted_id"],
@@ -698,10 +689,7 @@ def build_openapi_document(base_url: str = "http://127.0.0.1:8766") -> Dict[str,
             },
         },
         "/api/concepts/{conceptId}": {
-            "delete": {"tags": ["Annotations"], "summary": "Delete one unannotated concept variant row", "operationId": "deleteConcept", "parameters": [{"name": "conceptId", "in": "path", "required": True, "schema": {"type": "string", "pattern": "^[0-9]+$"}}], "responses": {"200": _response("Deleted concept row", _schema_ref("ConceptDeleteResponse")), "400": _response("Invalid concept id", _schema_ref("ErrorResponse")), "404": _response("Concept row not found", _schema_ref("ErrorResponse")), "409": _response("Concept has annotated intervals and cannot be deleted", _schema_ref("ConceptDeleteConflict")), "500": _response("Write failure", _schema_ref("ErrorResponse"))}, "x-parse": {"idempotent": False, "destructive": True}},
-        },
-        "/api/concepts/{conceptId}/duplicate": {
-            "post": {"tags": ["Annotations"], "summary": "Duplicate one concept row into a new variant", "operationId": "duplicateConcept", "parameters": [{"name": "conceptId", "in": "path", "required": True, "schema": {"type": "string", "pattern": "^[0-9]+$"}}], "requestBody": {"required": False, "content": _json_content({"type": "object", "maxProperties": 0, "additionalProperties": False})}, "responses": {"200": _response("Duplicated concept rows", _schema_ref("ConceptDuplicateResponse")), "400": _response("Invalid concept id or malformed path", _schema_ref("ErrorResponse")), "404": _response("Concept row not found", _schema_ref("ErrorResponse")), "409": _response("Concept row cannot be duplicated (no free variant labels remain)", _schema_ref("ErrorResponse")), "500": _response("Write failure", _schema_ref("ErrorResponse"))}, "x-parse": {"idempotent": False}},
+            "delete": {"tags": ["Annotations"], "summary": "Delete one unannotated canonical concept row", "operationId": "deleteConcept", "parameters": [{"name": "conceptId", "in": "path", "required": True, "schema": {"type": "string", "pattern": "^[0-9]+$"}}], "responses": {"200": _response("Deleted concept row", _schema_ref("ConceptDeleteResponse")), "400": _response("Invalid concept id", _schema_ref("ErrorResponse")), "404": _response("Concept row not found", _schema_ref("ErrorResponse")), "409": _response("Concept has annotated intervals and cannot be deleted", _schema_ref("ConceptDeleteConflict")), "500": _response("Write failure", _schema_ref("ErrorResponse"))}, "x-parse": {"idempotent": False, "destructive": True}},
         },
         "/api/concepts/{conceptId}/promote-survey-primary": {
             "post": {

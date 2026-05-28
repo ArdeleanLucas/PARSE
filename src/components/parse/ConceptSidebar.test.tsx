@@ -205,13 +205,13 @@ describe('ConceptSidebar', () => {
         tags={baseTags}
         activeConceptId={1}
         onConceptSelect={vi.fn()}
-        actionFeedback={{ message: 'Duplicate failed', variant: 'error' }}
+        actionFeedback={{ message: 'Action failed', variant: 'error' }}
         onDismissActionFeedback={vi.fn()}
       />,
     );
 
     const banner = screen.getByTestId('sidebar-action-feedback');
-    expect(banner.textContent ?? '').toContain('Duplicate failed');
+    expect(banner.textContent ?? '').toContain('Action failed');
     expect(banner.className).toContain('bg-rose-50');
     expect(screen.queryByRole('alert')).toBeNull();
   });
