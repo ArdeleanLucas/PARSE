@@ -39,6 +39,7 @@ import json
 import re
 import subprocess
 import sys
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -67,38 +68,31 @@ def _empty_enrichments() -> dict[str, dict[str, Any]]:
 
 _REVIEW_VARIANT_CODE_RE = re.compile(r"\s*\(([A-Za-z0-9]+)\)\s*$")
 _TRAILING_PAREN_RE = re.compile(r"\s*\([^)]*\)\s*$")
-_LEADING_NUMBER_PREFIX_RE = re.compile(r"^\s*\d[\d.]*\s+")
 _FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def _stem_label(label: str) -> str:
-    """Return the canonical gloss of ``label`` with prefix + paren pollution stripped.
+    """Return the review-tool gloss stem of ``label`` with parens stripped.
 
-    PARSE's ``concepts.csv`` can carry three kinds of pollution around the bare
-    gloss; all of them need to fold away before anchored-mode matching keys
-    against the legacy review_tool's curated 82-concept list:
+    PARSE's migrated ``concepts.csv`` now carries canonical labels with leaked
+    Audition cue prefixes removed centrally by ``concept_canonical`` and the
+    MC-418 migration. The exporter intentionally no longer owns a second
+    leading-number cleanup pass; that MC-415-C workaround is retired.
+
+    Review-tool stemming still strips trailing parentheticals before matching
+    or writing legacy-compatible labels:
 
     1. **Variant suffix** — alphanumeric token at end, e.g. ``"dog (A)"``,
        ``"big (F)"``.
     2. **Meaning qualifier** — free text at end, e.g. ``"egg (e.g., chicken)"``,
        ``"fly (n.)"``, ``"you (sg.)"``, ``"to knock (at the door)"``.
-    3. **Leading numeric prefix** — Audition cue numbers that escaped the
-       importer's ``parse_cue_name`` normalization and glued onto the gloss,
-       e.g. ``"56 skin"`` (from concepts.csv id 611) or
-       ``"48 stomach (organ)"`` (id 610). Tracked separately as a PARSE
-       data-quality bug; this function defends the exporter against it.
 
-    The leading numeric prefix is stripped first (one shot — survey item ids
-    are well-formed `<digits>[.<digits>]` tokens), then trailing parentheticals
-    are stripped iteratively so chained suffixes like
+    Trailing parentheticals are stripped iteratively so chained suffixes like
     ``"egg (e.g., chicken) (A)"`` collapse to ``"egg"`` and combined cases like
-    ``"48 stomach (organ)"`` collapse to ``"stomach"``. Returns the input
-    unchanged when neither pattern matches.
+    ``"stomach (organ) (A)"`` collapse to ``"stomach"``. Returns the input
+    unchanged when no trailing parenthetical matches.
     """
     text = str(label or "").strip()
-    stripped_prefix = _LEADING_NUMBER_PREFIX_RE.sub("", text).strip()
-    if stripped_prefix:
-        text = stripped_prefix
     while True:
         stripped = _TRAILING_PAREN_RE.sub("", text).strip()
         if not stripped or stripped == text:
@@ -1323,12 +1317,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=None,
         help=(
-            "Path to an existing legacy review_data.json to anchor the export "
+            "DEPRECATED: path to an existing legacy review_data.json to anchor the export "
             "against. When set, the exporter iterates the legacy concepts list "
             "(preserving concept_id / concept_en / arabic / persian) and rebuilds "
             "each speaker's form from current PARSE workspace data, matching by "
             "concept gloss stem. Use this to collapse PARSE issue #529's "
-            "duplicate concept rows down to one entry per gloss."
+            "duplicate concept rows down to one entry per gloss. Post-MC-418 "
+            "canonical workspaces should use the default export path instead."
         ),
     )
     return parser.parse_args(argv)
@@ -1344,6 +1339,17 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = args.out.resolve()
     contact_config = args.contact_config.resolve() if args.contact_config else _default_contact_config()
     legacy_anchor = args.legacy_anchor.resolve() if args.legacy_anchor else None
+    if legacy_anchor is not None:
+        warnings.warn(
+            "--legacy-anchor is deprecated and will be removed in a future release. "
+            "The default non-anchored export now produces the canonical review_tool "
+            "shape against post-MC-418 workspaces. Concept identity is canonical in "
+            "/home/lucas/parse-workspace after the 2026-05-28 migration. Retire "
+            "your invocation of --legacy-anchor before 2026-Q3 or the flag will "
+            "start failing.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     if not workspace.exists():
         print(f"error: workspace not found: {workspace}", file=sys.stderr)
