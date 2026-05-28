@@ -84,7 +84,7 @@ interface ConceptSidebarProps {
   onPromoteSurveyPrimary?: (conceptId: string, surveyId: string, sourceItem: string) => void | Promise<void>;
   onMergeRequest?: (concept: SidebarConcept) => void;
   onUnmergeConcept?: (concept: SidebarConcept) => void;
-  onDuplicateConcept?: (concept: SidebarConcept) => void;
+  onAddElicitation?: (concept: SidebarConcept) => void;
   onDeleteConcept?: (concept: SidebarConcept) => void;
   /**
    * Optional grouped/source-item variant visibility predicate. ParseUI wires this to
@@ -99,7 +99,7 @@ interface ConceptSidebarProps {
   scopedToSpeaker?: boolean;
   onScopedToSpeakerChange?: (next: boolean) => void;
   elicitedConceptKeys?: ReadonlySet<string>;
-  recentlyDuplicatedSiblingKey?: string | null;
+  elicitationVariantLabelsByConceptKey?: Record<string, string[]>;
   actionFeedback?: { message: string; variant: 'error' | 'warning' } | null;
   onDismissActionFeedback?: () => void;
 }
@@ -198,14 +198,14 @@ export function ConceptSidebar({
   onPromoteSurveyPrimary,
   onMergeRequest,
   onUnmergeConcept,
-  onDuplicateConcept,
+  onAddElicitation,
   onDeleteConcept,
   isConceptVariantVisibleInSidebar,
   hideVariantPills = false,
   scopedToSpeaker = false,
   onScopedToSpeakerChange,
   elicitedConceptKeys = new Set<string>(),
-  recentlyDuplicatedSiblingKey = null,
+  elicitationVariantLabelsByConceptKey = {},
   actionFeedback = null,
   onDismissActionFeedback,
 }: ConceptSidebarProps) {
@@ -578,13 +578,21 @@ export function ConceptSidebar({
             : (resolvedSurvey.sourceItem || fallbackBadge || `#${concept.id}`);
           const variants = concept.variants ?? [];
           const visibleVariants = isConceptVariantVisibleInSidebar ? variants.filter((variant) => isConceptVariantVisibleInSidebar(concept, variant)) : variants;
+          const elicitationLabels = !hideVariantPills && !visibleVariants.length
+            ? (elicitationVariantLabelsByConceptKey[concept.key ?? String(concept.id)] ?? [])
+            : [];
           const hasVariants = !hideVariantPills && visibleVariants.length > 1;
+          const hasElicitationVariants = elicitationLabels.length > 1;
           const firstVariantKey = visibleVariants[0]?.conceptKey ?? variants[0]?.conceptKey ?? null;
           const parentActive = !!(concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey)));
           const parentName = concept.name;
           const noDataSuffix = !isElicited && !scopedToSpeaker && hasElicitedScope ? ' no data' : '';
           const mergeCountSuffix = concept.mergedKeys && concept.mergedKeys.length > 1 ? ` +${concept.mergedKeys.length - 1}` : '';
-          const variantSuffix = hasVariants ? ` variants ${visibleVariants.map((variant) => variant.variantLabel).join(' ')}` : '';
+          const variantSuffix = hasVariants
+            ? ` variants ${visibleVariants.map((variant) => variant.variantLabel).join(' ')}`
+            : hasElicitationVariants
+              ? ` variants ${elicitationLabels.join(' ')}`
+              : '';
           const parentButtonLabel = `${parentName}${noDataSuffix}${mergeCountSuffix} ${badge}${variantSuffix}`.trim();
           return (
             <div key={concept.id} data-testid={`concept-row-${concept.id}`} className="mb-0.5 rounded-md hover:bg-slate-50">
@@ -619,8 +627,6 @@ export function ConceptSidebar({
                   <div className="ml-1 flex shrink-0 items-center gap-0.5" aria-label={`${parentName} variants`}>
                     {visibleVariants.map((variant) => {
                       const childActive = concept.id === activeConceptId && activeConceptKey === variant.conceptKey;
-                      const isRecentlyDuplicated = !!recentlyDuplicatedSiblingKey
-                        && variant.conceptKey === recentlyDuplicatedSiblingKey;
                       const childConcept: SidebarConcept = {
                         ...concept,
                         key: variant.conceptKey,
@@ -639,8 +645,6 @@ export function ConceptSidebar({
                           dotTestId={`concept-variant-pill-dot-${variant.conceptKey}`}
                           conceptEn={variant.conceptEn}
                           active={childActive}
-                          recentlyDuplicated={isRecentlyDuplicated}
-                          showNew={isRecentlyDuplicated}
                           aria-label={`${parentName} variant ${variant.variantLabel} ${variant.conceptEn}`}
                           title={`${variant.conceptEn} (${variant.conceptKey})`}
                           data-testid={`concept-variant-pill-${variant.conceptKey}`}
@@ -653,6 +657,26 @@ export function ConceptSidebar({
                         />
                       );
                     })}
+                  </div>
+                )}
+                {hasElicitationVariants && (
+                  <div className="ml-1 flex shrink-0 items-center gap-0.5" aria-label={`${parentName} elicitations`}>
+                    {elicitationLabels.map((letter) => (
+                      <VariantChip
+                        as="button"
+                        key={`${concept.key ?? concept.id}:${letter}`}
+                        letter={letter}
+                        dotClassName={tagDot[concept.tag]}
+                        conceptEn={parentName}
+                        aria-label={`${parentName} (${letter})`}
+                        title={`${parentName} (${letter})`}
+                        active={parentActive}
+                        onClick={() => {
+                          if (concept.key) onConceptSelect(concept.id, concept.key);
+                          else onConceptSelect(concept.id);
+                        }}
+                      />
+                    ))}
                   </div>
                 )}
                 <SurveyBadge
@@ -698,14 +722,14 @@ export function ConceptSidebar({
             type="button"
             role="menuitem"
             aria-disabled="false"
-            title="Add a new variant"
+            title="Add another elicitation interval for this concept"
             className="block w-full rounded px-2 py-1 text-left text-slate-700 hover:bg-slate-50"
             onClick={() => {
-              onDuplicateConcept?.(contextMenu.concept);
+              onAddElicitation?.(contextMenu.concept);
               setContextMenu(null);
             }}
           >
-            Duplicate (split into next variant)
+            + Add elicitation
           </button>
           <button
             type="button"

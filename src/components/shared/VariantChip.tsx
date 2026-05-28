@@ -3,7 +3,6 @@ import type { ButtonHTMLAttributes, HTMLAttributes } from 'react';
 export const VARIANT_CHIP_BASE_CLASS = 'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 transition';
 export const VARIANT_CHIP_ACTIVE_CLASS = 'bg-indigo-50 text-indigo-900 ring-indigo-200';
 export const VARIANT_CHIP_INACTIVE_CLASS = 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50';
-export const VARIANT_CHIP_RECENT_CLASS = 'bg-emerald-50 text-emerald-800 ring-2 ring-emerald-400';
 
 interface VariantChipCommonProps {
   letter: string;
@@ -11,8 +10,6 @@ interface VariantChipCommonProps {
   dotTestId?: string;
   conceptEn?: string;
   active?: boolean;
-  recentlyDuplicated?: boolean;
-  showNew?: boolean;
 }
 
 type VariantChipSpanProps = VariantChipCommonProps & HTMLAttributes<HTMLSpanElement> & {
@@ -27,13 +24,11 @@ export type VariantChipProps = VariantChipSpanProps | VariantChipButtonProps;
 
 function variantChipClassName({
   active = false,
-  recentlyDuplicated = false,
   className = '',
-}: Pick<VariantChipCommonProps, 'active' | 'recentlyDuplicated'> & { className?: string }): string {
+}: Pick<VariantChipCommonProps, 'active'> & { className?: string }): string {
   return [
     VARIANT_CHIP_BASE_CLASS,
     active ? VARIANT_CHIP_ACTIVE_CLASS : VARIANT_CHIP_INACTIVE_CLASS,
-    recentlyDuplicated ? VARIANT_CHIP_RECENT_CLASS : '',
     className,
   ]
     .filter(Boolean)
@@ -48,8 +43,6 @@ export function VariantChip(props: VariantChipProps) {
     dotTestId,
     conceptEn,
     active = false,
-    recentlyDuplicated = false,
-    showNew = false,
     className,
     ...rest
   } = props;
@@ -62,7 +55,6 @@ export function VariantChip(props: VariantChipProps) {
       />
       <span>{letter}</span>
       {conceptEn && <span className="sr-only">{conceptEn}</span>}
-      {showNew && <span className="text-[8px] font-bold">NEW</span>}
     </>
   );
 
@@ -72,7 +64,7 @@ export function VariantChip(props: VariantChipProps) {
       <button
         {...buttonProps}
         type={buttonProps.type ?? 'button'}
-        className={variantChipClassName({ active, recentlyDuplicated, className })}
+        className={variantChipClassName({ active, className })}
       >
         {children}
       </button>
@@ -83,7 +75,7 @@ export function VariantChip(props: VariantChipProps) {
   return (
     <span
       {...spanProps}
-      className={variantChipClassName({ active, recentlyDuplicated, className })}
+      className={variantChipClassName({ active, className })}
     >
       {children}
     </span>

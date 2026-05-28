@@ -55,20 +55,6 @@ describe("createConceptInterval", () => {
     expect(getState().dirty.S1).toBe(true);
   });
 
-  it("is a no-op when the concept_id already has an interval", () => {
-    const { actions, getState, scheduleAutosave } = makeHarness(makeRecord([
-      { start: 0.5, end: 1.0, text: "head", concept_id: "623" },
-    ]));
-
-    actions.createConceptInterval("S1", "623", 1.25, 2.5);
-
-    expect(getState().records.S1.tiers.concept.intervals).toEqual([
-      { start: 0.5, end: 1.0, text: "head", concept_id: "623" },
-    ]);
-    expect(getState().dirty.S1).toBeUndefined();
-    expect(scheduleAutosave).not.toHaveBeenCalled();
-  });
-
   it("triggers autosave scheduling through the normal record mutation path", () => {
     const { actions, getState, scheduleAutosave } = makeHarness(makeRecord());
 
@@ -79,4 +65,18 @@ describe("createConceptInterval", () => {
     const undo = getState().histories.S1.undo;
     expect(undo[undo.length - 1]?.label).toBe("create concept interval");
   });
+
+  it("allows multiple elicitation intervals for the same concept_id", () => {
+    const { actions, getState } = makeHarness(makeRecord([
+      { start: 1, end: 2, text: "head", concept_id: "527" },
+    ]));
+
+    actions.createConceptInterval("S1", "527", 2.5, 3.5);
+
+    expect(getState().records.S1.tiers.concept.intervals).toEqual([
+      { start: 1, end: 2, text: "head", concept_id: "527" },
+      { start: 2.5, end: 3.5, text: "", concept_id: "527" },
+    ]);
+  });
+
 });

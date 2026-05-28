@@ -29,6 +29,7 @@ const mockSyncTagsFromServer = vi.fn().mockResolvedValue(undefined);
 const mockLoadSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockSetInterval = vi.fn();
 const mockSaveLexemeAnnotation = vi.fn().mockReturnValue({ ok: true, moved: 4 });
+const mockCreateConceptInterval = vi.fn();
 const mockSaveSpeaker = vi.fn().mockResolvedValue(undefined);
 const mockMarkLexemeManuallyAdjusted = vi.fn();
 const mockFlushAutosave = vi.fn();
@@ -148,6 +149,7 @@ vi.mock("./stores/annotationStore", () => {
       setConfirmedAnchor: mockSetConfirmedAnchor,
       clearConfirmedAnchor: mockClearConfirmedAnchor,
       saveLexemeAnnotation: mockSaveLexemeAnnotation,
+      createConceptInterval: mockCreateConceptInterval,
       saveSpeaker: mockSaveSpeaker,
       markLexemeManuallyAdjusted: mockMarkLexemeManuallyAdjusted,
       flushAutosave: mockFlushAutosave,
@@ -416,10 +418,6 @@ vi.mock("./api/client", () => ({
   startContactLexemeFetch: vi.fn().mockResolvedValue({ job_id: 'contact-fetch-job-1' }),
   listActiveJobs: vi.fn().mockResolvedValue([]),
   cancelComputeJob: vi.fn().mockResolvedValue({ cancelled: true, job_id: 'compute-job-1' }),
-  duplicateConcept: vi.fn().mockResolvedValue({
-    primary: { id: '1', label: 'water (A)', source_item: '1.1', source_survey: 'KLQ' },
-    sibling: { id: '618', label: 'water (B)', source_item: '1.1', source_survey: 'KLQ' },
-  }),
   deleteConcept: vi.fn().mockResolvedValue({ ok: true, deleted_id: '618' }),
   promoteConceptSurveyPrimary: vi.fn().mockResolvedValue({ ok: true, concept: { id: '1', label: 'nose', source_survey: 'jbil', source_item: '34' } }),
 }));
@@ -745,6 +743,7 @@ beforeEach(() => {
   mockSetInterval.mockClear();
   mockSaveLexemeAnnotation.mockReset();
   mockSaveLexemeAnnotation.mockReturnValue({ ok: true, moved: 4 });
+  mockCreateConceptInterval.mockClear();
   mockSaveSpeaker.mockClear();
   mockMarkLexemeManuallyAdjusted.mockClear();
   mockFlushAutosave.mockClear();
@@ -787,11 +786,6 @@ beforeEach(() => {
   vi.mocked(apiClient.startContactLexemeFetch).mockClear();
   vi.mocked(apiClient.listActiveJobs).mockClear();
   vi.mocked(apiClient.cancelComputeJob).mockClear();
-  vi.mocked(apiClient.duplicateConcept).mockReset();
-  vi.mocked(apiClient.duplicateConcept).mockResolvedValue({
-    primary: { id: '1', label: 'water (A)', source_item: '1.1', source_survey: 'KLQ' },
-    sibling: { id: '618', label: 'water (B)', source_item: '1.1', source_survey: 'KLQ' },
-  });
   vi.mocked(apiClient.deleteConcept).mockReset();
   vi.mocked(apiClient.deleteConcept).mockResolvedValue({ ok: true, deleted_id: '618' });
   vi.mocked(apiClient.promoteConceptSurveyPrimary).mockReset();
@@ -820,6 +814,55 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+
+
+describe("MC-418-B add elicitation", () => {
+  it("replaces duplicate variant with + Add elicitation and creates another interval on the same concept id", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      ...mockConfig!,
+      speakers: ["Fail01"],
+      concepts: [{ id: "527", label: "head", source_item: "10", source_survey: "jbil" }],
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "head", conceptId: "527", ipa: "sær", start: 3, end: 4 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    const rowButton = await screen.findByRole("button", { name: /head.*JBIL 10/i });
+    fireEvent.contextMenu(rowButton);
+
+    expect(screen.queryByText(/Duplicate/)).not.toBeTruthy();
+    fireEvent.click(await screen.findByRole("menuitem", { name: /\+ Add elicitation/i }));
+
+    expect(mockCreateConceptInterval).toHaveBeenCalledWith("Fail01", "527", 4.5, 5.5);
+  });
+
+  it("renders per-speaker interval-rank variant chips without persisted concept variants", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      ...mockConfig!,
+      speakers: ["Fail01"],
+      concepts: [{ id: "527", label: "head", source_item: "10", source_survey: "jbil" }],
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "head", conceptId: "527", ipa: "late", start: 10, end: 11 },
+        { conceptText: "head", conceptId: "527", ipa: "early", start: 3, end: 4 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    const rowButton = await screen.findByRole("button", { name: /head.*JBIL 10/i });
+    const row = rowButton.closest("[data-testid^=\"concept-row-\"]") as HTMLElement;
+    expect(within(row).getByRole("button", { name: "head (A)" })).toBeTruthy();
+    expect(within(row).getByRole("button", { name: "head (B)" })).toBeTruthy();
+  });
+});
 
 describe('ParseUI survey primary promotion', () => {
   it('promotes primary survey from the no-speaker sidebar badge and refreshes config', async () => {
@@ -1831,324 +1874,6 @@ describe("ParseUI", () => {
     expect(problematicRow().getAttribute("aria-pressed")).toBe("true");
     expect(confirmedRow().className).toContain("bg-indigo-50");
     expect(problematicRow().className).toContain("bg-indigo-50");
-  });
-
-  it("seeds loaded annotation records with duplicate sibling tags and keeps the grouped primary tag visible", async () => {
-    mockTags = [...mockTags, { id: "thesis", label: "Thesis", color: "#6366f1" }];
-    mockConfig = {
-      project_name: "PARSE",
-      language_code: "ku",
-      speakers: ["Fail01"],
-      concepts: [
-        { id: "365", label: "JBIL 154", source_item: "154", source_survey: "JBIL" },
-      ],
-      audio_dir: "audio",
-      annotations_dir: "annotations",
-    };
-    mockRecords = {
-      Fail01: { ...makeRecord("Fail01", []), concept_tags: { "365": ["thesis"] } },
-    };
-    vi.mocked(apiClient.duplicateConcept).mockResolvedValueOnce({
-      primary: { id: "365", label: "JBIL 154 (A)", source_item: "154", source_survey: "JBIL" },
-      sibling: { id: "618", label: "JBIL 154 (B)", source_item: "154", source_survey: "JBIL" },
-    });
-    mockReloadConfig.mockImplementationOnce(async () => {
-      mockConfig = {
-        ...(mockConfig as ProjectConfig),
-        concepts: [
-          { id: "365", label: "JBIL 154 (A)", source_item: "154", source_survey: "JBIL" },
-          { id: "618", label: "JBIL 154 (B)", source_item: "154", source_survey: "JBIL" },
-        ],
-      };
-    });
-
-    render(<ParseUI />);
-    await switchToAnnotateMode();
-    mockSyncTagsFromServer.mockClear();
-    const rightPanel = () => screen.getByTestId("right-panel");
-    const thesisRow = () => within(rightPanel()).getByRole("button", { name: /Thesis\s+\d+/i });
-    expect(thesisRow().getAttribute("aria-pressed")).toBe("true");
-
-    fireEvent.contextMenu(screen.getByRole("button", { name: /JBIL 154/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
-
-    await waitFor(() => expect(apiClient.duplicateConcept).toHaveBeenCalledWith("365"));
-    await waitFor(() => expect(mockRecords.Fail01.concept_tags?.["618"]).toEqual(["thesis"]));
-    await waitFor(() => expect(mockSyncTagsFromServer).toHaveBeenCalledOnce());
-    expect(mockSyncTagsFromServer.mock.invocationCallOrder[0]).toBeGreaterThan(mockReloadConfig.mock.invocationCallOrder[0]);
-    expect(mockRecords.Fail01.concept_tags?.["365"]).toEqual(["thesis"]);
-    expect(thesisRow().getAttribute("aria-pressed")).toBe("true");
-  });
-
-  it("duplicates an already grouped A/B variant and shows A/B/C children after reload", async () => {
-    window.localStorage.setItem("parse.currentMode", "annotate");
-    mockConfig = {
-      project_name: "PARSE",
-      language_code: "ku",
-      speakers: ["Fail01"],
-      concepts: [
-        { id: "365", label: "new (A)", source_item: "154", source_survey: "JBIL" },
-        { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
-      ],
-      audio_dir: "audio",
-      annotations_dir: "annotations",
-    };
-    mockRecords = { Fail01: makeRecord("Fail01", []) };
-    vi.mocked(apiClient.duplicateConcept).mockResolvedValueOnce({
-      primary: { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
-      sibling: { id: "619", label: "new (C)", source_item: "154", source_survey: "JBIL" },
-    });
-    mockReloadConfig.mockImplementationOnce(async () => {
-      mockConfig = {
-        ...(mockConfig as ProjectConfig),
-        concepts: [
-          { id: "365", label: "new (A)", source_item: "154", source_survey: "JBIL" },
-          { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
-          { id: "619", label: "new (C)", source_item: "154", source_survey: "JBIL" },
-        ],
-      };
-    });
-
-    render(<ParseUI />);
-
-    const sidebar = await screen.findByTestId("concept-sidebar");
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-618")).toBeTruthy());
-    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-pill-618"));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
-
-    await waitFor(() => expect(apiClient.duplicateConcept).toHaveBeenCalledWith("618"));
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-619")).toBeTruthy());
-    expect(within(sidebar).getByTestId("concept-variant-pill-365").textContent ?? "").toContain("new (A)");
-    expect(within(sidebar).getByTestId("concept-variant-pill-618").textContent ?? "").toContain("new (B)");
-    expect(within(sidebar).getByTestId("concept-variant-pill-619").textContent ?? "").toContain("new (C)");
-  });
-
-  it("focuses the new duplicate sibling, shows success feedback, and clears the NEW marker", async () => {
-    window.localStorage.setItem("parse.currentMode", "annotate");
-    mockConfig = {
-      project_name: "PARSE",
-      language_code: "ku",
-      speakers: ["Fail01"],
-      concepts: [
-        { id: "365", label: "new (A)", source_item: "154", source_survey: "JBIL" },
-        { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
-      ],
-      audio_dir: "audio",
-      annotations_dir: "annotations",
-    };
-    mockRecords = { Fail01: makeRecord("Fail01", []) };
-    vi.mocked(apiClient.duplicateConcept).mockResolvedValueOnce({
-      primary: { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
-      sibling: { id: "619", label: "new (C)", source_item: "154", source_survey: "JBIL" },
-    });
-    mockReloadConfig.mockImplementationOnce(async () => {
-      mockConfig = {
-        ...(mockConfig as ProjectConfig),
-        concepts: [
-          { id: "365", label: "new (A)", source_item: "154", source_survey: "JBIL" },
-          { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
-          { id: "619", label: "new (C)", source_item: "154", source_survey: "JBIL" },
-        ],
-      };
-    });
-
-    render(<ParseUI />);
-
-    const sidebar = await screen.findByTestId("concept-sidebar");
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-618")).toBeTruthy());
-    vi.useFakeTimers();
-    fireEvent.click(within(sidebar).getByTestId("concept-variant-pill-618"));
-    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-pill-618"));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
-
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(apiClient.duplicateConcept).toHaveBeenCalledWith("618");
-    const originalRow = within(sidebar).getByTestId("concept-variant-pill-618");
-    const siblingRow = within(sidebar).getByTestId("concept-variant-pill-619");
-    expect(originalRow.className).not.toContain("bg-indigo-50");
-    expect(siblingRow.className).toContain("bg-indigo-50");
-    expect(siblingRow.textContent ?? "").toContain("NEW");
-    expect(screen.queryByRole("alert")).toBeNull();
-
-    act(() => {
-      vi.advanceTimersByTime(5000);
-    });
-    expect(within(sidebar).getByTestId("concept-variant-pill-619").textContent ?? "").not.toContain("NEW");
-  });
-
-  it("duplicate 409 error surfaces in the sidebar inline notice and clears after 5s", async () => {
-    window.localStorage.setItem("parse.currentMode", "annotate");
-    mockConfig = {
-      project_name: "PARSE",
-      language_code: "ku",
-      speakers: ["Fail01"],
-      concepts: [
-        { id: "365", label: "new (A)", source_item: "154", source_survey: "JBIL" },
-        { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
-      ],
-      audio_dir: "audio",
-      annotations_dir: "annotations",
-    };
-    mockRecords = { Fail01: makeRecord("Fail01", []) };
-    vi.mocked(apiClient.duplicateConcept).mockRejectedValueOnce(new ApiError(409, "POST", "/api/concepts/618/duplicate", { error: "duplicate exists" }, "API POST /api/concepts/618/duplicate failed 409: duplicate exists"));
-
-    render(<ParseUI />);
-
-    const sidebar = await screen.findByTestId("concept-sidebar");
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-618")).toBeTruthy());
-    vi.useFakeTimers();
-    fireEvent.contextMenu(within(sidebar).getByTestId("concept-variant-pill-618"));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
-
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    const feedback = within(sidebar).getByTestId("sidebar-action-feedback");
-    expect(feedback.textContent ?? "").toContain("duplicate exists");
-    expect(feedback.className).toContain("bg-amber-50");
-    expect(screen.queryByRole("alert")).toBeNull();
-
-    act(() => {
-      vi.advanceTimersByTime(5000);
-    });
-    expect(within(sidebar).queryByTestId("sidebar-action-feedback")).toBeNull();
-  });
-
-
-  it("duplicates the active speaker's visible variant when right-clicking a grouped parent", async () => {
-    window.localStorage.setItem("parse.currentMode", "annotate");
-    mockConfig = {
-      project_name: "PARSE",
-      language_code: "ku",
-      speakers: ["Fail01", "Kalh01"],
-      concepts: [
-        { id: "247", label: "head (A)", source_item: "31", source_survey: "JBIL" },
-        { id: "527", label: "head", source_item: "31", source_survey: "JBIL" },
-        { id: "622", label: "head (C)", source_item: "31", source_survey: "JBIL" },
-      ],
-      audio_dir: "audio",
-      annotations_dir: "annotations",
-    };
-    // Fail01 ONLY annotated row 527. Other rows (247, 622) are Kalh01's.
-    mockRecords = {
-      Fail01: makeRecord("Fail01", [{ conceptText: "head", conceptId: "527", start: 1, end: 2 }]),
-      Kalh01: makeRecord("Kalh01", [
-        { conceptText: "head (A)", conceptId: "247", start: 3, end: 4 },
-        { conceptText: "head (C)", conceptId: "622", start: 5, end: 6 },
-      ]),
-    };
-    vi.mocked(apiClient.duplicateConcept).mockResolvedValueOnce({
-      primary: { id: "527", label: "head (D)", source_item: "31", source_survey: "JBIL" },
-      sibling: { id: "999", label: "head (E)", source_item: "31", source_survey: "JBIL" },
-    });
-
-    render(<ParseUI />);
-
-    const sidebar = await screen.findByTestId("concept-sidebar");
-    await screen.findByTestId("annotate-progress-Fail01");
-    // Strict per-variant scope (MC-371-F): the parent renders as a single-row group
-    // because only row 527 is visible to Fail01.
-    fireEvent.contextMenu(within(sidebar).getByRole("button", { name: /head.*JBIL 31/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
-
-    // The firstVisibleVariantKey fallback MUST pick 527 (Fail01's only-visible variant),
-    // NOT variants[0] which is "247" (Kalh01's variant).
-    await waitFor(() => expect(apiClient.duplicateConcept).toHaveBeenCalledWith("527"));
-    expect(apiClient.duplicateConcept).not.toHaveBeenCalledWith("247");
-    expect(apiClient.duplicateConcept).not.toHaveBeenCalledWith("622");
-  });
-
-  it("right-click duplicate keeps the new sibling visible in scoped view for the duplicating speaker", async () => {
-    window.localStorage.setItem("parse.currentMode", "annotate");
-    mockConfig = {
-      project_name: "PARSE",
-      language_code: "ku",
-      speakers: ["Fail01", "Kalh01"],
-      concepts: [
-        { id: "365", label: "JBIL 154", source_item: "154", source_survey: "JBIL" },
-      ],
-      audio_dir: "audio",
-      annotations_dir: "annotations",
-    };
-    mockRecords = {
-      Fail01: makeRecord("Fail01", [{ conceptText: "JBIL 154", conceptId: "365", start: 1, end: 2 }]),
-      Kalh01: makeRecord("Kalh01", [{ conceptText: "other", conceptId: "888", start: 3, end: 4 }]),
-    };
-    vi.mocked(apiClient.duplicateConcept).mockResolvedValueOnce({
-      primary: { id: "365", label: "JBIL 154 (A)", source_item: "154", source_survey: "JBIL" },
-      sibling: { id: "999", label: "JBIL 154 (B)", source_item: "154", source_survey: "JBIL" },
-    });
-    mockReloadConfig.mockImplementationOnce(async () => {
-      mockConfig = {
-        ...(mockConfig as ProjectConfig),
-        concepts: [
-          { id: "365", label: "JBIL 154 (A)", source_item: "154", source_survey: "JBIL" },
-          { id: "999", label: "JBIL 154 (B)", source_item: "154", source_survey: "JBIL" },
-        ],
-      };
-    });
-
-    render(<ParseUI />);
-
-    const sidebar = await screen.findByTestId("concept-sidebar");
-    fireEvent.contextMenu(within(sidebar).getByRole("button", { name: /JBIL 154/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
-
-    await waitFor(() => expect(apiClient.duplicateConcept).toHaveBeenCalledWith("365"));
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-999")).toBeTruthy());
-  });
-
-  it("switching speakers scopes the fresh duplicate only to the duplicating speaker", async () => {
-    window.localStorage.setItem("parse.currentMode", "annotate");
-    mockConfig = {
-      project_name: "PARSE",
-      language_code: "ku",
-      speakers: ["Fail01", "Kalh01"],
-      concepts: [
-        { id: "365", label: "JBIL 154", source_item: "154", source_survey: "JBIL" },
-        { id: "888", label: "other" },
-      ],
-      audio_dir: "audio",
-      annotations_dir: "annotations",
-    };
-    mockRecords = {
-      Fail01: makeRecord("Fail01", [{ conceptText: "JBIL 154", conceptId: "365", start: 1, end: 2 }]),
-      Kalh01: makeRecord("Kalh01", [{ conceptText: "other", conceptId: "888", start: 3, end: 4 }]),
-    };
-    vi.mocked(apiClient.duplicateConcept).mockResolvedValueOnce({
-      primary: { id: "365", label: "JBIL 154 (A)", source_item: "154", source_survey: "JBIL" },
-      sibling: { id: "999", label: "JBIL 154 (B)", source_item: "154", source_survey: "JBIL" },
-    });
-    mockReloadConfig.mockImplementationOnce(async () => {
-      mockConfig = {
-        ...(mockConfig as ProjectConfig),
-        concepts: [
-          { id: "365", label: "JBIL 154 (A)", source_item: "154", source_survey: "JBIL" },
-          { id: "999", label: "JBIL 154 (B)", source_item: "154", source_survey: "JBIL" },
-          { id: "888", label: "other" },
-        ],
-      };
-    });
-
-    render(<ParseUI />);
-
-    const sidebar = await screen.findByTestId("concept-sidebar");
-    fireEvent.contextMenu(within(sidebar).getByRole("button", { name: /JBIL 154/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate \(split into next variant\)/i }));
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-999")).toBeTruthy());
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Kalh01" })[0]);
-    await waitFor(() => expect(within(sidebar).queryByTestId("concept-variant-pill-999")).toBeNull());
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Fail01" })[0]);
-    await waitFor(() => expect(within(sidebar).getByTestId("concept-variant-pill-999")).toBeTruthy());
   });
 
   it("other speakers' annotated variants do not appear in a scoped grouped row", async () => {
