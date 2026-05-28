@@ -63,7 +63,7 @@ import { useExport } from './hooks/useExport';
 import { useTagImport } from './hooks/useTagImport';
 import { useActiveJobsFeed } from './hooks/useActiveJobsFeed';
 import { listActiveJobs } from './api/client';
-import { deleteConcept, promoteConceptSurveyPrimary } from './api/client';
+import { deleteAnnotationInterval, deleteConcept, promoteConceptSurveyPrimary } from './api/client';
 import { ApiError } from './api/contracts/shared';
 import { useConfigStore } from './stores/configStore';
 import { useEnrichmentStore } from './stores/enrichmentStore';
@@ -1380,6 +1380,35 @@ export function ParseUI() {
     createConceptInterval(speaker, conceptKey, Number(start.toFixed(3)), Number(end.toFixed(3)));
   }, [activeSpeakerForSidebar, createConceptInterval, flashActionFeedback]);
 
+  const handleDeleteInterval = useCallback(async (speaker: string, conceptKey: string, intervalIndex: number) => {
+    try {
+      const store = useAnnotationStore.getState();
+      if (store.dirty?.[speaker]) {
+        await store.saveSpeaker(speaker);
+      }
+      const intervals = (useAnnotationStore.getState().records[speaker]?.tiers?.concept?.intervals ?? [])
+        .filter((interval) => String(interval.concept_id ?? '') === conceptKey)
+        .sort((left, right) => left.start - right.start);
+      const target = intervals[intervalIndex];
+      if (!target) {
+        flashActionFeedback('Could not find that interval in the loaded annotation.', 'warning');
+        return;
+      }
+      await deleteAnnotationInterval({
+        speaker,
+        concept_id: conceptKey,
+        start: target.start,
+        end: target.end,
+      });
+      await reloadSpeakerAnnotation(speaker);
+      flashActionFeedback('Interval deleted; backup created.', 'warning');
+    } catch (err) {
+      console.error('[ParseUI] deleteAnnotationInterval failed:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      flashActionFeedback(`Could not delete interval: ${message}`, 'error');
+    }
+  }, [flashActionFeedback, reloadSpeakerAnnotation]);
+
   const speakerForms = useMemo<SpeakerForm[]>(() => {
     const activeSpeakers = selectedSpeakers.filter((speaker) => speakers.includes(speaker));
     const flagged = getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'problematic');
@@ -1924,6 +1953,7 @@ export function ParseUI() {
             });
           }}
           onAddElicitation={handleAddElicitation}
+          onDeleteInterval={handleDeleteInterval}
         />
 
         {/* MAIN + AI STACK */}

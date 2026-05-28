@@ -1570,6 +1570,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_post_offset_apply()
             return
 
+        if request_path == "/api/annotations/intervals/delete":
+            self._api_post_annotation_interval_delete()
+            return
+
         parts = self._path_parts(request_path)
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "survey-links": self._api_post_concept_survey_link(parts[2]); return
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "promote-survey-primary": self._api_post_concept_promote_survey_primary(parts[2]); return

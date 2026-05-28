@@ -4069,6 +4069,102 @@ def _compute_offset_detect_from_pair(job_id: str, payload: _server.Dict[str, _se
     _set_compute_progress(job_id, 92, message='Finalizing result')
     return _server._offset_detect_payload(speaker=speaker, offset_sec=median_offset, confidence=float(confidence), n_matched=len(matches), total_anchors=len(matches), total_segments=0, method='manual_pair', spread_sec=float(spread), matches=matches, anchor_distribution='manual')
 
+# Mirror-tier intervals with start/end drift > 1ms from the concept-tier
+# timestamps will NOT be auto-deleted alongside the concept row; surface
+# via the text-vs-concept_en audit (MC-418-G) or manual cleanup.
+_INTERVAL_DELETE_TOLERANCE_SEC = 0.001
+_INTERVAL_DELETE_TIERS = ('concept', 'ipa', 'ortho', 'ortho_words', 'speaker')
+
+
+def _annotation_interval_matches(raw_interval: _server.Any, start: float, end: float) -> bool:
+    interval = _server._annotation_normalize_interval(raw_interval)
+    if interval is None:
+        return False
+    return abs(float(interval['start']) - start) < _INTERVAL_DELETE_TOLERANCE_SEC and abs(float(interval['end']) - end) < _INTERVAL_DELETE_TOLERANCE_SEC
+
+
+def _annotation_delete_interval(
+    record: _server.Dict[str, _server.Any],
+    *,
+    concept_id: str,
+    start: float,
+    end: float,
+) -> _server.Dict[str, int]:
+    tiers = record.get('tiers')
+    if not isinstance(tiers, dict):
+        return {tier_name: 0 for tier_name in _INTERVAL_DELETE_TIERS}
+    removed: _server.Dict[str, int] = {tier_name: 0 for tier_name in _INTERVAL_DELETE_TIERS}
+    for tier_name in _INTERVAL_DELETE_TIERS:
+        tier = tiers.get(tier_name)
+        if not isinstance(tier, dict):
+            continue
+        intervals = tier.get('intervals')
+        if not isinstance(intervals, list):
+            continue
+        kept: _server.List[_server.Any] = []
+        for raw_interval in intervals:
+            delete_this = _annotation_interval_matches(raw_interval, start, end)
+            if tier_name == 'concept':
+                delete_this = delete_this and str(raw_interval.get('concept_id') if isinstance(raw_interval, dict) else '').strip() == concept_id
+            if delete_this:
+                removed[tier_name] += 1
+            else:
+                kept.append(raw_interval)
+        tier['intervals'] = kept
+    return removed
+
+
+def _annotation_backup_path(path: _server.pathlib.Path, suffix: str) -> _server.pathlib.Path:
+    stamp = _server.datetime.now(_server.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    return path.with_name('{0}.bak-{1}-{2}'.format(path.name, stamp, suffix))
+
+
+def _relative_project_path(path: _server.pathlib.Path) -> str:
+    try:
+        return path.relative_to(_server._project_root()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _api_post_annotation_interval_delete(self) -> None:
+    body = self._expect_object(self._read_json_body(required=True), 'Request body')
+    try:
+        speaker = _server._normalize_speaker_id(body.get('speaker'))
+    except ValueError as exc:
+        raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, str(exc)) from exc
+    concept_id = str(body.get('concept_id') if body.get('concept_id') is not None else body.get('conceptId') or '').strip()
+    if not concept_id:
+        raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, 'concept_id is required')
+    start = _server._coerce_finite_float(body.get('start'))
+    end = _server._coerce_finite_float(body.get('end'))
+    if start is None or end is None or end < start:
+        raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, 'Valid start/end are required')
+    try:
+        annotation_path, canonical_path, legacy_path = _server._annotation_paths_for_speaker(speaker)
+    except RuntimeError as exc:
+        raise _server.ApiError(_server.HTTPStatus.NOT_FOUND, str(exc)) from exc
+    annotation = _server._read_json_file(annotation_path, {})
+    if not isinstance(annotation, dict):
+        raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, 'Annotation is not a JSON object')
+    removed = _annotation_delete_interval(annotation, concept_id=concept_id, start=float(start), end=float(end))
+    if removed.get('concept', 0) == 0:
+        raise _server.ApiError(_server.HTTPStatus.NOT_FOUND, 'No matching concept interval for speaker {0}, concept_id {1}, start {2}, end {3}'.format(speaker, concept_id, start, end))
+    backup_path = _annotation_backup_path(annotation_path, 'pre-interval-delete')
+    _server.shutil.copy2(annotation_path, backup_path)
+    _server._annotation_touch_metadata(annotation, preserve_created=True)
+    _server._write_annotation_to_canonical_and_legacy(annotation_path, canonical_path, legacy_path, annotation)
+    self._send_json(_server.HTTPStatus.OK, {
+        'ok': True,
+        'speaker': speaker,
+        'concept_id': concept_id,
+        'start': float(start),
+        'end': float(end),
+        'removed': removed,
+        'backup_path': _relative_project_path(backup_path),
+        'tolerance_sec': _INTERVAL_DELETE_TOLERANCE_SEC,
+    })
+
+
 def _api_get_annotation(self, speaker: str) -> None:
     """Return annotation JSON for a single speaker.
 
@@ -4192,5 +4288,5 @@ def _api_post_offset_apply(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-__all__ = ['_partial_ortho_rows_to_word_segments', '_pick_lexeme_word_for_concept', '_align_partial_ortho_words', '_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_payload_pad', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_compute_lexeme_rerun_ipa', '_compute_lexeme_rerun_ortho', '_compute_lexemes_rerun_by_tag', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_ensure_host_memory_for_step', '_collect_after_unload', '_gpu_free_memory_gb', '_ensure_free_gpu_memory_for_ipa', '_full_pipeline_ipa_step_result', '_isolated_subprocess_error_result', '_full_pipeline_ipa_subprocess_error_result', '_full_pipeline_ipa_subprocess_entry', '_speaker_ortho_step_result', '_speaker_ortho_subprocess_entry', '_speaker_ipa_subprocess_entry', '_run_in_isolated_subprocess', '_compute_full_pipeline_ipa_in_subprocess', '_compute_speaker_ortho_in_subprocess', '_compute_speaker_ortho_dispatch', '_compute_speaker_ipa_in_subprocess', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
+__all__ = ['_partial_ortho_rows_to_word_segments', '_pick_lexeme_word_for_concept', '_align_partial_ortho_words', '_annotation_empty_tier', '_annotation_sort_intervals', '_annotation_normalize_interval', '_annotation_tier_key', '_annotation_normalize_tier', '_annotation_max_end', '_annotation_sort_all_intervals', '_annotation_collect_speaker_intervals', '_offset_detect_payload', '_annotation_find_concept_interval', '_annotation_offset_anchor_intervals', '_annotation_shift_intervals', '_stt_cache_path', '_write_stt_cache', '_read_stt_cache', '_latest_stt_segments_for_speaker', '_annotation_sync_speaker_tier', '_annotation_touch_metadata', '_annotation_empty_record', '_annotation_upsert_interval', '_normalize_flat_annotation_entry', '_annotation_record_from_flat_entries', '_normalize_annotation_record', '_normalize_speaker_id', '_annotation_record_relative_path', '_annotation_legacy_record_relative_path', '_annotation_resolve_relative_path', '_annotation_record_path_for_speaker', '_annotation_legacy_record_path_for_speaker', '_annotation_read_path_for_speaker', '_annotation_payload_from_request_body', '_pipeline_audio_path_for_speaker', '_audio_duration_sec', '_tier_coverage', '_pipeline_state_for_speaker', '_ortho_tier2_align_to_words', '_normalize_compute_run_mode', '_payload_concept_ids', '_payload_pad', '_concept_intervals_for_run_mode', '_affected_concepts_payload', '_concept_window_no_op_result', '_concept_windows_empty_reason', '_merge_concept_window_rows', '_run_step_on_concept_windows', '_short_clip_refine_lexemes', '_merge_ortho_words', '_annotation_paths_for_speaker', '_write_annotation_to_canonical_and_legacy', '_compute_speaker_stt', '_compute_speaker_ortho_concept_windows', '_compute_speaker_ipa_concept_windows', '_compute_speaker_ipa', '_compute_speaker_forced_align', '_compute_speaker_boundaries', '_compute_speaker_retranscribe_with_boundaries', '_compute_speaker_ortho', '_compute_lexeme_rerun_ipa', '_compute_lexeme_rerun_ortho', '_compute_lexemes_rerun_by_tag', '_full_pipeline_min_host_memory_gb', '_host_memory_info', '_host_available_memory_gb', '_ensure_host_memory_for_full_pipeline', '_ensure_host_memory_for_step', '_collect_after_unload', '_gpu_free_memory_gb', '_ensure_free_gpu_memory_for_ipa', '_full_pipeline_ipa_step_result', '_isolated_subprocess_error_result', '_full_pipeline_ipa_subprocess_error_result', '_full_pipeline_ipa_subprocess_entry', '_speaker_ortho_step_result', '_speaker_ortho_subprocess_entry', '_speaker_ipa_subprocess_entry', '_run_in_isolated_subprocess', '_compute_full_pipeline_ipa_in_subprocess', '_compute_speaker_ortho_in_subprocess', '_compute_speaker_ortho_dispatch', '_compute_speaker_ipa_in_subprocess', '_compute_full_pipeline', '_compute_concept_scoped_noop_payload', '_offset_detect_timeout_sec', '_enforce_offset_deadline', '_compute_offset_detect', '_compute_offset_detect_from_pair', '_api_post_annotation_interval_delete', '_api_get_annotation', '_api_get_stt_segments', '_api_get_pipeline_state', '_api_post_annotation', '_api_post_offset_detect', '_api_post_offset_detect_from_pair', '_api_post_offset_apply']
 
