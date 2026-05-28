@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import json
+import warnings
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -22,6 +23,7 @@ from export_review_data import (
     _variant_letter,
     build_review_data,
     build_review_data_anchored,
+    main,
     write_outputs,
 )
 
@@ -753,35 +755,36 @@ class CrosstierTextTests(unittest.TestCase):
         self.assertEqual(_crosstier_text(payload, "ipa", set(), 1.0, 2.0), "center")
 
 
-class LegacyAnchoredTests(unittest.TestCase):
-    """End-to-end tests for build_review_data_anchored."""
+class DefaultModeExportTests(unittest.TestCase):
+    """Default export behavior after MC-418 workspace canonicalization.
 
-    def _ash_workspace_and_anchor(self, tmp: str) -> tuple[Path, Path]:
-        """Two PARSE rows for 'ash' (variant pollution); one speaker has data.
+    This replaces LegacyAnchoredTests: anchored mode stays callable for one
+    deprecation window, but migrated workspaces should use the default exporter
+    directly and emit clean concept labels without review_tool anchoring.
+    """
 
-        Legacy carries the canonical concept_id=132 for ash, with Arabic and
-        Persian reference forms. The exporter should collapse both PARSE rows
-        into one entry preserving the legacy concept_id and references.
-        """
-        workspace = _make_workspace(
+    @staticmethod
+    def _migrated_workspace(tmp: str) -> Path:
+        return _make_workspace(
             Path(tmp),
             concepts=[
-                # PARSE pollution: two rows for the same gloss, different concept_ids.
-                {"id": "1", "concept_en": "ash (A)", "source_item": "1.1", "source_survey": "KLQ"},
-                {"id": "2", "concept_en": "ash", "source_item": "1.1", "source_survey": "KLQ"},
+                {"id": "132", "concept_en": "ash", "source_item": "1.1", "source_survey": "KLQ"},
+                {"id": "169", "concept_en": "big", "source_item": "4.1", "source_survey": "KLQ"},
             ],
             speakers={
                 "Fail01": {
                     "concept_intervals": [
-                        # Speaker only tagged concept_id="2" — but legacy looks for "ash" globally.
-                        {"concept_id": "2", "start": 0.5, "end": 1.25}
+                        {"concept_id": "132", "start": 0.5, "end": 1.25},
+                        {"concept_id": "169", "start": 2.0, "end": 2.75},
                     ],
-                    "tagged_ids": ["2"],
+                    "tagged_ids": ["132", "169"],
                     "ipa_intervals": [
-                        {"start": 0.5, "end": 1.25, "text": "aʂ", "conceptId": "2"}
+                        {"start": 0.5, "end": 1.25, "text": "aʂ", "conceptId": "132"},
+                        {"start": 2.0, "end": 2.75, "text": "ɡap", "conceptId": "169"},
                     ],
                     "ortho_intervals": [
-                        {"start": 0.5, "end": 1.25, "text": "aş", "conceptId": "2"}
+                        {"start": 0.5, "end": 1.25, "text": "aş", "conceptId": "132"},
+                        {"start": 2.0, "end": 2.75, "text": "گەپ", "conceptId": "169"},
                     ],
                 },
                 "Kalh01": {
@@ -790,180 +793,65 @@ class LegacyAnchoredTests(unittest.TestCase):
                 },
             },
         )
-        anchor = _write_legacy_anchor(
-            Path(tmp),
-            concepts=[
-                {
-                    "concept_id": "132",
-                    "concept_en": "ash",
-                    "arabic": {"form": "رماد", "ipa": "ramaːd"},
-                    "persian": {"form": "خاکستر", "ipa": "xɑːkestær"},
-                    "forms": [
-                        {"speaker": "Fail01", "source": "JBIL"},
-                        {"speaker": "Kalh01", "source": "JBIL"},
-                    ],
-                }
-            ],
-        )
-        return workspace, anchor
 
-    def test_anchored_collapses_polluted_concepts_csv_to_one_entry(self) -> None:
+    def test_default_mode_concept_count_matches_post_migration_canonical(self) -> None:
         with TemporaryDirectory() as tmp:
-            workspace, anchor = self._ash_workspace_and_anchor(tmp)
-            review_data, clip_plan = build_review_data_anchored(
-                workspace=workspace,
-                legacy_anchor=anchor,
-            )
+            workspace = self._migrated_workspace(tmp)
+            review_data, clip_plan = build_review_data(workspace=workspace)
 
-        # ONE concept entry per legacy entry, not two for "ash" + "ash (A)".
-        self.assertEqual(len(review_data["concepts"]), 1)
-        concept = review_data["concepts"][0]
-        # Legacy concept identity preserved.
-        self.assertEqual(concept["concept_id"], "132")
-        self.assertEqual(concept["concept_en"], "ash")
-        self.assertEqual(concept["arabic"], {"form": "رماد", "ipa": "ramaːd"})
-        self.assertEqual(concept["persian"], {"form": "خاکستر", "ipa": "xɑːkestær"})
+        self.assertEqual(len(review_data["concepts"]), 2)
+        self.assertEqual(review_data["metadata"]["method"], "parse_workspace_export")
+        self.assertEqual(review_data["metadata"]["source"]["tagged_concept_count"], 2)
+        self.assertEqual(len(clip_plan), 2)
 
-    def test_anchored_recovers_per_speaker_ipa_and_ortho_via_crosstier_join(self) -> None:
+    def test_default_mode_concept_en_has_no_variant_or_cue_prefix(self) -> None:
         with TemporaryDirectory() as tmp:
-            workspace, anchor = self._ash_workspace_and_anchor(tmp)
-            review_data, _ = build_review_data_anchored(
-                workspace=workspace,
-                legacy_anchor=anchor,
-            )
+            workspace = self._migrated_workspace(tmp)
+            review_data, _ = build_review_data(workspace=workspace)
 
-        forms = {f["speaker"]: f for f in review_data["concepts"][0]["forms"]}
-        # Fail01 had a single interval — cross-tier join finds the matching IPA/ortho.
-        self.assertEqual(forms["Fail01"]["ipa"], "aʂ")
-        self.assertEqual(forms["Fail01"]["ortho"], "aş")
-        self.assertEqual(forms["Fail01"]["source"], "JBIL")
-        self.assertEqual(
-            forms["Fail01"]["audio_path"],
-            "audio/Fail01/JBIL_132_A_ash_Fail01.wav",
-        )
-        # Kalh01 has no interval → legacy null defaults.
-        self.assertEqual(forms["Kalh01"]["ipa"], "?")
-        self.assertEqual(forms["Kalh01"]["ortho"], "")
-        self.assertIsNone(forms["Kalh01"]["audio_path"])
+        labels = [concept["concept_en"] for concept in review_data["concepts"]]
+        self.assertEqual(labels, ["ash", "big"])
+        for label in labels:
+            self.assertNotRegex(label, r"\s*\([A-Z]\)\s*$")
+            self.assertNotRegex(label, r"^\s*\d[\d.]*\s+")
 
-    def test_anchored_picks_longest_interval_when_speaker_has_multiple(self) -> None:
-        # Polluted concepts.csv → speaker has intervals for both concept_ids
-        # (e.g. they tagged 'big' and 'big (A)' separately). Anchored mode
-        # picks the longest one as the representative realization.
+    def test_legacy_anchor_flag_emits_deprecation_warning(self) -> None:
         with TemporaryDirectory() as tmp:
-            workspace = _make_workspace(
-                Path(tmp),
-                concepts=[
-                    {"id": "53", "concept_en": "big (A)", "source_item": "4.1", "source_survey": "KLQ"},
-                    {"id": "634", "concept_en": "big", "source_item": "4.1", "source_survey": "KLQ"},
-                ],
-                speakers={
-                    "Fail01": {
-                        "concept_intervals": [
-                            {"concept_id": "53", "start": 1000.0, "end": 1000.2},   # 0.2s
-                            {"concept_id": "634", "start": 3492.305, "end": 3493.186},  # 0.881s — longer
-                        ],
-                        "tagged_ids": ["53", "634"],
-                        "ipa_intervals": [
-                            {"start": 1000.0, "end": 1000.2, "text": "short", "conceptId": "53"},
-                            {"start": 3492.305, "end": 3493.186, "text": "ɡap", "manuallyAdjusted": True},
-                        ],
-                        "ortho_intervals": [
-                            {"start": 3492.305, "end": 3493.186, "text": "گەپ", "manuallyAdjusted": True},
-                        ],
-                    },
-                },
-            )
+            workspace = self._migrated_workspace(tmp)
             anchor = _write_legacy_anchor(
                 Path(tmp),
                 concepts=[
                     {
-                        "concept_id": "169",
-                        "concept_en": "big",
-                        "arabic": {"form": "كبير", "ipa": "kabiːr"},
-                        "persian": {"form": "بزرگ", "ipa": "bozorɡ"},
+                        "concept_id": "132",
+                        "concept_en": "ash",
                         "forms": [{"speaker": "Fail01", "source": "JBIL"}],
                     }
                 ],
             )
-            review_data, _ = build_review_data_anchored(
-                workspace=workspace,
-                legacy_anchor=anchor,
+            out = Path(tmp) / "out"
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                rc = main([
+                    "--workspace",
+                    str(workspace),
+                    "--out",
+                    str(out),
+                    "--skip-audio",
+                    "--legacy-anchor",
+                    str(anchor),
+                ])
+
+            self.assertEqual(rc, 0)
+            self.assertTrue((out / "review_data.json").exists())
+            self.assertTrue(
+                any(
+                    issubclass(item.category, DeprecationWarning)
+                    and "--legacy-anchor" in str(item.message)
+                    and "2026-Q3" in str(item.message)
+                    for item in caught
+                ),
+                [str(item.message) for item in caught],
             )
-
-        form = review_data["concepts"][0]["forms"][0]
-        # Longest interval wins → IPA via time-overlap fallback ('ɡap') not 'short'.
-        self.assertEqual(form["ipa"], "ɡap")
-        self.assertEqual(form["ortho"], "گەپ")
-        self.assertAlmostEqual(form["start_sec"], 3492.305)
-        self.assertAlmostEqual(form["duration_sec"], 0.881, places=2)
-        self.assertEqual(
-            form["audio_path"],
-            "audio/Fail01/JBIL_169_A_big_Fail01.wav",
-        )
-
-    def test_anchored_unmatched_legacy_concept_emits_empty_forms(self) -> None:
-        # A legacy concept with no matching PARSE row (e.g. legacy 'egg' but
-        # PARSE has no 'egg' row) must still emit an entry — committee sees the
-        # concept's reference forms even when no speaker has annotated it.
-        with TemporaryDirectory() as tmp:
-            workspace = _make_workspace(
-                Path(tmp),
-                concepts=[
-                    {"id": "1", "concept_en": "ash", "source_item": "1.1", "source_survey": "KLQ"},
-                ],
-                speakers={
-                    "Fail01": {
-                        "concept_intervals": [],
-                        "tagged_ids": [],
-                    },
-                },
-            )
-            anchor = _write_legacy_anchor(
-                Path(tmp),
-                concepts=[
-                    {
-                        "concept_id": "141",
-                        "concept_en": "egg (e.g., chicken)",
-                        "arabic": {"form": "بيضة", "ipa": "bajdˤah"},
-                        "persian": {"form": "تخم‌مرغ", "ipa": ""},
-                        "forms": [{"speaker": "Fail01", "source": "JBIL"}],
-                    }
-                ],
-            )
-            review_data, _ = build_review_data_anchored(
-                workspace=workspace,
-                legacy_anchor=anchor,
-            )
-
-        # Concept retained even though no PARSE row matched.
-        self.assertEqual(len(review_data["concepts"]), 1)
-        concept = review_data["concepts"][0]
-        self.assertEqual(concept["concept_id"], "141")
-        self.assertEqual(concept["arabic"]["form"], "بيضة")
-        # Speaker's form is empty.
-        self.assertEqual(concept["forms"][0]["ipa"], "?")
-        self.assertIsNone(concept["forms"][0]["audio_path"])
-        # Metadata names the unmatched concept so callers can audit.
-        self.assertIn("egg (e.g., chicken)", review_data["metadata"]["source"]["unmatched_legacy_concepts"])
-
-    def test_anchored_metadata_carries_legacy_anchor_path_and_speaker_filter(self) -> None:
-        with TemporaryDirectory() as tmp:
-            workspace, anchor = self._ash_workspace_and_anchor(tmp)
-            review_data, _ = build_review_data_anchored(
-                workspace=workspace,
-                legacy_anchor=anchor,
-                speaker_filter=["Fail01"],
-            )
-
-        meta = review_data["metadata"]
-        self.assertEqual(meta["method"], "parse_workspace_export_legacy_anchored")
-        self.assertEqual(meta["speakers"], ["Fail01"])
-        self.assertEqual(meta["source"]["legacy_anchor"], str(anchor))
-        # Speaker filter applied: Kalh01 excluded.
-        forms = review_data["concepts"][0]["forms"]
-        self.assertEqual([f["speaker"] for f in forms], ["Fail01"])
-
 
 class StemLabelParenStrippingTests(unittest.TestCase):
     """MC-415-B: _stem_label must strip arbitrary parenthetical qualifiers, not
@@ -1056,93 +944,34 @@ class StemLabelParenStrippingTests(unittest.TestCase):
         self.assertEqual(form["audio_path"], "audio/Fail01/JBIL_141_A_egg_Fail01.wav")
 
 
-class StemLabelLeadingNumberPrefixTests(unittest.TestCase):
-    """MC-415-C: _stem_label must also strip a leading '<number> ' prefix.
+class StemLabelCuePrefixRetirementTests(unittest.TestCase):
+    """MC-418-I: retire the MC-415-C exporter-local cue-prefix workaround.
 
-    PARSE's concepts.csv carries 2 rows where the Audition cue number escaped
-    parse_cue_name normalization and got glued onto concept_en: id=611
-    ``'56 skin'`` and id=610 ``'48 stomach (organ)'``. The exporter defends
-    against this so anchored matching reaches the canonical legacy gloss.
+    Cue-prefix cleanup now belongs to the central canonicalization/migration
+    pipeline. Review-tool stemming still removes trailing parentheticals, but it
+    must not carry a second leading-number strip after the workspace is migrated.
     """
 
-    def test_strips_simple_numeric_prefix(self) -> None:
-        self.assertEqual(_stem_label("56 skin"), "skin")
-        self.assertEqual(_stem_label("1 ash"), "ash")
-        self.assertEqual(_stem_label("141 egg"), "egg")
+    def test_numeric_prefix_is_not_stripped_by_review_export_stemmer(self) -> None:
+        self.assertEqual(_stem_label("56 skin"), "56 skin")
+        self.assertEqual(_stem_label("1 ash"), "1 ash")
+        self.assertEqual(_stem_label("141 egg"), "141 egg")
 
-    def test_strips_dotted_numeric_prefix(self) -> None:
-        # Survey item ids can carry a dotted form (e.g. KLQ '1.1', '4.19').
-        self.assertEqual(_stem_label("1.1 ash"), "ash")
-        self.assertEqual(_stem_label("4.19 good"), "good")
+    def test_dotted_numeric_prefix_is_not_stripped_by_review_export_stemmer(self) -> None:
+        self.assertEqual(_stem_label("1.1 ash"), "1.1 ash")
+        self.assertEqual(_stem_label("4.19 good"), "4.19 good")
 
-    def test_combines_prefix_and_trailing_paren_strip(self) -> None:
-        # Real-world id=610: "48 stomach (organ)" should fold to "stomach".
-        self.assertEqual(_stem_label("48 stomach (organ)"), "stomach")
-        self.assertEqual(_stem_label("169 big (A)"), "big")
-        self.assertEqual(_stem_label("32 hair (men)"), "hair")
+    def test_trailing_parenthetical_strip_still_applies_after_numeric_prefix(self) -> None:
+        # The retired workaround is only the leading-number strip. The existing
+        # review_tool parenthetical stemmer remains deliberately unchanged.
+        self.assertEqual(_stem_label("48 stomach (organ)"), "48 stomach")
+        self.assertEqual(_stem_label("169 big (A)"), "169 big")
+        self.assertEqual(_stem_label("32 hair (men)"), "32 hair")
 
     def test_does_not_strip_alphabetic_prefix(self) -> None:
-        # Only leading runs of digits (with optional dots) qualify as a prefix.
-        # Don't accidentally swallow words that happen to start a label.
         self.assertEqual(_stem_label("to bathe"), "to bathe")
         self.assertEqual(_stem_label("the boy cut"), "the boy cut")
         self.assertEqual(_stem_label("3rd person"), "3rd person")
-
-    def test_anchored_recovers_legacy_skin_via_leading_number_strip(self) -> None:
-        """Regression guard for the 2026-05-19 Khan02 'skin' miss: PARSE row
-        id=611 carries concept_en '56 skin' and the speaker's interval
-        references id=611. Anchored matching against legacy gloss 'skin'
-        only succeeds when the prefix is stripped."""
-        with TemporaryDirectory() as tmp:
-            workspace = _make_workspace(
-                Path(tmp),
-                concepts=[
-                    {"id": "277", "concept_en": "skin", "source_item": "56", "source_survey": "JBIL"},
-                    {"id": "611", "concept_en": "56 skin", "source_item": "56", "source_survey": "JBIL"},
-                ],
-                speakers={
-                    "Khan02": {
-                        "concept_intervals": [
-                            {"concept_id": "611", "start": 5330.0, "end": 5331.247, "text": "skin"}
-                        ],
-                        # Note: Khan02 did NOT tag concept 611 — only has the
-                        # interval. Anchored mode doesn't gate on the thesis tag.
-                        "tagged_ids": [],
-                        "ipa_intervals": [
-                            {"start": 5330.0, "end": 5331.247, "text": "puːse"}
-                        ],
-                        "ortho_intervals": [
-                            {"start": 5330.0, "end": 5331.247, "text": "پۊسە"}
-                        ],
-                    }
-                },
-            )
-            anchor = _write_legacy_anchor(
-                Path(tmp),
-                concepts=[
-                    {
-                        "concept_id": "56",
-                        "concept_en": "skin",
-                        "arabic": {"form": "جلد", "ipa": "ʒild"},
-                        "persian": {"form": "پوست", "ipa": "puːst"},
-                        "forms": [{"speaker": "Khan02", "source": "JBIL"}],
-                    }
-                ],
-            )
-            review_data, _ = build_review_data_anchored(
-                workspace=workspace,
-                legacy_anchor=anchor,
-            )
-
-        self.assertEqual(review_data["concepts"][0]["concept_en"], "skin")
-        # 'skin' is not in unmatched_legacy_concepts.
-        self.assertNotIn("skin", review_data["metadata"]["source"]["unmatched_legacy_concepts"])
-        # Khan02's form is populated despite tagging neither concept_id.
-        form = review_data["concepts"][0]["forms"][0]
-        self.assertEqual(form["ipa"], "puːse")
-        self.assertEqual(form["ortho"], "پۊسە")
-        self.assertEqual(form["audio_path"], "audio/Khan02/JBIL_56_A_skin_Khan02.wav")
-
 
 class AnchoredAuditionPrefixSelectionTests(unittest.TestCase):
     """MC-415-D: when a speaker has multiple concept-tier intervals at the
