@@ -587,9 +587,15 @@ def _form_from_interval(
     cognate_sets: Mapping[str, Any] | None = None,
     similarity: Mapping[str, Any] | None = None,
     borrowing_flags: Mapping[str, Any] | None = None,
+    ipa_override: str | None = None,
+    ortho_override: str | None = None,
 ) -> dict[str, Any]:
-    ipa = _interval_field(interval, "ipa", "ipa_text")
-    ortho = _interval_field(interval, "ortho", "orthography", "text")
+    ipa = ipa_override if ipa_override is not None else _interval_field(interval, "ipa", "ipa_text")
+    ortho = (
+        ortho_override
+        if ortho_override is not None
+        else _interval_field(interval, "ortho", "orthography", "text")
+    )
     cs = cognate_sets or {}
     sim = similarity or {}
     bf = borrowing_flags or {}
@@ -1065,6 +1071,9 @@ def build_review_data(
             start_sec = float(_interval_field(interval, "start", "start_sec") or 0.0)
             end_sec = float(_interval_field(interval, "end", "end_sec") or 0.0)
             duration_sec = max(0.0, end_sec - start_sec)
+            crosstier_ids = {value for value in {concept_id, source_item} if value}
+            ipa_text = _crosstier_text(payload, "ipa", crosstier_ids, start_sec, end_sec)
+            ortho_text = _crosstier_text(payload, "ortho", crosstier_ids, start_sec, end_sec)
 
             filename = _audio_filename(survey, source_item, variant, gloss, speaker)
             audio_relpath = f"audio/{speaker}/{filename}"
@@ -1082,6 +1091,8 @@ def build_review_data(
                 cognate_sets=cognate_sets,
                 similarity=similarity,
                 borrowing_flags=borrowing_flags,
+                ipa_override=ipa_text,
+                ortho_override=ortho_text,
             )
             forms.append(form)
 
