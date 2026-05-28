@@ -143,3 +143,68 @@ PYTHONPATH=python python3 -m pytest python/test_sync_review_tool_speakers.py -q
 python3 python/export_review_data.py --workspace /home/lucas/parse-workspace --out /tmp/mc-422-f-acceptance --speakers Fail01 Saha01 Mand01 Qasr01 Kalh01 Khan02
 PYTHONPATH=python python3 python/scripts/migrate_concept_suffix_pollution.py --workspace /home/lucas/parse-workspace --verify-only
 ```
+
+## MC-424-A coverage-gap follow-up (added 2026-05-28)
+
+MC-424-A enumerated the default-vs-anchored coverage gaps rather than relying only on the MC-422-F net counts. The fresh directional comparison found **22 anchored-present/default-missing rows**, not the expected 21: the headline net deltas were offset by two default-only ortho rows (`milk`/`rain` for `Saha01`) and one pre-existing default-only Persian reference outside the directional missing set. The actionable anchored-only gaps still matched the intended surfaces: speaker form gaps plus contact-reference lookup drift.
+
+### Pre-fix gap enumeration
+
+| Surface | Concept | Speaker | Anchored | Default | Case | Rationale |
+|---|---|---|---|---|---|---|
+| ortho | egg | Fail01 | خایا | — | case 1 | Workspace interval exists, but default export required a speaker-local thesis tag. |
+| ortho | leaf | Fail01 | بەرێگ | — | case 1 | Workspace interval exists, but default export required a speaker-local thesis tag. |
+| ortho | new | Fail01 | تازە | — | case 1 | Workspace interval exists, but default export required a speaker-local thesis tag. |
+| ortho | round | Fail01 | خەر | — | case 1 | Workspace interval exists, but default export required a speaker-local thesis tag. |
+| ortho | skin | Khan02 | پۊسە | — | case 1 | Workspace interval exists, but default export required a speaker-local thesis tag. |
+| ortho | white | Fail01 | چەرمگ | — | case 1 | Workspace interval exists, but default export required a speaker-local thesis tag. |
+| audio | egg | Fail01 | present | absent | case 1 | Workspace interval exists, but default export required a speaker-local thesis tag. |
+| audio | leaf | Fail01 | present | absent | case 1 | Workspace interval exists, but default export required a speaker-local thesis tag. |
+| audio | new | Fail01 | present | absent | case 1 | Workspace interval exists, but default export required a speaker-local thesis tag. |
+| audio | round | Fail01 | present | absent | case 1 | Workspace interval exists, but default export required a speaker-local thesis tag. |
+| audio | skin | Khan02 | present | absent | case 1 | Workspace interval exists, but default export required a speaker-local thesis tag. |
+| audio | white | Fail01 | present | absent | case 1 | Workspace interval exists, but default export required a speaker-local thesis tag. |
+| arabic | egg | — | بيض | — | case 2 | Workspace contact cache has canonical key `egg`; default lookup used `egg (e.g., chicken)`. |
+| arabic | fly | — | يطير | — | case 2 | Workspace contact cache has canonical key `fly`; default lookup used `fly (n.)`. |
+| arabic | horn | — | قرن | — | case 2 | Workspace contact cache has canonical key `horn`; default lookup used `horn (cow)`. |
+| arabic | hot | — | حار | — | case 2 | Workspace contact cache has canonical key `hot`; default lookup used `hot (fire)`. |
+| arabic | long | — | طويل | — | case 2 | Collapsed default row selected source item `158` / `long (thing)` while the cache key is canonical `long`. |
+| persian | egg | — | تخم مرغ | — | case 2 | Workspace contact cache has canonical key `egg`; default lookup used `egg (e.g., chicken)`. |
+| persian | fly | — | پرواز می‌کند | — | case 2 | Workspace contact cache has canonical key `fly`; default lookup used `fly (n.)`. |
+| persian | horn | — | شاخ | — | case 2 | Workspace contact cache has canonical key `horn`; default lookup used `horn (cow)`. |
+| persian | hot | — | داغ | — | case 2 | Workspace contact cache has canonical key `hot`; default lookup used `hot (fire)`. |
+| persian | long | — | دراز | — | case 2 | Collapsed default row selected source item `158` / `long (thing)` while the cache key is canonical `long`. |
+
+Case distribution: **case 1 = 12**, **case 2 = 10**, **case 3 = 0**.
+
+### Fixes shipped
+
+- **Case 1 — speaker-local tag gate:** default export now uses a speaker's interval when the concept is in the global thesis-tagged union and that speaker has a matching concept interval, even if that individual annotation lacks the concept tag. MC-424-A found all six ortho/audio pairs had live intervals and aligned ortho text; the old speaker-local tag check was the only reason they exported empty.
+- **Case 2 — contact lookup key drift:** `_contact_forms_for_concept` now tries canonicalized label keys (`strip_clarifier` / review stem) and then a deterministic same-canonical-label cache-key fallback. The fallback uses canonical equality, not substring matching, so `sand` cannot pick `salt (eating)`.
+
+### Post-fix metrics
+
+| Metric | MC-422-F default baseline | MC-424-A default after fixes | Anchored mode (`2ac21dd`) | Gap after fixes |
+|---|---:|---:|---:|---:|
+| Concept count | 82 | 82 | 82 | 0 |
+| Speaker count | 6 | 6 | 6 | 0 |
+| Form slots | 492 | 492 | 492 | 0 |
+| IPA coverage | 492/492 | 492/492 | 491/492 | +1 form |
+| Ortho coverage | 480/492 | 486/492 | 484/492 | +2 forms |
+| Audio coverage | 480/492 | 486/492 | 486/492 | 0 |
+| Arabic ref forms | 76/82 | 81/82 | 81/82 | 0 |
+| Persian ref forms | 75/82 | 81/82 | 81/82 | 0 |
+| Anchored-present/default-missing rows | 22 directional rows | 0 directional rows | n/a | closed |
+
+### Residual case-3 gaps
+
+None. MC-424-A found no true data ceilings among the anchored-present/default-missing rows. The only residual directionality is default-only ortho text for `milk`/`rain` (`Saha01`), which is outside the anchored-missing gap closure target and should be treated as a separate quality audit if needed.
+
+### MC-424-A validation commands
+
+```bash
+python3 python/export_review_data.py --workspace /home/lucas/parse-workspace --out /tmp/mc-424-a-default --speakers Fail01 Saha01 Mand01 Qasr01 Kalh01 Khan02 --skip-audio
+PYTHONPATH=python python3 python/scripts/diff_default_vs_anchored.py --default /tmp/mc-424-a-default/review_data.json --anchored /tmp/mc-424-a-anchored/review_data.json --workspace /home/lucas/parse-workspace
+python3 python/export_review_data.py --workspace /home/lucas/parse-workspace --out /tmp/mc-424-a-default-v2 --speakers Fail01 Saha01 Mand01 Qasr01 Kalh01 Khan02 --skip-audio
+PYTHONPATH=python python3 python/scripts/diff_default_vs_anchored.py --default /tmp/mc-424-a-default-v2/review_data.json --anchored /tmp/mc-424-a-anchored/review_data.json --workspace /home/lucas/parse-workspace
+```

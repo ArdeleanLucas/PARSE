@@ -18,6 +18,7 @@ from tempfile import TemporaryDirectory
 from export_review_data import (
     DEFAULT_TAG_ID,
     LEGACY_SCHEMA_VERSION,
+    _contact_forms_for_concept,
     _crosstier_text,
     _extract_form_from_contact_entry,
     _stem_label,
@@ -393,6 +394,37 @@ class BuildReviewDataTests(unittest.TestCase):
         self.assertEqual(len(clip_plan), 1)
         self.assertEqual(clip_plan[0][1]["ipa"], "boːrʌk")
 
+    def test_default_mode_uses_speaker_interval_when_concept_is_globally_tagged(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = _make_workspace(
+                Path(tmp),
+                concepts=[
+                    {"id": "1", "concept_en": "egg (e.g., chicken)", "source_item": "141", "source_survey": "JBIL"},
+                ],
+                speakers={
+                    "Fail01": {
+                        "concept_intervals": [{"concept_id": "1", "start": 1.0, "end": 1.5}],
+                        "ipa_intervals": [{"conceptId": "1", "start": 1.0, "end": 1.5, "text": "xaja"}],
+                        "ortho_intervals": [{"conceptId": "1", "start": 1.0, "end": 1.5, "text": "خایا"}],
+                        # Regression guard: MC-424-A found live speaker intervals where
+                        # concept_tags were missing from that speaker but present elsewhere.
+                        "tagged_ids": [],
+                    },
+                    "Saha01": {
+                        "concept_intervals": [],
+                        "tagged_ids": ["1"],
+                    },
+                },
+            )
+            review_data, clip_plan = build_review_data(workspace=workspace)
+
+        [concept] = review_data["concepts"]
+        forms = {form["speaker"]: form for form in concept["forms"]}
+        self.assertEqual(forms["Fail01"]["ipa"], "xaja")
+        self.assertEqual(forms["Fail01"]["ortho"], "خایا")
+        self.assertEqual(forms["Fail01"]["audio_path"], "audio/Fail01/JBIL_141_A_egg_Fail01.wav")
+        self.assertEqual(len(clip_plan), 1)
+
     def test_collapse_preserves_clarifier_in_notes(self) -> None:
         with TemporaryDirectory() as tmp:
             workspace = _make_workspace(
@@ -607,6 +639,28 @@ class AnalyticalFieldsTests(unittest.TestCase):
         self.assertEqual(_extract_form_from_contact_entry([{"orthography": "خاکستر"}]), "خاکستر")
         self.assertEqual(_extract_form_from_contact_entry([{"unknown_key": "ignored"}]), "")
         self.assertEqual(_extract_form_from_contact_entry("bare-string"), "bare-string")
+
+    def test_contact_lookup_falls_back_to_canonicalized_label(self) -> None:
+        contact_langs = {
+            "ar": {"concepts": {"egg": [{"script": "بيض"}]}},
+            "fa": {"concepts": {"egg": [{"script": "تخم مرغ"}]}},
+        }
+
+        forms = _contact_forms_for_concept(contact_langs, "354", "egg (e.g., chicken)")
+
+        self.assertEqual(forms["arabic"], {"form": "بيض", "ipa": ""})
+        self.assertEqual(forms["persian"], {"form": "تخم مرغ", "ipa": ""})
+
+    def test_contact_lookup_does_not_cross_concepts(self) -> None:
+        contact_langs = {
+            "ar": {"concepts": {"salt (eating)": [{"script": "ملح"}]}},
+            "fa": {"concepts": {"salt (eating)": [{"script": "نمک"}]}},
+        }
+
+        forms = _contact_forms_for_concept(contact_langs, "99", "sand")
+
+        self.assertEqual(forms["arabic"], {"form": "", "ipa": ""})
+        self.assertEqual(forms["persian"], {"form": "", "ipa": ""})
 
     def test_build_review_data_prefers_workspace_contact_cache_when_present(self) -> None:
         with TemporaryDirectory() as tmp:
