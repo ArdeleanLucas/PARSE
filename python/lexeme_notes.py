@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence
 
 from concept_canonical import BARE_VARIANT_RE as _TRAILING_VARIANT_PATTERN
+from concept_canonical import canonicalize_label, variant_suffix
 
 # Match leading Audition cue ids in "(1.1)- label", "[1.1]- label", or "9- label" form.
 _PAREN_ID_PATTERN = re.compile(r"^\s*\(\s*([0-9]+(?:\.[0-9]+)*)\s*\)\s*[-\u2013\u2014:]?\s*(.*)$")
@@ -89,12 +90,11 @@ def _parse_name_prefix(name: str) -> Optional[tuple[str, str, str]]:
         return None
     concept_id = match.group(1).strip()
     remainder = match.group(2).strip()
-    variant = ""
+    variant = variant_suffix(remainder)
     variant_match = _TRAILING_VARIANT_PATTERN.search(remainder)
     if variant_match:
         variant = variant_match.group(1)
-        remainder = remainder[: variant_match.start()].strip()
-    return concept_id, remainder, variant
+    return concept_id, canonicalize_label(remainder), variant
 
 
 def parse_audition_csv(text: str) -> List[CommentRow]:

@@ -630,7 +630,7 @@ def test_onboard_audition_comments_csv_writes_import_notes_by_row_index(tmp_path
     assert complete_calls[0][1]["commentsImported"] == 2
 
 
-def test_audition_concept_resolver_reuses_casefold_labels_and_allocates_stably(tmp_path, monkeypatch) -> None:
+def test_audition_concept_resolver_reuses_unanchored_labels_and_allocates_per_slot(tmp_path, monkeypatch) -> None:
     server._install_route_bindings()
     monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
     _write_concepts_csv(
@@ -655,11 +655,32 @@ def test_audition_concept_resolver_reuses_casefold_labels_and_allocates_stably(t
         {"id": "2", "label": "forehead", "audition_prefix": "1.2", "source_item": "1.2", "source_survey": "KLQ"},
         {"id": "225", "label": "NINE", "audition_prefix": "9", "source_item": "9", "source_survey": "JBIL"},
         {"id": "226", "label": "to listen to", "audition_prefix": "8.4", "source_item": "8.4", "source_survey": "KLQ"},
-        {"id": "226", "label": "TO LISTEN TO", "audition_prefix": "8.5", "source_item": "8.5", "source_survey": "KLQ"},
+        {"id": "227", "label": "TO LISTEN TO", "audition_prefix": "8.5", "source_item": "8.5", "source_survey": "KLQ"},
     ]
 
     media._merge_concepts_into_root_csv(resolved)
     assert media._resolve_audition_concepts(rows) == resolved
+
+
+def test_audition_concept_resolver_uses_slot_to_reuse_existing_variant_row(tmp_path, monkeypatch) -> None:
+    server._install_route_bindings()
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _write_full_concepts_csv(
+        tmp_path / "concepts.csv",
+        [
+            {"id": "53", "concept_en": "big (A)", "source_item": "4.1", "source_survey": "KLQ"},
+            {"id": "619", "concept_en": "big (B)", "source_item": "4.1", "source_survey": "KLQ"},
+        ],
+    )
+    rows = _parse_audition_rows([
+        {"Name": "(4.1)- big A", "Start": "0", "Duration": "1"},
+    ])
+
+    resolved = media._resolve_audition_concepts(rows)
+
+    assert resolved == [
+        {"id": "53", "label": "big", "audition_prefix": "4.1", "source_item": "4.1", "source_survey": "KLQ"},
+    ]
 
 
 def test_onboard_audition_import_index_tracks_shuffled_physical_csv_order(tmp_path, monkeypatch) -> None:

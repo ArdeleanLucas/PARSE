@@ -6,7 +6,7 @@ import sys
 import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from lexeme_notes import _parse_time, parse_audition_csv
+from lexeme_notes import _parse_time, parse_audition_csv  # noqa: E402
 
 
 def test_parse_audition_csv_accepts_hierarchical_and_plain_integer_prefixes() -> None:
@@ -52,6 +52,31 @@ def test_parse_audition_csv_accepts_bracket_prefixes_and_bare_names() -> None:
         ("", "He saw me", "", "He saw me"),
         ("", "(2.29- child of one's son)-", "", "(2.29- child of one's son)-"),
     ]
+
+
+def test_parse_audition_csv_canonicalizes_bare_variant_without_losing_variant_metadata() -> None:
+    rows = parse_audition_csv(
+        "Name\tStart\tDuration\n"
+        "(4.1)- big A\t0:00.000\t0:01.000\n"
+    )
+
+    assert len(rows) == 1
+    assert rows[0].concept_id == "4.1"
+    assert rows[0].remainder == "big"
+    assert rows[0].variant == "A"
+    assert rows[0].raw_name == "(4.1)- big A"
+
+
+def test_parse_audition_csv_preserves_parenthetical_clarifier_in_remainder() -> None:
+    rows = parse_audition_csv(
+        "Name\tStart\tDuration\n"
+        "32- hair (women)\t0:00.000\t0:01.000\n"
+    )
+
+    assert len(rows) == 1
+    assert rows[0].concept_id == "32"
+    assert rows[0].remainder == "hair (women)"
+    assert rows[0].variant == ""
 
 
 def test_parse_time_accepts_hms_minutes_seconds_and_plain_seconds() -> None:

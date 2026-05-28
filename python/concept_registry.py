@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from concept_canonical import label_key
+from concept_canonical import canonicalize_label, label_key
 from concept_source_item import concept_row_from_item, read_concepts_csv_rows, row_value, write_concepts_csv_rows
 
 
@@ -15,6 +15,8 @@ class ConceptRegistry:
     label_to_id: dict[str, str]
     max_id: int
     raw_rows: list[dict[str, str]]
+    label_to_ids: dict[str, list[str]]
+    triple_to_id: dict[tuple[str, str, str], str]
 
 
 def concept_label_key(label: str) -> str:
@@ -36,12 +38,35 @@ def _normalize_integer_concept_id(value: object) -> str:
     return text if str(int_id) == text else ""
 
 
-def _row_value(row: dict[str, object], name: str) -> str:
+def _row_value(row: Mapping[str, object], name: str) -> str:
     return row_value(row, name)
 
 
+def _empty_registry() -> ConceptRegistry:
+    return ConceptRegistry(label_to_id={}, max_id=0, raw_rows=[], label_to_ids={}, triple_to_id={})
+
+
+def _source_slot_key(source_survey: object, source_item: object) -> tuple[str, str] | None:
+    survey = str(source_survey or "").strip()
+    item = str(source_item or "").strip()
+    if survey and item:
+        return survey, item
+    return None
+
+
+def _canonical_label_key(label: object) -> str:
+    return concept_label_key(canonicalize_label(str(label or "")))
+
+
+def _registry_row_by_id(registry: ConceptRegistry, concept_id: str) -> dict[str, str] | None:
+    for row in registry.raw_rows:
+        if _normalize_integer_concept_id(_row_value(row, "id")) == concept_id:
+            return row
+    return None
+
+
 def load_concept_registry(project_root: Path) -> ConceptRegistry:
-    registry = ConceptRegistry(label_to_id={}, max_id=0, raw_rows=[])
+    registry = _empty_registry()
     path = Path(project_root) / "concepts.csv"
     if not path.exists():
         return registry
@@ -64,23 +89,70 @@ def load_concept_registry(project_root: Path) -> ConceptRegistry:
                 normalized["concept_en"] = label
                 registry.raw_rows.append(normalized)
                 registry.label_to_id.setdefault(concept_label_key(label), cid)
+                canonical_key = _canonical_label_key(label)
+                if canonical_key:
+                    registry.label_to_ids.setdefault(canonical_key, []).append(cid)
+                    slot = _source_slot_key(normalized.get("source_survey"), normalized.get("source_item"))
+                    if slot:
+                        registry.triple_to_id.setdefault((slot[0], slot[1], canonical_key), cid)
     except (OSError, csv.Error, UnicodeDecodeError):
-        return ConceptRegistry(label_to_id={}, max_id=0, raw_rows=[])
+        return _empty_registry()
     return registry
 
 
-def resolve_or_allocate_concept_id(registry: ConceptRegistry, label: str) -> tuple[str, bool]:
-    clean_label = str(label or "").strip()
+def resolve_or_allocate_concept_id(
+    registry: ConceptRegistry,
+    label: str,
+    *,
+    source_survey: str | None = None,
+    source_item: str | None = None,
+) -> tuple[str, bool]:
+    """Resolve or allocate a concept id using slot-aware canonical identity.
+
+    When a source survey/item slot is known, the resolver first matches by
+    ``(source_survey, source_item, canonical_label_key)``. Legacy callers that
+    do not know the slot still get first-label-match behavior through the
+    canonical label index.
+    """
+
+    clean_label = canonicalize_label(str(label or "").strip())
     key = concept_label_key(clean_label)
     if not key:
         return "", False
-    existing = registry.label_to_id.get(key)
-    if existing:
-        return existing, False
+
+    slot = _source_slot_key(source_survey, source_item)
+    if slot:
+        existing = registry.triple_to_id.get((slot[0], slot[1], key))
+        if existing:
+            return existing, False
+        for candidate_id in registry.label_to_ids.get(key, []):
+            row = _registry_row_by_id(registry, candidate_id)
+            if row is None:
+                continue
+            if not _row_value(row, "source_survey") and not _row_value(row, "source_item"):
+                return candidate_id, False
+    else:
+        candidates = registry.label_to_ids.get(key, [])
+        if candidates:
+            return candidates[0], False
+        existing = registry.label_to_id.get(key)
+        if existing:
+            return existing, False
+
     registry.max_id += 1
     concept_id = str(registry.max_id)
-    registry.label_to_id[key] = concept_id
-    registry.raw_rows.append({"id": concept_id, "concept_en": clean_label, "source_item": "", "source_survey": "", "custom_order": ""})
+    row = {
+        "id": concept_id,
+        "concept_en": clean_label,
+        "source_item": slot[1] if slot else "",
+        "source_survey": slot[0] if slot else "",
+        "custom_order": "",
+    }
+    registry.raw_rows.append(row)
+    registry.label_to_id.setdefault(key, concept_id)
+    registry.label_to_ids.setdefault(key, []).append(concept_id)
+    if slot:
+        registry.triple_to_id.setdefault((slot[0], slot[1], key), concept_id)
     return concept_id, True
 
 
