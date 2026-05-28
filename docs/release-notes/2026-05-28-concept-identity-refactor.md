@@ -30,7 +30,7 @@ Variant letters are computed when PARSE renders a speaker's intervals. Two diffe
 | MC-418-G | [#556](https://github.com/ArdeleanLucas/PARSE/pull/556) | Merged | Migration verification, idempotence, MCP wrapper, and Fail01 regression. |
 | MC-418-H | [#548](https://github.com/ArdeleanLucas/PARSE/pull/548) | Merged | `export_review_data` MCP/chat tool exposure for issue #533. |
 | MC-418-I | [#558](https://github.com/ArdeleanLucas/PARSE/pull/558) | Merged | `--legacy-anchor` retirement and MC-415-C exporter-strip removal for issue #537. |
-| MC-418-J | This PR | Open | These release notes and board parent close-out. |
+| MC-418-J | [#559](https://github.com/ArdeleanLucas/PARSE/pull/559) | Open | These release notes and board parent close-out. |
 | MC-418-K | [#557](https://github.com/ArdeleanLucas/PARSE/pull/557) | Merged | Post-live-run migration fix: canonicalize standalone `(X)` rows and re-key `survey-overlap.json`. |
 
 The original MC-418-J handoff was drafted before MC-418-K existed. MC-418-K is included here because it changed the final shipped migration behavior and is part of the same release boundary.
