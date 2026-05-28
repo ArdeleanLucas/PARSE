@@ -35,6 +35,7 @@ class MigrationResult:
     text_fields_stripped: int = 0
     concept_tags_rekeyed: int = 0
     parse_tags_rekeyed: int = 0
+    survey_overlap_rekeyed: int = 0
     backups_created: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     dry_run: bool = False
@@ -71,6 +72,7 @@ class MigrationResult:
                 f"  interval text fields stripped: {self.text_fields_stripped}",
                 f"  speaker concept_tags re-keyed: {self.concept_tags_rekeyed}",
                 f"  parse-tags.json entries re-keyed: {self.parse_tags_rekeyed}",
+                f"  survey-overlap.json entries re-keyed: {self.survey_overlap_rekeyed}",
                 f"  backups: {len(self.backups_created)}",
             ]
         )
@@ -196,6 +198,51 @@ def rewrite_parse_tags(workspace: Path, merge_map: dict[str, str], dry_run: bool
     return rekeyed, backup_path
 
 
+def rewrite_survey_overlap(workspace: Path, merge_map: dict[str, str], dry_run: bool) -> tuple[int, str | None]:
+    """Rewrite survey-overlap sidecar concept-id keys per ``merge_map``.
+
+    ``concept_survey_links`` is shaped as ``{concept_id: {survey: item}}``;
+    ``speaker_concept_survey_links`` nests that map by speaker. When multiple
+    old ids collapse to one canonical id, target dictionaries are merged with
+    deterministic last-write-wins behavior per survey key.
+    """
+
+    path = Path(workspace) / "survey-overlap.json"
+    if not path.exists():
+        return 0, None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return 0, None
+
+    rekeyed_total = 0
+
+    links = payload.get("concept_survey_links")
+    if isinstance(links, dict):
+        rewritten_links, rekeyed = _rewrite_survey_link_map(links, merge_map)
+        if rewritten_links != links:
+            payload["concept_survey_links"] = rewritten_links
+        rekeyed_total += rekeyed
+
+    speaker_links = payload.get("speaker_concept_survey_links")
+    if isinstance(speaker_links, dict):
+        rewritten_speaker_links: dict[str, dict[str, dict[str, Any]]] = {}
+        for speaker, concept_links in speaker_links.items():
+            if not isinstance(concept_links, dict):
+                rewritten_speaker_links[str(speaker)] = {}
+                continue
+            rewritten_links, rekeyed = _rewrite_survey_link_map(concept_links, merge_map)
+            rewritten_speaker_links[str(speaker)] = rewritten_links
+            rekeyed_total += rekeyed
+        if rewritten_speaker_links != speaker_links:
+            payload["speaker_concept_survey_links"] = rewritten_speaker_links
+
+    backup_path: str | None = None
+    if not dry_run and rekeyed_total:
+        backup_path = _backup_file(path)
+        _atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    return rekeyed_total, backup_path
+
+
 def run_migration(workspace: Path, *, dry_run: bool = False) -> MigrationResult:
     """Run the suffix-pollution migration on ``workspace``."""
 
@@ -246,6 +293,11 @@ def run_migration(workspace: Path, *, dry_run: bool = False) -> MigrationResult:
         result.parse_tags_rekeyed = parse_tags_rekeyed
         if parse_tags_backup:
             result.backups_created.append(parse_tags_backup)
+
+        survey_overlap_rekeyed, survey_overlap_backup = rewrite_survey_overlap(workspace, result.merge_map, dry_run)
+        result.survey_overlap_rekeyed = survey_overlap_rekeyed
+        if survey_overlap_backup:
+            result.backups_created.append(survey_overlap_backup)
 
         if not dry_run:
             result.post_migration_violations = verify_post_migration(workspace)
@@ -435,8 +487,10 @@ def _canonical_concept_rows(rows: list[dict[str, str]], merge_map: dict[str, str
             continue
         output = _project_row(row, fieldnames)
         output["id"] = concept_id
+        # Canonicalize every surviving row, including standalone legacy
+        # ``(A)``/cue-prefix rows that do not have a sibling to merge.
+        output["concept_en"] = canonicalize_label(output.get("concept_en") or "")
         if concept_id in grouped_noncanonical:
-            output["concept_en"] = canonicalize_label(output.get("concept_en") or "")
             for sibling in grouped_noncanonical[concept_id]:
                 _fold_non_empty_values(output, sibling, fieldnames)
         canonical_rows.append(output)
@@ -525,6 +579,24 @@ def _rewrite_concept_tags(record: dict[str, Any], merge_map: dict[str, str]) -> 
     return rekeyed
 
 
+def _rewrite_survey_link_map(
+    links: dict[Any, Any], merge_map: dict[str, str]
+) -> tuple[dict[str, dict[str, Any]], int]:
+    rewritten: dict[str, dict[str, Any]] = {}
+    rekeyed = 0
+    for old_id, targets in links.items():
+        old_text = str(old_id)
+        new_id = merge_map.get(old_text, old_text)
+        if new_id != old_text:
+            rekeyed += 1
+        if not isinstance(targets, dict):
+            continue
+        merged = rewritten.setdefault(new_id, {})
+        for survey, item in targets.items():
+            merged[str(survey)] = item
+    return rewritten, rekeyed
+
+
 def _dedupe_sort_concepts(concepts: Iterable[str]) -> list[str]:
     return sorted({str(concept_id) for concept_id in concepts if str(concept_id).strip()}, key=_concept_sort_key)
 
@@ -591,6 +663,7 @@ __all__ = [
     "rewrite_annotation_file",
     "rewrite_concepts_csv",
     "rewrite_parse_tags",
+    "rewrite_survey_overlap",
     "run_migration",
     "validate_cross_survey_links",
     "verify_post_migration",

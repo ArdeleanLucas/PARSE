@@ -127,3 +127,130 @@ def test_run_migration_rekeys_parse_tags_and_creates_timestamped_backups(tmp_pat
     assert any(name.startswith("parse-tags.json.bak-") and name.endswith("-pre-suffix-canonicalization") for name in backup_names)
     assert list(workspace.glob("concepts.csv.bak-*-pre-suffix-canonicalization"))
     assert list(workspace.glob("parse-tags.json.bak-*-pre-suffix-canonicalization"))
+
+
+def _write_minimal_annotation(workspace: Path, intervals: list[dict[str, object]] | None = None) -> None:
+    annotations = workspace / "annotations"
+    annotations.mkdir()
+    (annotations / "Synthetic.parse.json").write_text(
+        json.dumps(
+            {
+                "tiers": {"concept": {"intervals": intervals or []}},
+                "concept_tags": {},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_run_migration_canonicalizes_standalone_variant_suffix_rows(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "concepts.csv").write_text(
+        "id,concept_en,source_item,source_survey,custom_order\n"
+        "100,solo (A),99,JBIL,100\n"
+        "200,paired (A),50,KLQ,200\n"
+        "201,paired (B),50,KLQ,201\n"
+        "300,clean,77,JBIL,300\n",
+        encoding="utf-8",
+    )
+    _write_minimal_annotation(
+        workspace,
+        [
+            {"start": 0, "end": 1, "text": "solo (A)", "concept_id": "100"},
+            {"start": 1, "end": 2, "text": "paired (A)", "concept_id": "200"},
+            {"start": 2, "end": 3, "text": "paired (B)", "concept_id": "201"},
+            {"start": 3, "end": 4, "text": "clean", "concept_id": "300"},
+        ],
+    )
+
+    result = run_migration(workspace)
+
+    assert result.success
+    rows = _read_concepts(workspace / "concepts.csv")
+    by_id = {row["id"]: row for row in rows}
+    assert by_id["100"]["concept_en"] == "solo"
+    assert "201" not in by_id
+    assert by_id["200"]["concept_en"] == "paired"
+    assert by_id["300"]["concept_en"] == "clean"
+    assert result.post_migration_violations == []
+
+
+def test_run_migration_rekeys_survey_overlap_links_and_dedupes_collisions(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "concepts.csv").write_text(
+        "id,concept_en,source_item,source_survey,custom_order\n"
+        "53,big (A),4.1,KLQ,53\n"
+        "619,big (B),4.1,KLQ,619\n"
+        "620,big (C),4.1,KLQ,620\n"
+        "900,small,5.1,JBIL,900\n"
+        "901,big,4.1,jbil,901\n"
+        "902,big,x.y,klq2,902\n"
+        "903,small,5.1,klq,903\n",
+        encoding="utf-8",
+    )
+    (workspace / "survey-overlap.json").write_text(
+        json.dumps(
+            {
+                "concept_survey_links": {
+                    "53": {"jbil": "4.1"},
+                    "619": {"jbil": "4.1"},
+                    "620": {"klq2": "x.y"},
+                    "900": {"klq": "5.1"},
+                },
+                "speaker_concept_survey_links": {
+                    "Fail01": {
+                        "53": {"jbil": "4.1"},
+                        "619": {"jbil": "4.1"},
+                    },
+                    "Saha01": {
+                        "620": {"klq2": "x.y"},
+                        "900": {"klq": "5.1"},
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _write_minimal_annotation(workspace)
+
+    result = run_migration(workspace)
+
+    assert result.success
+    assert result.survey_overlap_rekeyed == 4
+    payload = json.loads((workspace / "survey-overlap.json").read_text(encoding="utf-8"))
+    assert payload["concept_survey_links"] == {
+        "53": {"jbil": "4.1", "klq2": "x.y"},
+        "900": {"klq": "5.1"},
+    }
+    assert payload["speaker_concept_survey_links"] == {
+        "Fail01": {"53": {"jbil": "4.1"}},
+        "Saha01": {"53": {"klq2": "x.y"}, "900": {"klq": "5.1"}},
+    }
+    backup_names = [path.name for path in workspace.glob("survey-overlap.json.bak-*-pre-suffix-canonicalization")]
+    assert backup_names
+    assert any(Path(path).name in backup_names for path in result.backups_created)
+    assert "survey-overlap.json entries re-keyed: 4" in result.summary()
+
+
+def test_run_migration_missing_survey_overlap_file_is_not_an_error(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "concepts.csv").write_text(
+        "id,concept_en,source_item,source_survey,custom_order\n"
+        "53,big (A),4.1,KLQ,53\n"
+        "619,big (B),4.1,KLQ,619\n",
+        encoding="utf-8",
+    )
+    _write_minimal_annotation(workspace)
+
+    result = run_migration(workspace)
+
+    assert result.success
+    assert result.survey_overlap_rekeyed == 0
+    assert not (workspace / "survey-overlap.json").exists()
