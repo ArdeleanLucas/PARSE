@@ -1,0 +1,4 @@
+{
+  "workspace": "${WORKSPACE_ROOT}/missing-migration-workspace",
+  "dryRun": true
+}
