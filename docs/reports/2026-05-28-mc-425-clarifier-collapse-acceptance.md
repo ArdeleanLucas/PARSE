@@ -294,9 +294,23 @@ PYTHONPATH=python python3 -m pytest python/ -x -q
 
 ## Issue closure
 
-Pending until this MC-425-B report PR exists. The close comment must reference both:
+#561 was closed after PR #576 existed, with a comment referencing both delivery options:
 
 - Option 1: MC-422-D / PR #570 — clarifier-tolerant validator plus export-time dedup safety net.
-- Option 2: MC-425-A / PR #575 — data-model re-merge migration extension with δ-format notes.
+- Option 2: MC-425-A / PR #575 — data-model re-merge migration extension with δ-format notes, plus this MC-425-B live-run acceptance report in PR #576.
 
-After the PR is opened, #561 should be closed with the MC-425-B PR URL and the live postcondition summary above.
+Closure command output:
+
+```text
+✓ Closed issue ArdeleanLucas/PARSE#561 (Clarifier-tolerant concept identity (post-MC-418 follow-up))
+```
+
+Verified issue state:
+
+```text
+#561 state=CLOSED closedAt=2026-05-28T18:43:26Z
+```
+
+Issue URL: <https://github.com/ArdeleanLucas/PARSE/issues/561>
+
+PR URL: <https://github.com/ArdeleanLucas/PARSE/pull/576>
