@@ -1,0 +1,25 @@
+id,concept_en,source_item,source_survey,custom_order
+53,big (A),F01,Fail01,1
+1053,big (B),F01,Fail01,101
+634,big,F01,Fail01,201
+54,white (A),F02,Fail01,2
+1054,white (B),F02,Fail01,102
+635,white,F02,Fail01,202
+55,dog (A),F03,Fail01,3
+1055,dog (B),F03,Fail01,103
+636,dog,F03,Fail01,203
+56,leaf (A),F04,Fail01,4
+1056,leaf (B),F04,Fail01,104
+637,leaf,F04,Fail01,204
+57,salt (eating) (A),F05,Fail01,5
+1057,salt (eating) (B),F05,Fail01,105
+638,salt (eating),F05,Fail01,205
+58,"egg (e.g., chicken) (A)",F06,Fail01,6
+1058,"egg (e.g., chicken) (B)",F06,Fail01,106
+639,"egg (e.g., chicken)",F06,Fail01,206
+59,new (A),F07,Fail01,7
+1059,new (B),F07,Fail01,107
+640,new,F07,Fail01,207
+60,round (A),F08,Fail01,8
+1060,round (B),F08,Fail01,108
+641,round,F08,Fail01,208

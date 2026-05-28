@@ -1,0 +1,4 @@
+{
+  "workspace": "${WORKSPACE_ROOT}",
+  "dryRun": true
+}

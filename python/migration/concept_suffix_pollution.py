@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from concept_canonical import canonicalize_label, variant_stem
+from concept_canonical import canonicalize_label, strip_cue_prefix, variant_stem, variant_suffix
 from concept_registry import concept_label_key
 
 _BACKUP_SUFFIX = "pre-suffix-canonicalization"
@@ -38,17 +38,28 @@ class MigrationResult:
     backups_created: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     dry_run: bool = False
+    already_canonical: bool = False
+    post_migration_violations: list[str] = field(default_factory=list)
+    cross_survey_link_violations: list[str] = field(default_factory=list)
+    text_vs_concept_en_inconsistencies: list[str] = field(default_factory=list)
 
     @property
     def success(self) -> bool:
-        return not self.errors
+        return not self.errors and not self.post_migration_violations and not self.cross_survey_link_violations
 
     def summary(self) -> str:
-        lines = [
-            f"Migration {'DRY-RUN' if self.dry_run else 'COMPLETE'}",
-            f"  concepts.csv rows: {self.rows_before} → {self.rows_after}",
-            f"  merge_map entries: {len(self.merge_map)}",
-        ]
+        if self.already_canonical:
+            lines = [
+                f"Migration {'DRY-RUN' if self.dry_run else 'COMPLETE'} — already canonical",
+                f"  concepts.csv rows: {self.rows_before} → {self.rows_after}",
+                "  merge_map entries: 0",
+            ]
+        else:
+            lines = [
+                f"Migration {'DRY-RUN' if self.dry_run else 'COMPLETE'}",
+                f"  concepts.csv rows: {self.rows_before} → {self.rows_after}",
+                f"  merge_map entries: {len(self.merge_map)}",
+            ]
         if self.merge_map:
             lines.append("  merge_map:")
             for old_id, new_id in sorted(self.merge_map.items(), key=lambda item: _concept_sort_key(item[0])):
@@ -63,6 +74,15 @@ class MigrationResult:
                 f"  backups: {len(self.backups_created)}",
             ]
         )
+        if self.post_migration_violations:
+            lines.append("POST-MIGRATION VIOLATIONS:")
+            lines.extend(f"  - {violation}" for violation in self.post_migration_violations)
+        if self.cross_survey_link_violations:
+            lines.append("CROSS-SURVEY LINK VIOLATIONS:")
+            lines.extend(f"  - {violation}" for violation in self.cross_survey_link_violations)
+        if self.text_vs_concept_en_inconsistencies:
+            lines.append("TEXT VS CONCEPT_EN INCONSISTENCIES:")
+            lines.extend(f"  - {violation}" for violation in self.text_vs_concept_en_inconsistencies)
         if self.errors:
             lines.append("ERRORS:")
             lines.extend(f"  - {error}" for error in self.errors)
@@ -191,6 +211,15 @@ def run_migration(workspace: Path, *, dry_run: bool = False) -> MigrationResult:
         concept_canonical_by_id = {row["id"]: canonicalize_label(row.get("concept_en") or "") for row in canonical_rows}
 
         if not result.merge_map:
+            result.already_canonical = _rows_already_canonical(workspace, rows)
+            if result.already_canonical:
+                result.post_migration_violations = verify_post_migration(workspace)
+                result.cross_survey_link_violations = validate_cross_survey_links(workspace)
+                result.text_vs_concept_en_inconsistencies = audit_text_vs_concept_en(workspace)
+            elif not dry_run:
+                result.post_migration_violations = verify_post_migration(workspace)
+                result.cross_survey_link_violations = validate_cross_survey_links(workspace)
+                result.text_vs_concept_en_inconsistencies = audit_text_vs_concept_en(workspace)
             return result
 
         _rows_before, _rows_after, concepts_backup = rewrite_concepts_csv(workspace, result.merge_map, dry_run)
@@ -217,9 +246,171 @@ def run_migration(workspace: Path, *, dry_run: bool = False) -> MigrationResult:
         result.parse_tags_rekeyed = parse_tags_rekeyed
         if parse_tags_backup:
             result.backups_created.append(parse_tags_backup)
+
+        if not dry_run:
+            result.post_migration_violations = verify_post_migration(workspace)
+            result.cross_survey_link_violations = validate_cross_survey_links(workspace)
+            result.text_vs_concept_en_inconsistencies = audit_text_vs_concept_en(workspace)
     except (OSError, csv.Error, json.JSONDecodeError, ValueError) as exc:
         result.errors.append(str(exc))
     return result
+
+
+def is_already_canonical(workspace: Path) -> bool:
+    """Return True when the workspace has no suffix-pollution work left."""
+
+    workspace = Path(workspace)
+    rows, _fieldnames = _read_concepts_csv(workspace / "concepts.csv")
+    if build_merge_map(rows):
+        return False
+    return _rows_already_canonical(workspace, rows)
+
+
+def verify_post_migration(workspace: Path) -> list[str]:
+    """Return hard invariant violations after suffix-pollution migration."""
+
+    workspace = Path(workspace)
+    violations: list[str] = []
+    rows, _fieldnames = _read_concepts_csv(workspace / "concepts.csv")
+    valid_ids = {_normalize_concept_id(row.get("id")) for row in rows if _normalize_concept_id(row.get("id"))}
+
+    for row in rows:
+        concept_id = _normalize_concept_id(row.get("id")) or _clean(row.get("id"))
+        concept_en = _clean(row.get("concept_en"))
+        if variant_suffix(concept_en):
+            violations.append(f"concept_en has (X) suffix: id={concept_id} concept_en={concept_en!r}")
+        if strip_cue_prefix(concept_en) != concept_en:
+            violations.append(f"concept_en has leading cue prefix: id={concept_id} concept_en={concept_en!r}")
+
+    annotations_dir = workspace / "annotations"
+    if annotations_dir.is_dir():
+        for annotation_path in sorted(annotations_dir.glob("*.parse.json")):
+            record = json.loads(annotation_path.read_text(encoding="utf-8"))
+            for cid in _iter_concept_id_values(record):
+                if cid and cid not in valid_ids:
+                    violations.append(f"orphan concept_id in {annotation_path.name}: {cid}")
+            concept_tags = record.get("concept_tags") if isinstance(record, dict) else None
+            if isinstance(concept_tags, dict):
+                for cid in concept_tags:
+                    normalized = _normalize_concept_id(cid)
+                    if normalized and normalized not in valid_ids:
+                        violations.append(f"orphan concept_id in {annotation_path.name} concept_tags: {normalized}")
+
+    tags_path = workspace / "parse-tags.json"
+    if tags_path.exists():
+        tags = json.loads(tags_path.read_text(encoding="utf-8"))
+        if isinstance(tags, list):
+            for tag in tags:
+                if not isinstance(tag, dict):
+                    continue
+                for cid in _as_list(tag.get("concepts")):
+                    normalized = _normalize_concept_id(cid)
+                    if normalized and normalized not in valid_ids:
+                        violations.append(f"orphan concept_id in parse-tags.json tag={tag.get('id')}: {normalized}")
+
+    return violations
+
+
+def validate_cross_survey_links(workspace: Path) -> list[str]:
+    """Validate that sidecar cross-survey links target matching labels."""
+
+    workspace = Path(workspace)
+    sidecar_path = workspace / "survey-overlap.json"
+    if not sidecar_path.exists():
+        return []
+    payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    links = payload.get("concept_survey_links") if isinstance(payload, dict) else None
+    if not isinstance(links, dict):
+        return []
+
+    rows, _fieldnames = _read_concepts_csv(workspace / "concepts.csv")
+    by_id = {_normalize_concept_id(row.get("id")): row for row in rows if _normalize_concept_id(row.get("id"))}
+    by_survey_item: dict[tuple[str, str], list[dict[str, str]]] = {}
+    for row in rows:
+        survey = _clean(row.get("source_survey")).casefold()
+        item = _clean(row.get("source_item"))
+        if survey and item:
+            by_survey_item.setdefault((survey, item), []).append(row)
+
+    violations: list[str] = []
+    for source_id, targets in links.items():
+        normalized_source = _normalize_concept_id(source_id)
+        source_row = by_id.get(normalized_source)
+        if not source_row:
+            violations.append(f"link source id {source_id} not in concepts.csv")
+            continue
+        if not isinstance(targets, dict):
+            violations.append(f"link source id {source_id} has non-object targets")
+            continue
+        source_label = concept_label_key(canonicalize_label(source_row.get("concept_en") or ""))
+        for target_survey, target_item in targets.items():
+            survey_key = _clean(target_survey).casefold()
+            item_key = _clean(target_item)
+            candidates = by_survey_item.get((survey_key, item_key), [])
+            if not candidates:
+                violations.append(f"link target ({target_survey}, {target_item}) has no concept")
+                continue
+            if not any(concept_label_key(canonicalize_label(candidate.get("concept_en") or "")) == source_label for candidate in candidates):
+                violations.append(
+                    f"link target ({target_survey}, {target_item}) hosts no concept matching label {source_label!r} (links {source_id})"
+                )
+    return violations
+
+
+def audit_text_vs_concept_en(workspace: Path) -> list[str]:
+    """Return informational interval text/concept_en inconsistencies."""
+
+    workspace = Path(workspace)
+    rows, _fieldnames = _read_concepts_csv(workspace / "concepts.csv")
+    by_id = {
+        _normalize_concept_id(row.get("id")): concept_label_key(canonicalize_label(row.get("concept_en") or ""))
+        for row in rows
+        if _normalize_concept_id(row.get("id"))
+    }
+    inconsistencies: list[str] = []
+    annotations_dir = workspace / "annotations"
+    if not annotations_dir.is_dir():
+        return inconsistencies
+    for annotation_path in sorted(annotations_dir.glob("*.parse.json")):
+        record = json.loads(annotation_path.read_text(encoding="utf-8"))
+        intervals = record.get("tiers", {}).get("concept", {}).get("intervals", []) if isinstance(record, dict) else []
+        if not isinstance(intervals, list):
+            continue
+        for interval in intervals:
+            if not isinstance(interval, dict):
+                continue
+            concept_id = _normalize_concept_id(interval.get("concept_id") or interval.get("conceptId"))
+            text = concept_label_key(canonicalize_label(interval.get("text") or ""))
+            expected = by_id.get(concept_id)
+            if concept_id and text and expected and text != expected:
+                inconsistencies.append(
+                    f"{annotation_path.name} concept_id={concept_id}: text={text!r} != concept_en={expected!r}"
+                )
+    return inconsistencies
+
+
+def _rows_already_canonical(workspace: Path, rows: list[dict[str, str]]) -> bool:
+    for row in rows:
+        concept_en = _clean(row.get("concept_en"))
+        if variant_suffix(concept_en):
+            return False
+        if strip_cue_prefix(concept_en) != concept_en:
+            return False
+    return not verify_post_migration(workspace) and not validate_cross_survey_links(workspace)
+
+
+def _iter_concept_id_values(value: Any) -> Iterable[str]:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key in _CONCEPT_ID_KEYS:
+                normalized = _normalize_concept_id(child)
+                if normalized:
+                    yield normalized
+            else:
+                yield from _iter_concept_id_values(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _iter_concept_id_values(child)
 
 
 def _read_concepts_csv(path: Path) -> tuple[list[dict[str, str]], list[str]]:
@@ -394,9 +585,13 @@ def _utc_now_compact() -> str:
 
 __all__ = [
     "MigrationResult",
+    "audit_text_vs_concept_en",
     "build_merge_map",
+    "is_already_canonical",
     "rewrite_annotation_file",
     "rewrite_concepts_csv",
     "rewrite_parse_tags",
     "run_migration",
+    "validate_cross_survey_links",
+    "verify_post_migration",
 ]
