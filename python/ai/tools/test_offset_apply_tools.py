@@ -64,3 +64,4 @@ def test_tool_apply_timestamp_offset_supports_dry_run_directly(tmp_path) -> None
     assert payload["wouldShiftIntervals"] == 1
     assert payload["wouldShiftConcepts"] == 1
     assert payload["preview"][0]["to"] == [25.0, 25.5]
+    assert set(payload["preview"][0]) == {"tier", "from", "to"}
