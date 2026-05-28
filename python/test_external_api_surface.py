@@ -432,15 +432,16 @@ def test_build_mcp_http_catalog_defaults_to_full_safe_surface_without_config(tmp
 
     tool_names = {tool["name"] for tool in catalog["tools"]}
     assert catalog["mode"] == "default"
-    assert catalog["count"] == 65
-    assert catalog["exposure"]["mcpToolCount"] == 65
-    assert catalog["exposure"]["defaultParseMcpToolCount"] == 61
+    assert catalog["count"] == 66
+    assert catalog["exposure"]["mcpToolCount"] == 66
+    assert catalog["exposure"]["defaultParseMcpToolCount"] == 62
     assert "audio_normalize_start" in tool_names
     assert "clef_clear_data" in tool_names
     assert "csv_only_reimport" in tool_names
     assert "revert_csv_reimport" in tool_names
     assert "populate_cross_survey_links" in tool_names
     assert "export_annotations_csv" in tool_names
+    assert "export_review_data" in tool_names
     assert "transcript_reformat" in tool_names
 
 
@@ -453,10 +454,10 @@ def test_build_mcp_http_catalog_active_mode_preserves_legacy_surface_for_explici
 
     tool_names = {tool["name"] for tool in catalog["tools"]}
     assert catalog["mode"] == "active"
-    assert catalog["count"] == 45
+    assert catalog["count"] == 46
     assert catalog["exposure"]["configSource"] == str(config_path)
-    assert catalog["exposure"]["mcpToolCount"] == 45
-    assert catalog["exposure"]["defaultParseMcpToolCount"] == 61
+    assert catalog["exposure"]["mcpToolCount"] == 46
+    assert catalog["exposure"]["defaultParseMcpToolCount"] == 62
     assert "annotation_read" in tool_names
     assert "csv_only_reimport" in tool_names
     assert "revert_csv_reimport" in tool_names
@@ -464,6 +465,7 @@ def test_build_mcp_http_catalog_active_mode_preserves_legacy_surface_for_explici
     assert "audio_normalize_start" not in tool_names
     assert "clef_clear_data" not in tool_names
     assert "export_annotations_csv" not in tool_names
+    assert "export_review_data" in tool_names
 
 
 def test_build_mcp_http_catalog_includes_workflow_specs_and_safety_metadata(tmp_path: pathlib.Path) -> None:

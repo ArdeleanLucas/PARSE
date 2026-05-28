@@ -26,6 +26,7 @@ EXPORT_TOOL_NAMES = (
     "export_nexus",
     "export_annotations_elan",
     "export_annotations_textgrid",
+    "export_review_data",
 )
 
 
@@ -242,6 +243,70 @@ EXPORT_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                         _tool_condition(
                             "export_file_written",
                             "When dryRun=false and outputPath is provided, the requested export file is written inside the project.",
+                            kind="filesystem_write",
+                        ),
+                    ),
+                ),
+    "export_review_data": ChatToolSpec(
+                    name="export_review_data",
+                    description=(
+                        "Export a PARSE workspace to the legacy review_tool v4.1 schema "
+                        "(thesis-tag filtered, optional ffmpeg-clipped audio, analytical fields, "
+                        "and contact-language reference forms). Mirrors python/export_review_data.py."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["workspace", "out"],
+                        "properties": {
+                            "workspace": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 1024,
+                                "description": "Absolute path to the PARSE workspace root.",
+                            },
+                            "out": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 1024,
+                                "description": "Output directory for review_data.json, timestamps, and optional audio clips.",
+                            },
+                            "tag_id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200,
+                                "description": "parse-tags.json tag id to filter concepts by (default: custom-sk-concept-list).",
+                            },
+                            "contact_config": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 1024,
+                                "description": "Path to sil_contact_languages.json. Defaults to <repo>/config/sil_contact_languages.json.",
+                            },
+                            "speakers": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Optional speaker subset; project.json order is preserved and unknown speakers return invalid_args.",
+                            },
+                            "skip_audio": {
+                                "type": "boolean",
+                                "description": "Skip ffmpeg audio clipping; emits review_data.json and timestamps only.",
+                            },
+                        },
+                    },
+                    mutability="mutating",
+                    preconditions=(
+                        _project_loaded_condition(),
+                        _tool_condition(
+                            "review_workspace_available",
+                            "The requested workspace must contain project.json, concepts.csv, and annotations suitable for review_tool export.",
+                            kind="project_state",
+                        ),
+                    ),
+                    postconditions=(
+                        _tool_condition(
+                            "review_data_export_written",
+                            "The tool writes review_data.json plus timestamp CSVs and optional audio clips to the requested output directory.",
                             kind="filesystem_write",
                         ),
                     ),
@@ -549,12 +614,80 @@ def export_annotations_textgrid(tools: "ParseChatTools", args: Dict[str, Any]) -
             raise ChatToolExecutionError("TextGrid export failed: {0}".format(exc)) from exc
 
 
+def _review_export_invalid_args(message: str) -> Dict[str, Any]:
+        return {"ok": False, "error": message, "error_kind": "invalid_args"}
+
+
+def export_review_data(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
+        """Export a workspace to the legacy review_tool schema via the chat/MCP surface."""
+        try:
+            from export_review_data import (  # type: ignore[import]
+                DEFAULT_CONTACT_CONFIG_RELATIVE,
+                DEFAULT_TAG_ID,
+                build_review_data,
+                write_outputs,
+            )
+        except Exception as exc:
+            raise ChatToolExecutionError("export_review_data is not importable: {0}".format(exc)) from exc
+
+        workspace_raw = str(args.get("workspace") or "").strip()
+        out_raw = str(args.get("out") or "").strip()
+        if not workspace_raw:
+            return _review_export_invalid_args("workspace is required")
+        if not out_raw:
+            return _review_export_invalid_args("out is required")
+
+        workspace = Path(workspace_raw).expanduser().resolve()
+        out_dir = Path(out_raw).expanduser().resolve()
+        if not workspace.exists():
+            return _review_export_invalid_args("workspace path does not exist: {0}".format(workspace_raw))
+
+        tag_id = str(args.get("tag_id") or DEFAULT_TAG_ID).strip() or DEFAULT_TAG_ID
+        contact_config_raw = str(args.get("contact_config") or "").strip()
+        if contact_config_raw:
+            contact_config = Path(contact_config_raw).expanduser().resolve()
+        else:
+            repo_root = Path(__file__).resolve().parents[3]
+            contact_config = repo_root / DEFAULT_CONTACT_CONFIG_RELATIVE
+
+        speakers_raw = args.get("speakers")
+        speakers = None
+        if isinstance(speakers_raw, list):
+            speakers = [str(speaker).strip() for speaker in speakers_raw if str(speaker).strip()]
+
+        try:
+            review_data, clip_plan = build_review_data(
+                workspace=workspace,
+                tag_id=tag_id,
+                contact_config=contact_config,
+                speaker_filter=speakers,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            return _review_export_invalid_args(str(exc))
+        except Exception as exc:
+            raise ChatToolExecutionError("review_tool export failed: {0}".format(exc)) from exc
+
+        try:
+            summary = write_outputs(
+                workspace=workspace,
+                out_dir=out_dir,
+                review_data=review_data,
+                clip_plan=clip_plan,
+                skip_audio=bool(args.get("skip_audio", False)),
+            )
+        except Exception as exc:
+            raise ChatToolExecutionError("review_tool output write failed: {0}".format(exc)) from exc
+
+        return {"ok": True, **summary}
+
+
 EXPORT_TOOL_HANDLERS = {
     "export_annotations_csv": export_annotations_csv,
     "export_lingpy_tsv": export_lingpy_tsv,
     "export_nexus": export_nexus,
     "export_annotations_elan": export_annotations_elan,
     "export_annotations_textgrid": export_annotations_textgrid,
+    "export_review_data": export_review_data,
 }
 
 
@@ -568,4 +701,5 @@ __all__ = [
     "export_nexus",
     "export_annotations_elan",
     "export_annotations_textgrid",
+    "export_review_data",
 ]

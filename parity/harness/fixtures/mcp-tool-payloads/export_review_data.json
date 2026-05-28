@@ -1,0 +1,5 @@
+{
+  "workspace": "${WORKSPACE_ROOT}",
+  "out": "${WORKSPACE_ROOT}/exports/review-tool",
+  "skip_audio": true
+}
