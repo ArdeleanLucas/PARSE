@@ -72,7 +72,7 @@ def test_run_migration_dry_run_does_not_write(tmp_path: Path) -> None:
     assert result.backups_created == []
 
 
-def test_run_migration_canonical_concept_en_and_clarifier_preservation(tmp_path: Path) -> None:
+def test_run_migration_canonicalizes_suffixes_and_collapses_clarifier_siblings(tmp_path: Path) -> None:
     workspace = _copy_fixture(tmp_path)
 
     result = run_migration(workspace)
@@ -80,13 +80,13 @@ def test_run_migration_canonical_concept_en_and_clarifier_preservation(tmp_path:
     assert result.success
     rows = _read_concepts(workspace / "concepts.csv")
     by_id = {row["id"]: row for row in rows}
-    assert list(by_id) == ["53", "10", "11"]
+    assert list(by_id) == ["53", "10"]
     assert by_id["53"]["concept_en"] == "big"
     assert by_id["53"]["source_survey"] == "KLQ"
     assert by_id["53"]["source_item"] == "4.1"
     assert by_id["53"]["custom_order"] == "53"
-    assert by_id["10"]["concept_en"] == "hair (women)"
-    assert by_id["11"]["concept_en"] == "hair (men)"
+    assert by_id["10"]["concept_en"] == "hair"
+    assert result.clarifier_merge_map == {"11": "10"}
 
 
 def test_rewrite_annotation_file_rekeys_strips_exact_variant_text_and_merges_concept_tags(tmp_path: Path) -> None:
@@ -118,13 +118,15 @@ def test_run_migration_rekeys_parse_tags_and_creates_timestamped_backups(tmp_pat
     assert result.success
     tags = json.loads((workspace / "parse-tags.json").read_text(encoding="utf-8"))
     assert tags[0]["concepts"] == ["53"]
-    assert [str(concept_id) for concept_id in tags[1]["concepts"]] == ["10", "11"]
-    assert result.parse_tags_rekeyed == 1
+    assert [str(concept_id) for concept_id in tags[1]["concepts"]] == ["10"]
+    assert result.parse_tags_rekeyed == 2
     backup_names = sorted(Path(path).name for path in result.backups_created)
-    assert len(backup_names) == 3
+    assert len(backup_names) == 5
     assert any(name.startswith("concepts.csv.bak-") and name.endswith("-pre-suffix-canonicalization") for name in backup_names)
     assert any(name.startswith("Fail01.parse.json.bak-") and name.endswith("-pre-suffix-canonicalization") for name in backup_names)
     assert any(name.startswith("parse-tags.json.bak-") and name.endswith("-pre-suffix-canonicalization") for name in backup_names)
+    assert any(name.startswith("concepts.csv.bak-") and name.endswith("-pre-clarifier-collapse") for name in backup_names)
+    assert any(name.startswith("parse-tags.json.bak-") and name.endswith("-pre-clarifier-collapse") for name in backup_names)
     assert list(workspace.glob("concepts.csv.bak-*-pre-suffix-canonicalization"))
     assert list(workspace.glob("parse-tags.json.bak-*-pre-suffix-canonicalization"))
 

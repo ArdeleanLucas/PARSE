@@ -22,6 +22,9 @@ from concept_canonical import canonicalize_label, strip_clarifier, strip_cue_pre
 from concept_registry import concept_label_key
 
 _BACKUP_SUFFIX = "pre-suffix-canonicalization"
+_CLARIFIER_BACKUP_SUFFIX = "pre-clarifier-collapse"
+_COMPARE_NOTES_STORAGE_FILE = "parseui-compare-notes-v1.json"
+_COMPARE_NOTES_HEADER = "Merged from clarifier rows on "
 _CONCEPT_ID_KEYS = {"concept_id", "conceptId"}
 
 
@@ -36,6 +39,9 @@ class MigrationResult:
     concept_tags_rekeyed: int = 0
     parse_tags_rekeyed: int = 0
     survey_overlap_rekeyed: int = 0
+    clarifier_merge_map: dict[str, str] = field(default_factory=dict)
+    clarifier_groups_collapsed: int = 0
+    clarifier_notes_updated: int = 0
     backups_created: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     dry_run: bool = False
@@ -65,6 +71,13 @@ class MigrationResult:
             lines.append("  merge_map:")
             for old_id, new_id in sorted(self.merge_map.items(), key=lambda item: _concept_sort_key(item[0])):
                 lines.append(f"    {old_id} -> {new_id}")
+        lines.append(f"  clarifier merge_map entries: {len(self.clarifier_merge_map)}")
+        if self.clarifier_merge_map:
+            lines.append("  clarifier merge_map:")
+            for old_id, new_id in sorted(self.clarifier_merge_map.items(), key=lambda item: _concept_sort_key(item[0])):
+                lines.append(f"    {old_id} -> {new_id}")
+        lines.append(f"  clarifier groups collapsed: {self.clarifier_groups_collapsed}")
+        lines.append(f"  clarifier notes updated: {self.clarifier_notes_updated}")
         lines.extend(
             [
                 f"  annotation files rewritten: {self.annotations_rewritten}",
@@ -89,6 +102,23 @@ class MigrationResult:
             lines.append("ERRORS:")
             lines.extend(f"  - {error}" for error in self.errors)
         return "\n".join(lines)
+
+
+@dataclass
+class ClarifierCollapseResult:
+    merge_map: dict[str, str] = field(default_factory=dict)
+    rows_before: int = 0
+    rows_after: int = 0
+    groups_collapsed: int = 0
+    annotations_rewritten: int = 0
+    intervals_rekeyed: int = 0
+    text_fields_stripped: int = 0
+    concept_tags_rekeyed: int = 0
+    parse_tags_rekeyed: int = 0
+    survey_overlap_rekeyed: int = 0
+    notes_updated: int = 0
+    backups_created: list[str] = field(default_factory=list)
+    dry_run: bool = False
 
 
 def build_merge_map(rows: list[dict[str, str]]) -> dict[str, str]:
@@ -146,6 +176,8 @@ def rewrite_annotation_file(
     merge_map: dict[str, str],
     concept_canonical_by_id: dict[str, str],
     dry_run: bool,
+    *,
+    backup_suffix: str = _BACKUP_SUFFIX,
 ) -> dict[str, int | str | None]:
     """Rewrite one ``annotations/*.parse.json`` file.
 
@@ -166,13 +198,15 @@ def rewrite_annotation_file(
     stats["tags_rekeyed"] = tags_rekeyed
 
     if not dry_run and (stats["rekeyed"] or stripped or tags_rekeyed):
-        backup_path = _backup_file(Path(path))
+        backup_path = _backup_file(Path(path), backup_suffix)
         _atomic_write_text(Path(path), json.dumps(record, ensure_ascii=False, indent=2) + "\n")
         stats["backup"] = backup_path
     return stats
 
 
-def rewrite_parse_tags(workspace: Path, merge_map: dict[str, str], dry_run: bool) -> tuple[int, str | None]:
+def rewrite_parse_tags(
+    workspace: Path, merge_map: dict[str, str], dry_run: bool, *, backup_suffix: str = _BACKUP_SUFFIX
+) -> tuple[int, str | None]:
     """Rewrite root ``parse-tags.json`` concept references."""
 
     path = Path(workspace) / "parse-tags.json"
@@ -193,12 +227,14 @@ def rewrite_parse_tags(workspace: Path, merge_map: dict[str, str], dry_run: bool
                 tag["concepts"] = new_concepts
     backup_path: str | None = None
     if not dry_run and rekeyed:
-        backup_path = _backup_file(path)
+        backup_path = _backup_file(path, backup_suffix)
         _atomic_write_text(path, json.dumps(tags, ensure_ascii=False, indent=2) + "\n")
     return rekeyed, backup_path
 
 
-def rewrite_survey_overlap(workspace: Path, merge_map: dict[str, str], dry_run: bool) -> tuple[int, str | None]:
+def rewrite_survey_overlap(
+    workspace: Path, merge_map: dict[str, str], dry_run: bool, *, backup_suffix: str = _BACKUP_SUFFIX
+) -> tuple[int, str | None]:
     """Rewrite survey-overlap sidecar concept-id keys per ``merge_map``.
 
     ``concept_survey_links`` is shaped as ``{concept_id: {survey: item}}``;
@@ -238,13 +274,13 @@ def rewrite_survey_overlap(workspace: Path, merge_map: dict[str, str], dry_run: 
 
     backup_path: str | None = None
     if not dry_run and rekeyed_total:
-        backup_path = _backup_file(path)
+        backup_path = _backup_file(path, backup_suffix)
         _atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     return rekeyed_total, backup_path
 
 
 def run_migration(workspace: Path, *, dry_run: bool = False) -> MigrationResult:
-    """Run the suffix-pollution migration on ``workspace``."""
+    """Run suffix-pollution canonicalization plus clarifier-row collapse."""
 
     result = MigrationResult(dry_run=dry_run)
     workspace = Path(workspace)
@@ -257,49 +293,56 @@ def run_migration(workspace: Path, *, dry_run: bool = False) -> MigrationResult:
         result.rows_after = len(canonical_rows)
         concept_canonical_by_id = {row["id"]: canonicalize_label(row.get("concept_en") or "") for row in canonical_rows}
 
-        if not result.merge_map:
-            result.already_canonical = _rows_already_canonical(workspace, rows)
-            if result.already_canonical:
-                result.post_migration_violations = verify_post_migration(workspace)
-                result.cross_survey_link_violations = validate_cross_survey_links(workspace)
-                result.text_vs_concept_en_inconsistencies = audit_text_vs_concept_en(workspace)
-            elif not dry_run:
-                result.post_migration_violations = verify_post_migration(workspace)
-                result.cross_survey_link_violations = validate_cross_survey_links(workspace)
-                result.text_vs_concept_en_inconsistencies = audit_text_vs_concept_en(workspace)
-            return result
+        if result.merge_map:
+            _rows_before, _rows_after, concepts_backup = rewrite_concepts_csv(workspace, result.merge_map, dry_run)
+            result.rows_after = _rows_after
+            if concepts_backup:
+                result.backups_created.append(concepts_backup)
 
-        _rows_before, _rows_after, concepts_backup = rewrite_concepts_csv(workspace, result.merge_map, dry_run)
-        if concepts_backup:
-            result.backups_created.append(concepts_backup)
+            annotations_dir = workspace / "annotations"
+            if annotations_dir.is_dir():
+                for annotation_path in sorted(annotations_dir.glob("*.parse.json")):
+                    stats = rewrite_annotation_file(annotation_path, result.merge_map, concept_canonical_by_id, dry_run)
+                    rekeyed = int(stats["rekeyed"] or 0)
+                    stripped = int(stats["stripped"] or 0)
+                    tags_rekeyed = int(stats["tags_rekeyed"] or 0)
+                    if rekeyed or stripped or tags_rekeyed:
+                        result.annotations_rewritten += 1
+                    result.intervals_rekeyed += rekeyed
+                    result.text_fields_stripped += stripped
+                    result.concept_tags_rekeyed += tags_rekeyed
+                    backup = stats.get("backup")
+                    if isinstance(backup, str):
+                        result.backups_created.append(backup)
 
-        annotations_dir = workspace / "annotations"
-        if annotations_dir.is_dir():
-            for annotation_path in sorted(annotations_dir.glob("*.parse.json")):
-                stats = rewrite_annotation_file(annotation_path, result.merge_map, concept_canonical_by_id, dry_run)
-                rekeyed = int(stats["rekeyed"] or 0)
-                stripped = int(stats["stripped"] or 0)
-                tags_rekeyed = int(stats["tags_rekeyed"] or 0)
-                if rekeyed or stripped or tags_rekeyed:
-                    result.annotations_rewritten += 1
-                result.intervals_rekeyed += rekeyed
-                result.text_fields_stripped += stripped
-                result.concept_tags_rekeyed += tags_rekeyed
-                backup = stats.get("backup")
-                if isinstance(backup, str):
-                    result.backups_created.append(backup)
+            parse_tags_rekeyed, parse_tags_backup = rewrite_parse_tags(workspace, result.merge_map, dry_run)
+            result.parse_tags_rekeyed += parse_tags_rekeyed
+            if parse_tags_backup:
+                result.backups_created.append(parse_tags_backup)
 
-        parse_tags_rekeyed, parse_tags_backup = rewrite_parse_tags(workspace, result.merge_map, dry_run)
-        result.parse_tags_rekeyed = parse_tags_rekeyed
-        if parse_tags_backup:
-            result.backups_created.append(parse_tags_backup)
+            survey_overlap_rekeyed, survey_overlap_backup = rewrite_survey_overlap(workspace, result.merge_map, dry_run)
+            result.survey_overlap_rekeyed += survey_overlap_rekeyed
+            if survey_overlap_backup:
+                result.backups_created.append(survey_overlap_backup)
 
-        survey_overlap_rekeyed, survey_overlap_backup = rewrite_survey_overlap(workspace, result.merge_map, dry_run)
-        result.survey_overlap_rekeyed = survey_overlap_rekeyed
-        if survey_overlap_backup:
-            result.backups_created.append(survey_overlap_backup)
+        clarifier_result = collapse_clarifier_rows(workspace, dry_run=dry_run)
+        result.clarifier_merge_map = clarifier_result.merge_map
+        result.clarifier_groups_collapsed = clarifier_result.groups_collapsed
+        result.clarifier_notes_updated = clarifier_result.notes_updated
+        result.rows_after = clarifier_result.rows_after or result.rows_after
+        result.annotations_rewritten += clarifier_result.annotations_rewritten
+        result.intervals_rekeyed += clarifier_result.intervals_rekeyed
+        result.text_fields_stripped += clarifier_result.text_fields_stripped
+        result.concept_tags_rekeyed += clarifier_result.concept_tags_rekeyed
+        result.parse_tags_rekeyed += clarifier_result.parse_tags_rekeyed
+        result.survey_overlap_rekeyed += clarifier_result.survey_overlap_rekeyed
+        result.backups_created.extend(clarifier_result.backups_created)
 
-        if not dry_run:
+        if not result.merge_map and not result.clarifier_merge_map:
+            latest_rows, _latest_fieldnames = _read_concepts_csv(concepts_path)
+            result.already_canonical = _rows_already_canonical(workspace, latest_rows) and is_already_clarifier_collapsed(workspace)
+
+        if not dry_run or result.already_canonical:
             result.post_migration_violations = verify_post_migration(workspace)
             result.cross_survey_link_violations = validate_cross_survey_links(workspace)
             result.text_vs_concept_en_inconsistencies = audit_text_vs_concept_en(workspace)
@@ -308,12 +351,92 @@ def run_migration(workspace: Path, *, dry_run: bool = False) -> MigrationResult:
     return result
 
 
+def collapse_clarifier_rows(workspace: Path, dry_run: bool = False) -> ClarifierCollapseResult:
+    """Collapse sibling concept rows that differ only by parenthetical clarifiers.
+
+    Rows are grouped by ``(source_survey, source_item, strip_clarifier(concept_en))``.
+    Each group keeps the lowest numeric id, rewrites annotation/tag references to
+    that id, and prepends the locked δ-format provenance header to the compare
+    notes mirror shaped like the ``parseui-compare-notes-v1`` localStorage value.
+    """
+
+    workspace = Path(workspace)
+    result = ClarifierCollapseResult(dry_run=dry_run)
+    rows, fieldnames = _read_concepts_csv(workspace / "concepts.csv")
+    result.rows_before = len(rows)
+    canonical_rows, merge_map, note_lines = _clarifier_canonical_rows(rows, fieldnames)
+    result.rows_after = len(canonical_rows)
+    result.merge_map = merge_map
+    result.groups_collapsed = len(note_lines)
+    if not merge_map:
+        return result
+
+    if not dry_run:
+        concepts_path = workspace / "concepts.csv"
+        result.backups_created.append(_backup_file(concepts_path, _CLARIFIER_BACKUP_SUFFIX))
+        _atomic_write_text(concepts_path, _render_concepts_csv(canonical_rows, fieldnames))
+
+    concept_canonical_by_id = {row["id"]: canonicalize_label(row.get("concept_en") or "") for row in canonical_rows}
+    annotations_dir = workspace / "annotations"
+    if annotations_dir.is_dir():
+        for annotation_path in sorted(annotations_dir.glob("*.parse.json")):
+            stats = rewrite_annotation_file(
+                annotation_path,
+                merge_map,
+                concept_canonical_by_id,
+                dry_run,
+                backup_suffix=_CLARIFIER_BACKUP_SUFFIX,
+            )
+            rekeyed = int(stats["rekeyed"] or 0)
+            stripped = int(stats["stripped"] or 0)
+            tags_rekeyed = int(stats["tags_rekeyed"] or 0)
+            if rekeyed or stripped or tags_rekeyed:
+                result.annotations_rewritten += 1
+            result.intervals_rekeyed += rekeyed
+            result.text_fields_stripped += stripped
+            result.concept_tags_rekeyed += tags_rekeyed
+            backup = stats.get("backup")
+            if isinstance(backup, str):
+                result.backups_created.append(backup)
+
+    parse_tags_rekeyed, parse_tags_backup = rewrite_parse_tags(
+        workspace, merge_map, dry_run, backup_suffix=_CLARIFIER_BACKUP_SUFFIX
+    )
+    result.parse_tags_rekeyed = parse_tags_rekeyed
+    if parse_tags_backup:
+        result.backups_created.append(parse_tags_backup)
+
+    survey_overlap_rekeyed, survey_overlap_backup = rewrite_survey_overlap(
+        workspace, merge_map, dry_run, backup_suffix=_CLARIFIER_BACKUP_SUFFIX
+    )
+    result.survey_overlap_rekeyed = survey_overlap_rekeyed
+    if survey_overlap_backup:
+        result.backups_created.append(survey_overlap_backup)
+
+    notes_updated, notes_backup = _prepend_clarifier_notes(workspace, note_lines, dry_run)
+    result.notes_updated = notes_updated
+    if notes_backup:
+        result.backups_created.append(notes_backup)
+    return result
+
+
+def is_already_clarifier_collapsed(workspace: Path) -> bool:
+    """Return True when no same-slot clarifier sibling group remains."""
+
+    rows, _fieldnames = _read_concepts_csv(Path(workspace) / "concepts.csv")
+    _canonical_rows, merge_map, _note_lines = _clarifier_canonical_rows(rows, _fieldnames)
+    return not merge_map
+
+
+
 def is_already_canonical(workspace: Path) -> bool:
     """Return True when the workspace has no suffix-pollution work left."""
 
     workspace = Path(workspace)
     rows, _fieldnames = _read_concepts_csv(workspace / "concepts.csv")
     if build_merge_map(rows):
+        return False
+    if not is_already_clarifier_collapsed(workspace):
         return False
     return _rows_already_canonical(workspace, rows)
 
@@ -333,6 +456,10 @@ def verify_post_migration(workspace: Path) -> list[str]:
             violations.append(f"concept_en has (X) suffix: id={concept_id} concept_en={concept_en!r}")
         if strip_cue_prefix(concept_en) != concept_en:
             violations.append(f"concept_en has leading cue prefix: id={concept_id} concept_en={concept_en!r}")
+
+    _clarifier_rows, clarifier_merge_map, _note_lines = _clarifier_canonical_rows(rows, _fieldnames)
+    for old_id, new_id in sorted(clarifier_merge_map.items(), key=lambda item: _concept_sort_key(item[0])):
+        violations.append(f"clarifier sibling row remains uncollapsed: {old_id} -> {new_id}")
 
     annotations_dir = workspace / "annotations"
     if annotations_dir.is_dir():
@@ -452,6 +579,99 @@ def _rows_already_canonical(workspace: Path, rows: list[dict[str, str]]) -> bool
         if strip_cue_prefix(concept_en) != concept_en:
             return False
     return not verify_post_migration(workspace) and not validate_cross_survey_links(workspace)
+
+
+def _clarifier_canonical_rows(
+    rows: list[dict[str, str]], fieldnames: list[str]
+) -> tuple[list[dict[str, str]], dict[str, str], dict[str, list[str]]]:
+    groups: dict[tuple[str, str, str], list[dict[str, str]]] = {}
+    for row in rows:
+        concept_id = _normalize_concept_id(row.get("id"))
+        if not concept_id:
+            continue
+        survey = _clean(row.get("source_survey"))
+        item = _clean(row.get("source_item"))
+        base = _clean(strip_clarifier(_clean(row.get("concept_en"))))
+        base_key = concept_label_key(base)
+        if not survey or not item or not base_key:
+            continue
+        groups.setdefault((survey, item, base_key), []).append(row)
+
+    merge_map: dict[str, str] = {}
+    rows_to_drop: set[str] = set()
+    canonical_label_by_id: dict[str, str] = {}
+    note_lines: dict[str, list[str]] = {}
+    grouped_noncanonical: dict[str, list[dict[str, str]]] = {}
+
+    for members in groups.values():
+        valid_members = [(int(_normalize_concept_id(row.get("id"))), row) for row in members if _normalize_concept_id(row.get("id"))]
+        if len(valid_members) <= 1:
+            continue
+        if not any(_clean(strip_clarifier(_clean(row.get("concept_en")))) != _clean(row.get("concept_en")) for _cid, row in valid_members):
+            continue
+        canonical_id = str(min(concept_id for concept_id, _row in valid_members))
+        canonical_row = next(row for concept_id, row in valid_members if str(concept_id) == canonical_id)
+        canonical_label_by_id[canonical_id] = _clean(strip_clarifier(_clean(canonical_row.get("concept_en"))))
+        note_lines[canonical_id] = [
+            f"- {_clean(row.get('concept_en'))} — was concept_id {concept_id}"
+            for concept_id, row in sorted(valid_members, key=lambda item: item[0])
+        ]
+        for concept_id, row in valid_members:
+            old_id = str(concept_id)
+            if old_id == canonical_id:
+                continue
+            merge_map[old_id] = canonical_id
+            rows_to_drop.add(old_id)
+            grouped_noncanonical.setdefault(canonical_id, []).append(row)
+
+    if not merge_map:
+        return [_project_row(row, fieldnames) for row in rows], {}, {}
+
+    canonical_rows: list[dict[str, str]] = []
+    for row in rows:
+        concept_id = _normalize_concept_id(row.get("id"))
+        if not concept_id or concept_id in rows_to_drop:
+            continue
+        output = _project_row(row, fieldnames)
+        output["id"] = concept_id
+        if concept_id in canonical_label_by_id:
+            output["concept_en"] = canonical_label_by_id[concept_id]
+            for sibling in grouped_noncanonical.get(concept_id, []):
+                _fold_non_empty_values(output, sibling, fieldnames)
+        canonical_rows.append(output)
+    return canonical_rows, dict(sorted(merge_map.items(), key=lambda item: _concept_sort_key(item[0]))), note_lines
+
+
+def _prepend_clarifier_notes(
+    workspace: Path, note_lines: dict[str, list[str]], dry_run: bool
+) -> tuple[int, str | None]:
+    if not note_lines:
+        return 0, None
+    path = Path(workspace) / _COMPARE_NOTES_STORAGE_FILE
+    payload: dict[str, str]
+    if path.exists():
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        payload = {str(key): str(value) for key, value in raw.items()} if isinstance(raw, dict) else {}
+    else:
+        payload = {}
+
+    date = _utc_today()
+    updated = 0
+    for canonical_id, lines in sorted(note_lines.items(), key=lambda item: _concept_sort_key(item[0])):
+        current = str(payload.get(canonical_id, ""))
+        if current.startswith(_COMPARE_NOTES_HEADER):
+            continue
+        header = f"{_COMPARE_NOTES_HEADER}{date}:\n" + "\n".join(lines)
+        payload[canonical_id] = header if not current else f"{header}\n\n{current}"
+        updated += 1
+
+    backup_path: str | None = None
+    if updated and not dry_run:
+        if path.exists():
+            backup_path = _backup_file(path, _CLARIFIER_BACKUP_SUFFIX)
+        _atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    return updated, backup_path
+
 
 
 def _iter_concept_id_values(value: Any) -> Iterable[str]:
@@ -642,8 +862,8 @@ def _concept_sort_key(value: str) -> tuple[int, int | str]:
         return (1, str(value))
 
 
-def _backup_file(path: Path) -> str:
-    backup_path = path.with_name(f"{path.name}.bak-{_utc_now_compact()}-{_BACKUP_SUFFIX}")
+def _backup_file(path: Path, suffix: str = _BACKUP_SUFFIX) -> str:
+    backup_path = path.with_name(f"{path.name}.bak-{_utc_now_compact()}-{suffix}")
     shutil.copy2(path, backup_path)
     return str(backup_path)
 
@@ -658,11 +878,18 @@ def _utc_now_compact() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+def _utc_today() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
 __all__ = [
+    "ClarifierCollapseResult",
     "MigrationResult",
     "audit_text_vs_concept_en",
     "build_merge_map",
+    "collapse_clarifier_rows",
     "is_already_canonical",
+    "is_already_clarifier_collapsed",
     "rewrite_annotation_file",
     "rewrite_concepts_csv",
     "rewrite_parse_tags",
