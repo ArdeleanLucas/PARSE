@@ -208,3 +208,60 @@ PYTHONPATH=python python3 python/scripts/diff_default_vs_anchored.py --default /
 python3 python/export_review_data.py --workspace /home/lucas/parse-workspace --out /tmp/mc-424-a-default-v2 --speakers Fail01 Saha01 Mand01 Qasr01 Kalh01 Khan02 --skip-audio
 PYTHONPATH=python python3 python/scripts/diff_default_vs_anchored.py --default /tmp/mc-424-a-default-v2/review_data.json --anchored /tmp/mc-424-a-anchored/review_data.json --workspace /home/lucas/parse-workspace
 ```
+
+## MC-424-B review_tool re-prepare (added 2026-05-28)
+
+After MC-424-A landed case 1 / case 2 fixes, the prepared `review_tool` commit was re-run to incorporate the improved default-mode coverage. The live workspace was read-only; `scripts/sync_review_tool.sh` only read from `/home/lucas/parse-workspace` and wrote the prepared artifact commit in `/home/lucas/gh/ardeleanlucas/review_tool`.
+
+Re-run command:
+
+```bash
+SPEAKERS="Fail01 Saha01 Mand01 Qasr01 Kalh01 Khan02" bash scripts/sync_review_tool.sh
+```
+
+Summary emitted by the script:
+
+```json
+{
+  "review_data_path": "/home/lucas/gh/ardeleanlucas/review_tool/review_data.json",
+  "concept_count": 82,
+  "speaker_count": 6,
+  "clip_plan_count": 486,
+  "audio_clipped": 486,
+  "audio_errors": [],
+  "skipped_audio": false,
+  "analytical_coverage": {
+    "forms_with_cognate_class": 0,
+    "forms_with_arabic_similarity": 0,
+    "forms_with_persian_similarity": 0,
+    "forms_with_borrowing_flag": 0,
+    "concepts_with_arabic_ref": 81,
+    "concepts_with_persian_ref": 81
+  }
+}
+```
+
+| Metric | Pre (MC-422-F, `0472e09e`) | Post (MC-424-B, `4b7b992d318fe5a8dd5958578d69d2e08a6e46d1`) | Δ |
+|---|---:|---:|---:|
+| Concept count | 82 | 82 | 0 |
+| Speaker count | 6 | 6 | 0 |
+| Form slots | 492 | 492 | 0 |
+| IPA coverage | 100.0% (492/492) | 100.0% (492/492) | +0 forms |
+| Ortho coverage | 97.6% (480/492) | 98.8% (486/492) | +6 forms |
+| Audio coverage | 97.6% (480/492) | 98.8% (486/492) | +6 forms |
+| Arabic refs | 76/82 (92.7%) | 81/82 (98.8%) | +5 concepts |
+| Persian refs | 75/82 (91.5%) | 81/82 (98.8%) | +6 concepts |
+| Duplicate `concept_en` groups | 0 | 0 | 0 |
+
+Delta from `0472e09e`:
+
+- Six speaker rows gained winner-form IPA/ortho/audio: `Fail01` `egg`, `leaf`, `new`, `round`, `white`; `Khan02` `skin`.
+- Contact references gained one Persian-only row (`I`) and five Arabic+Persian rows (`egg`, `fly`, `horn`, `hot`, `long`).
+- No concept-count, speaker-subset, form-slot, or duplicate-`concept_en` drift was introduced.
+
+Local `review_tool` state after this lane:
+
+- Rollback tag (unchanged): `mc-415-d-anchored-2ac21dd` -> `2ac21dd`.
+- Prior MC-422-F commit (history): `0472e09ebfa622438b9bdaea9f2cd35d70919e33`.
+- New prepared commit (this lane): `4b7b992d318fe5a8dd5958578d69d2e08a6e46d1`.
+- Not pushed to `ArdeleanLucas/review_tool/main` — Lucas authorizes the push.
