@@ -258,6 +258,26 @@ def _load_enrichments(workspace: Path) -> dict[str, Any]:
     return out
 
 
+def _default_contact_config() -> Path:
+    return Path(__file__).resolve().parent.parent / DEFAULT_CONTACT_CONFIG_RELATIVE
+
+
+def _resolve_contact_config(workspace: Path, contact_config: Path | None) -> Path:
+    """Resolve contact refs with workspace cache precedence for every caller.
+
+    The populated post-MC-418 cache lives at
+    ``<workspace>/config/sil_contact_languages.json``. Keeping this resolution
+    beside the loader rather than only in the shell wrapper makes the CLI,
+    chat tool, and MCP adapter share the same default behavior.
+    """
+    if contact_config is not None:
+        return contact_config
+    workspace_cache = workspace / DEFAULT_CONTACT_CONFIG_RELATIVE
+    if workspace_cache.exists():
+        return workspace_cache
+    return _default_contact_config()
+
+
 def _load_contact_languages(contact_config: Path | None) -> dict[str, dict[str, Any]]:
     """Read ``sil_contact_languages.json``; return ``{lang_code: {"concepts": {...}}}``.
 
@@ -287,8 +307,10 @@ def _load_contact_languages(contact_config: Path | None) -> dict[str, dict[str, 
         return {}
     if not isinstance(data, Mapping):
         return {}
+    languages_value = data.get("languages")
+    language_entries: Mapping[str, Any] = languages_value if isinstance(languages_value, Mapping) else data
     out: dict[str, dict[str, Any]] = {}
-    for code, entry in data.items():
+    for code, entry in language_entries.items():
         if not isinstance(code, str) or code.startswith("_") or not isinstance(entry, Mapping):
             continue
         out[code] = {"concepts": entry.get("concepts") if isinstance(entry.get("concepts"), Mapping) else {}}
@@ -300,14 +322,17 @@ def _extract_form_from_contact_entry(entry: Any) -> str:
 
     The fetcher writes either a bare list of strings (legacy, ``["ma:ʔ"]``) or a
     list of provenance dicts (modern, ``[{"form": str, "sources": [...]}]``).
-    Take the first non-empty value, regardless of shape.
+    Wikidata-backed entries use ``script`` for the orthographic form; keep
+    ``form > script > orthography`` priority so provider-native forms win when
+    multiple keys are present.
     """
     if isinstance(entry, list):
         for item in entry:
             if isinstance(item, Mapping):
-                form = item.get("form")
-                if form:
-                    return str(form).strip()
+                for key in ("form", "script", "orthography"):
+                    form = item.get(key)
+                    if form and str(form).strip():
+                        return str(form).strip()
             elif item:
                 return str(item).strip()
     elif isinstance(entry, str) and entry.strip():
@@ -1000,7 +1025,7 @@ def build_review_data(
     cognate_sets = enrichments.get("cognate_sets", {})
     similarity = enrichments.get("similarity", {})
     borrowing_flags = enrichments.get("borrowing_flags", {})
-    contact_langs = _load_contact_languages(contact_config)
+    contact_langs = _load_contact_languages(_resolve_contact_config(workspace, contact_config))
 
     annotations_dir = workspace / "annotations"
     annotation_payloads: dict[str, dict[str, Any]] = {}
@@ -1307,8 +1332,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help=(
             "Path to sil_contact_languages.json (Arabic/Persian reference forms). "
-            "Defaults to <repo>/config/sil_contact_languages.json resolved relative "
-            "to this script. Pass an explicit path or set to /dev/null to skip."
+            "Defaults to <workspace>/config/sil_contact_languages.json when present, "
+            "then <repo>/config/sil_contact_languages.json. Pass an explicit path or "
+            "set to /dev/null to skip."
         ),
     )
     parser.add_argument(
@@ -1340,15 +1366,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _default_contact_config() -> Path:
-    return Path(__file__).resolve().parent.parent / DEFAULT_CONTACT_CONFIG_RELATIVE
-
-
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     workspace = args.workspace.resolve()
     out_dir = args.out.resolve()
-    contact_config = args.contact_config.resolve() if args.contact_config else _default_contact_config()
+    contact_config = args.contact_config.resolve() if args.contact_config else None
     legacy_anchor = args.legacy_anchor.resolve() if args.legacy_anchor else None
     if legacy_anchor is not None:
         warnings.warn(

@@ -5,7 +5,8 @@
 # Inputs (env vars; defaults shown):
 #   PARSE_WORKSPACE    /home/lucas/parse-workspace
 #   REVIEW_TOOL_CLONE  $HOME/gh/ardeleanlucas/review_tool
-#   CONTACT_CONFIG     <repo-root>/config/sil_contact_languages.json
+#   CONTACT_CONFIG     $PARSE_WORKSPACE/config/sil_contact_languages.json when present,
+#                      otherwise <repo-root>/config/sil_contact_languages.json
 #
 # Flags forwarded to export_review_data.py (env-gated):
 #   SKIP_AUDIO=1            → --skip-audio
@@ -19,7 +20,12 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 PARSE_WORKSPACE="${PARSE_WORKSPACE:-/home/lucas/parse-workspace}"
 REVIEW_TOOL_CLONE="${REVIEW_TOOL_CLONE:-$HOME/gh/ardeleanlucas/review_tool}"
-CONTACT_CONFIG="${CONTACT_CONFIG:-$REPO_ROOT/config/sil_contact_languages.json}"
+
+if [[ -z "${CONTACT_CONFIG:-}" && -f "$PARSE_WORKSPACE/config/sil_contact_languages.json" ]]; then
+  CONTACT_CONFIG="$PARSE_WORKSPACE/config/sil_contact_languages.json"
+else
+  CONTACT_CONFIG="${CONTACT_CONFIG:-$REPO_ROOT/config/sil_contact_languages.json}"
+fi
 
 if [[ ! -d "$PARSE_WORKSPACE" ]]; then
   echo "error: PARSE_WORKSPACE not found: $PARSE_WORKSPACE" >&2
