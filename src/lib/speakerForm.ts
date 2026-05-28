@@ -100,8 +100,12 @@ function pickLongestInterval(intervals: readonly AnnotationInterval[]): Annotati
   return best;
 }
 
+function sortIntervalsByStart(intervals: readonly AnnotationInterval[]): AnnotationInterval[] {
+  return [...intervals].sort((left, right) => (left.start - right.start) || (left.end - right.end));
+}
+
 function conceptIntervalsForKey(record: AnnotationRecord | null | undefined, conceptKey: string): AnnotationInterval[] {
-  return (record?.tiers?.concept?.intervals ?? []).filter((interval) => String(interval.concept_id ?? '') === conceptKey);
+  return sortIntervalsByStart((record?.tiers?.concept?.intervals ?? []).filter((interval) => String(interval.concept_id ?? '') === conceptKey));
 }
 
 function conceptIntervalMatchesSpeakerFormConcept(concept: Concept, interval: AnnotationInterval): boolean {
@@ -117,7 +121,7 @@ function conceptIntervalMatchesSpeakerFormConcept(concept: Concept, interval: An
 
 function ipaIntervalsForConceptIntervals(record: AnnotationRecord | null | undefined, conceptIntervals: readonly AnnotationInterval[]): AnnotationInterval[] {
   const ipaIntervals = record?.tiers?.ipa?.intervals ?? [];
-  return ipaIntervals.filter((ipaInterval) => conceptIntervals.some((conceptInterval) => overlaps(ipaInterval, conceptInterval)));
+  return sortIntervalsByStart(ipaIntervals.filter((ipaInterval) => conceptIntervals.some((conceptInterval) => overlaps(ipaInterval, conceptInterval))));
 }
 
 function buildSingleRealizationForVariant(
@@ -143,6 +147,15 @@ function readCanonicalOverride(
   const rawIdx = conceptCanonical?.[speaker];
   const requestedIdx = typeof rawIdx === 'number' && Number.isInteger(rawIdx) && rawIdx >= 0 ? rawIdx : 0;
   return Math.min(requestedIdx, realizationCount - 1);
+}
+
+function readFocusedIntervalIndex(
+  focusedIntervalIndex: number | undefined,
+  realizationCount: number,
+): number | null {
+  if (realizationCount <= 0) return null;
+  if (typeof focusedIntervalIndex !== 'number' || !Number.isInteger(focusedIntervalIndex) || focusedIntervalIndex < 0) return null;
+  return focusedIntervalIndex < realizationCount ? focusedIntervalIndex : 0;
 }
 
 function readAutoDetectDismissed(
@@ -185,8 +198,10 @@ export function buildSpeakerForm(
   enrichments: Record<string, unknown>,
   flagged: boolean,
   primaryContactCodes: readonly string[],
+  focusedConceptId?: string | null,
+  focusedIntervalIndex?: number,
 ): SpeakerForm {
-  const conceptIntervals = (record?.tiers?.concept?.intervals ?? []).filter((interval) => conceptIntervalMatchesSpeakerFormConcept(concept, interval));
+  const conceptIntervals = sortIntervalsByStart((record?.tiers?.concept?.intervals ?? []).filter((interval) => conceptIntervalMatchesSpeakerFormConcept(concept, interval)));
   const matchingIpaIntervals = ipaIntervalsForConceptIntervals(record, conceptIntervals);
   const utterances = matchingIpaIntervals.length;
 
@@ -251,7 +266,10 @@ export function buildSpeakerForm(
 
   if (concept.mergedKeys && concept.mergedKeys.length > 1) {
     const realizations = concept.mergedKeys.map((key) => buildSingleRealizationForVariant(record, key));
-    const selectedIdx = readCanonicalOverride(canonicalOverrides, concept.key, speaker, realizations.length);
+    const focusedIdx = focusedConceptId ? concept.mergedKeys.indexOf(focusedConceptId) : -1;
+    const selectedIdx = focusedIdx >= 0
+      ? focusedIdx
+      : readCanonicalOverride(canonicalOverrides, concept.key, speaker, realizations.length);
     const canonical = realizations[selectedIdx];
     return {
       speaker,
@@ -273,7 +291,10 @@ export function buildSpeakerForm(
 
   if (concept.sourceItem && concept.variants && concept.variants.length >= 2) {
     const realizations = concept.variants.map((variant) => buildSingleRealizationForVariant(record, variant.conceptKey));
-    const selectedIdx = readCanonicalOverride(canonicalOverrides, concept.key, speaker, realizations.length);
+    const focusedIdx = focusedConceptId ? concept.variants.findIndex((variant) => variant.conceptKey === focusedConceptId) : -1;
+    const selectedIdx = focusedIdx >= 0
+      ? focusedIdx
+      : readCanonicalOverride(canonicalOverrides, concept.key, speaker, realizations.length);
     const canonical = realizations[selectedIdx];
     return {
       speaker,
@@ -296,7 +317,9 @@ export function buildSpeakerForm(
   // pickOrthoIntervalForConcept is strict to the passed interval, so each realization only shows IPA-aligned ortho.
   let realizations: Realization[] = matchingIpaIntervals.map((ipaInterval) => realizationFromIpaInterval(record, ipaInterval));
   let realizationsSource: SpeakerForm['realizationsSource'] = realizations.length > 1 ? 'auto-detect' : 'single';
-  let selectedIdx = readCanonicalOverride(canonicalOverrides, concept.key, speaker, realizations.length);
+  let selectedIdx = focusedConceptId === concept.key
+    ? readFocusedIntervalIndex(focusedIntervalIndex, realizations.length) ?? readCanonicalOverride(canonicalOverrides, concept.key, speaker, realizations.length)
+    : readCanonicalOverride(canonicalOverrides, concept.key, speaker, realizations.length);
 
   if (realizations.length > 1 && readAutoDetectDismissed(overrides, concept.key, speaker)) {
     const longest = pickLongestInterval(matchingIpaIntervals);
