@@ -99,7 +99,6 @@ interface ConceptSidebarProps {
   scopedToSpeaker?: boolean;
   onScopedToSpeakerChange?: (next: boolean) => void;
   elicitedConceptKeys?: ReadonlySet<string>;
-  recentlyDuplicatedSiblingKey?: string | null;
   elicitationVariantLabelsByConceptKey?: Record<string, string[]>;
   actionFeedback?: { message: string; variant: 'error' | 'warning' } | null;
   onDismissActionFeedback?: () => void;
@@ -206,7 +205,6 @@ export function ConceptSidebar({
   scopedToSpeaker = false,
   onScopedToSpeakerChange,
   elicitedConceptKeys = new Set<string>(),
-  recentlyDuplicatedSiblingKey = null,
   elicitationVariantLabelsByConceptKey = {},
   actionFeedback = null,
   onDismissActionFeedback,
@@ -629,8 +627,6 @@ export function ConceptSidebar({
                   <div className="ml-1 flex shrink-0 items-center gap-0.5" aria-label={`${parentName} variants`}>
                     {visibleVariants.map((variant) => {
                       const childActive = concept.id === activeConceptId && activeConceptKey === variant.conceptKey;
-                      const isRecentlyDuplicated = !!recentlyDuplicatedSiblingKey
-                        && variant.conceptKey === recentlyDuplicatedSiblingKey;
                       const childConcept: SidebarConcept = {
                         ...concept,
                         key: variant.conceptKey,
@@ -649,8 +645,6 @@ export function ConceptSidebar({
                           dotTestId={`concept-variant-pill-dot-${variant.conceptKey}`}
                           conceptEn={variant.conceptEn}
                           active={childActive}
-                          recentlyDuplicated={isRecentlyDuplicated}
-                          showNew={isRecentlyDuplicated}
                           aria-label={`${parentName} variant ${variant.variantLabel} ${variant.conceptEn}`}
                           title={`${variant.conceptEn} (${variant.conceptKey})`}
                           data-testid={`concept-variant-pill-${variant.conceptKey}`}

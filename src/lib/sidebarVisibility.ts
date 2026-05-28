@@ -2,7 +2,6 @@ export interface SidebarVariantVisibilityOptions {
   scopedToSpeaker: boolean;
   activeSpeakerForSidebar: string | null;
   elicitedConceptKeys: Set<string>;
-  activeSpeakerFreshKeys: ReadonlySet<string>;
   selectedTagIds: Set<string>;
   getTagsForConcept: (key: string, scope: any) => any[];
   activeTagScope: any;
@@ -13,15 +12,13 @@ export interface SidebarVariantVisibilityOptions {
  *
  * Extracted from PR #316's inline `ParseUI.tsx` callback so sidebar visibility remains
  * reusable across future components that need to render the same survey-aware grouped
- * variants. Speaker-scope visibility is a strict per-variant decision, with a
- * session-only bypass for fresh duplicates created by the active speaker. Tag filtering
+ * variants. Speaker-scope visibility is a strict per-variant decision. Tag filtering
  * remains a per-variant decision.
  *
  * Visibility rules, in order:
  * 1. Speaker scoping + elicited concepts: when sidebar speaker scope is enabled, an
  *    active sidebar speaker exists, and that speaker has elicited concept ids, hide any
- *    variant whose raw `conceptKey` is absent from both `elicitedConceptKeys` and
- *    `activeSpeakerFreshKeys`.
+ *    variant whose raw `conceptKey` is absent from `elicitedConceptKeys`.
  * 2. Tag filtering: when one or more sidebar tag filters are selected, the same raw
  *    variant key must have every selected tag in the active tag scope.
  * 3. Default visible: if neither rule rejects the variant, keep it visible.
@@ -38,8 +35,7 @@ export function isConceptVariantVisibleInSidebar(
     && options.elicitedConceptKeys.size > 0
   ) {
     const elicitedHere = options.elicitedConceptKeys.has(conceptKey);
-    const isFreshDuplicate = options.activeSpeakerFreshKeys.has(conceptKey);
-    if (!elicitedHere && !isFreshDuplicate) return false;
+    if (!elicitedHere) return false;
   }
   if (options.selectedTagIds.size > 0) {
     const conceptTagIds = new Set(options.getTagsForConcept(conceptKey, options.activeTagScope).map((tag) => tag.id));

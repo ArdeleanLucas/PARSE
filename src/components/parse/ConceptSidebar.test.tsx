@@ -1480,37 +1480,6 @@ describe('ConceptSidebar', () => {
       expect(screen.getByTestId('concept-variant-pill-618').textContent ?? '').toContain('B');
     });
 
-    it('renders the NEW badge on the recently duplicated variant row', () => {
-      render(
-        <ConceptSidebar
-          query=""
-          onQueryChange={vi.fn()}
-          sortParent="concept"
-        conceptSub="az"
-        sourceSub="time"
-          onSortParentChange={vi.fn()}
-        onConceptSubChange={vi.fn()}
-        onSourceSubChange={vi.fn()}
-          sourceDisabled={false}
-          filteredConcepts={concepts}
-          statusFilter="all"
-          onStatusFilterChange={vi.fn()}
-          selectedTagIds={new Set()}
-          onTagSelectionChange={vi.fn()}
-          tags={[]}
-          activeConceptId={3}
-          activeConceptKey="618"
-          onConceptSelect={vi.fn()}
-          recentlyDuplicatedSiblingKey="618"
-        />,
-      );
-
-      const row = screen.getByTestId('concept-variant-pill-618');
-      expect(row.textContent ?? '').toContain('NEW');
-      expect(row.className).toContain('ring-2');
-      expect(row.className).toContain('ring-emerald-400');
-    });
-
     it('does not auto-expand when activeConceptKey is null', () => {
       render(
         <ConceptSidebar
