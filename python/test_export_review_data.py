@@ -45,8 +45,10 @@ def _make_workspace(
     """Materialise a minimal PARSE workspace under ``tmp_path``.
 
     ``speakers`` maps a speaker name to a dict carrying ``concept_intervals``
-    (list of dicts with at minimum ``concept_id``, ``start``, ``end``, ``ipa``,
-    ``ortho``) and ``tagged_ids`` (concept ids to mark as thesis-tagged).
+    (list of dicts with at minimum ``concept_id``, ``start``, and ``end``),
+    optional separate ``ipa_intervals`` / ``ortho_intervals`` tier payloads,
+    and ``tagged_ids`` (concept ids to mark as thesis-tagged). Legacy fixtures
+    may still embed ``ipa`` / ``ortho`` directly in concept intervals.
     """
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -192,6 +194,55 @@ class BuildReviewDataTests(unittest.TestCase):
         self.assertEqual(empty["ipa"], "?")
         self.assertEqual(empty["ortho"], "")
         self.assertIsNone(empty["audio_path"])
+
+    def test_default_mode_cross_joins_ipa_tier(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = _make_workspace(
+                Path(tmp),
+                concepts=[
+                    {"id": "1", "concept_en": "hair", "source_item": "1.1", "source_survey": "KLQ"},
+                ],
+                speakers={
+                    "Fail01": {
+                        "concept_intervals": [
+                            {"concept_id": "1", "start": 0.0, "end": 1.0, "text": "hair"}
+                        ],
+                        "ipa_intervals": [
+                            {"concept_id": "1", "start": 0.0, "end": 1.0, "text": "boːrʌk"}
+                        ],
+                        "tagged_ids": ["1"],
+                    },
+                },
+            )
+            review_data, _clip_plan = build_review_data(workspace=workspace)
+
+        form = review_data["concepts"][0]["forms"][0]
+        self.assertEqual(form["ipa"], "boːrʌk")
+
+    def test_default_mode_cross_joins_ortho_tier_and_does_not_emit_concept_text(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = _make_workspace(
+                Path(tmp),
+                concepts=[
+                    {"id": "1", "concept_en": "hair", "source_item": "1.1", "source_survey": "KLQ"},
+                ],
+                speakers={
+                    "Fail01": {
+                        "concept_intervals": [
+                            {"concept_id": "1", "start": 0.0, "end": 1.0, "text": "hair"}
+                        ],
+                        "ortho_intervals": [
+                            {"concept_id": "1", "start": 0.0, "end": 1.0, "text": "موو"}
+                        ],
+                        "tagged_ids": ["1"],
+                    },
+                },
+            )
+            review_data, _clip_plan = build_review_data(workspace=workspace)
+
+        form = review_data["concepts"][0]["forms"][0]
+        self.assertEqual(form["ortho"], "موو")
+        self.assertNotEqual(form["ortho"], "hair")
 
     def test_variant_letter_extracted_from_concept_label(self) -> None:
         with TemporaryDirectory() as tmp:
