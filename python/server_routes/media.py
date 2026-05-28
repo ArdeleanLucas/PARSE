@@ -533,8 +533,13 @@ def _resolve_audition_concepts(rows: _server.List[_server.Any]) -> _server.List[
             continue
         if not audition_prefix:
             audition_prefix = 'row_{0}'.format(import_index)
-        cid, _was_allocated = resolve_or_allocate_concept_id(registry, label)
         source_item, source_survey = source_item_from_audition_row(row)
+        cid, _was_allocated = resolve_or_allocate_concept_id(
+            registry,
+            label,
+            source_survey=source_survey or None,
+            source_item=source_item or None,
+        )
         resolved.append({
             'id': cid,
             'label': label,
@@ -614,6 +619,8 @@ def _append_audition_rows_to_annotation(annotation: _server.Dict[str, _server.An
             'concept_id': _server._normalize_concept_id(resolved.get('id')),
             'import_index': int(import_index),
             'audition_prefix': str(resolved.get('audition_prefix') or '').strip(),
+            'source_item': str(resolved.get('source_item') or '').strip(),
+            'source_survey': str(resolved.get('source_survey') or '').strip(),
             'imported_csv_start': start,
             'imported_csv_end': end,
         }

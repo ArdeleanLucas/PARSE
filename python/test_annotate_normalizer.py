@@ -180,8 +180,11 @@ def test_normalize_annotation_record_preserves_trace_metadata_across_round_trip(
 
 def _write_concepts_csv(path: pathlib.Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["id", "concept_en"]
+    if any(any(key in row for key in ("source_item", "source_survey", "custom_order")) for row in rows):
+        fieldnames = ["id", "concept_en", "source_item", "source_survey", "custom_order"]
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["id", "concept_en"])
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
@@ -289,6 +292,52 @@ def test_normalizer_leaves_existing_concept_id_untouched(
     interval = normalized["tiers"]["concept"]["intervals"][0]
     assert interval["concept_id"] == "900"
     assert _read_concepts_csv(concepts_path) == [{"id": "2", "concept_en": "forehead"}]
+
+
+
+
+def test_normalizer_uses_interval_source_slot_to_backfill_variant_concept_id(
+    tmp_path: pathlib.Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    concepts_path = tmp_path / "concepts.csv"
+    _write_concepts_csv(
+        concepts_path,
+        [
+            {"id": "53", "concept_en": "big (A)", "source_survey": "KLQ", "source_item": "4.1"},
+            {"id": "619", "concept_en": "big (B)", "source_survey": "KLQ", "source_item": "4.1"},
+        ],
+    )
+
+    normalized = _normalize_annotation_record(
+        _record_with_tiers(
+            {
+                "concept": {
+                    "type": "interval",
+                    "intervals": [
+                        {
+                            "start": 0.0,
+                            "end": 1.0,
+                            "text": "big",
+                            "source_survey": "KLQ",
+                            "source_item": "4.1",
+                        }
+                    ],
+                }
+            }
+        ),
+        "Fail01",
+    )
+
+    interval = normalized["tiers"]["concept"]["intervals"][0]
+    assert interval["concept_id"] == "53"
+    assert interval["source_survey"] == "KLQ"
+    assert interval["source_item"] == "4.1"
+    assert _read_concepts_csv(concepts_path) == [
+        {"id": "53", "concept_en": "big (A)", "source_item": "4.1", "source_survey": "KLQ", "custom_order": ""},
+        {"id": "619", "concept_en": "big (B)", "source_item": "4.1", "source_survey": "KLQ", "custom_order": ""},
+    ]
 
 
 def test_normalizer_logs_warning_for_concept_interval_with_empty_text_and_leaves_id_empty(

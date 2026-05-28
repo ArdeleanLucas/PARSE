@@ -48,6 +48,8 @@ _OPTIONAL_INTERVAL_PASSTHROUGH_FIELDS = (
     'imported_csv_end',
     'conceptId',
     'source',
+    'source_item',
+    'source_survey',
     'confidence',
     'confidence_source',
     'confidence_n_tokens',
@@ -549,6 +551,14 @@ def _annotation_touch_metadata(record: _server.Dict[str, _server.Any], preserve_
         metadata['language_code'] = _server._annotation_language_code(record)
 
 
+def _annotation_interval_survey_item(interval: _server.Dict[str, _server.Any]) -> tuple[str | None, str | None]:
+    source_survey = str(interval.get('source_survey') or '').strip()
+    source_item = str(interval.get('source_item') or '').strip()
+    if source_survey and source_item:
+        return source_survey, source_item
+    return None, None
+
+
 def _annotation_enforce_concept_ids(record: _server.Dict[str, _server.Any], speaker: str) -> None:
     tiers = record.get('tiers') if isinstance(record, dict) else {}
     if not isinstance(tiers, dict):
@@ -573,7 +583,13 @@ def _annotation_enforce_concept_ids(record: _server.Dict[str, _server.Any], spea
             continue
         if registry is None:
             registry = load_concept_registry(_server._project_root())
-        concept_id, was_allocated = resolve_or_allocate_concept_id(registry, text)
+        source_survey, source_item = _annotation_interval_survey_item(interval)
+        concept_id, was_allocated = resolve_or_allocate_concept_id(
+            registry,
+            text,
+            source_survey=source_survey,
+            source_item=source_item,
+        )
         if concept_id:
             interval['concept_id'] = concept_id
         registry_changed = registry_changed or was_allocated
