@@ -74,6 +74,7 @@ LEGACY_CURATED_MCP_TOOL_NAMES = (
     "csv_only_reimport",
     "revert_csv_reimport",
     "export_review_data",
+    "migrate_concept_suffix_pollution",
     "parse_memory_read",
     "parse_memory_upsert_section",
     "speakers_list",
@@ -119,6 +120,7 @@ WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "export_lingpy_tsv",
     "export_nexus",
     "export_review_data",
+    "migrate_concept_suffix_pollution",
     "import_tag_csv",
     "populate_cross_survey_links",
     "peaks_generate",
@@ -507,6 +509,10 @@ from ai.tools.memory_tools import (
     tool_parse_memory_read,
     tool_parse_memory_upsert_section,
 )
+from ai.tools.migration_tools import (
+    MIGRATION_TOOL_SPECS,
+    tool_migrate_concept_suffix_pollution,
+)
 from ai.tools.offset_apply_tools import (
     OFFSET_APPLY_TOOL_SPECS,
     tool_apply_timestamp_offset,
@@ -577,6 +583,7 @@ REGISTRY: Dict[str, ChatToolSpec] = {
     **PIPELINE_ORCHESTRATION_TOOL_SPECS,
     **SPEAKER_IMPORT_TOOL_SPECS,
     **MEMORY_TOOL_SPECS,
+    **MIGRATION_TOOL_SPECS,
     **COMPARATIVE_TOOL_SPECS,
     **CONCEPT_FIELD_TOOL_SPECS,
     **CONTACT_LEXEME_TOOL_SPECS,
@@ -686,6 +693,7 @@ class ParseChatTools:
             **PIPELINE_ORCHESTRATION_TOOL_SPECS,
             **SPEAKER_IMPORT_TOOL_SPECS,
             **MEMORY_TOOL_SPECS,
+            **MIGRATION_TOOL_SPECS,
             **COMPARATIVE_TOOL_SPECS,
             **CONCEPT_FIELD_TOOL_SPECS,
             **CONTACT_LEXEME_TOOL_SPECS,
@@ -824,6 +832,7 @@ class ParseChatTools:
             "parse_memory_upsert_section",
             "peaks_generate",
             "prepare_tag_import",
+            "migrate_concept_suffix_pollution",
             "source_index_validate",
             "transcript_reformat",
         }:
@@ -929,6 +938,7 @@ class ParseChatTools:
             "clef_clear_data": "clef_reference_data_cleared",
             "import_tag_csv": "tag_import_written",
             "parse_memory_upsert_section": "parse_memory_section_written",
+            "migrate_concept_suffix_pollution": "concept_suffix_pollution_migration_written",
             "peaks_generate": "peaks_file_written",
             "prepare_tag_import": "tag_definition_written",
             "source_index_validate": "source_index_written",
@@ -1445,6 +1455,9 @@ class ParseChatTools:
 
     def _tool_parse_memory_upsert_section(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_parse_memory_upsert_section(self, args)
+
+    def _tool_migrate_concept_suffix_pollution(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        return tool_migrate_concept_suffix_pollution(self, args)
 
 
 __all__ = [
