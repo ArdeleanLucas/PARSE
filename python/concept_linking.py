@@ -21,10 +21,10 @@ from __future__ import annotations
 import re
 from typing import Iterable, Mapping
 
+from concept_canonical import canonicalize_label
 from concept_source_item import parse_cue_name
 
 _KLQ_PREFIX_RE = re.compile(r"^\(\s*\d+(?:\.\d+)*\s*\)\s*[-–—]?\s*")
-_TRAILING_VARIANT_RE = re.compile(r"\s+[A-Z]$")
 
 
 def normalize_cross_survey_gloss(label: str) -> str:
@@ -42,8 +42,9 @@ def normalize_cross_survey_gloss(label: str) -> str:
     text = parsed_label or text
     text = _KLQ_PREFIX_RE.sub("", text).strip()
 
-    # Step 4: strip a single trailing uppercase variant suffix.
-    text = _TRAILING_VARIANT_RE.sub("", text).strip()
+    # Step 4: strip a single trailing variant suffix. The shared canonicalizer
+    # also catches parenthetical variants such as ``big (A)``.
+    text = canonicalize_label(text)
 
     # Step 5: lowercase + collapse whitespace.
     text = " ".join(text.split()).casefold()
