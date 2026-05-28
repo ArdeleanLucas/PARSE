@@ -27,6 +27,7 @@ import { useSpectrogramSettings } from "../../../stores/useSpectrogramSettings";
 import { rerunLexemeIpa, rerunLexemeOrtho, saveLexemeNote } from "../../../api/client";
 import { LEXEME_RERUN_PAD_VALUES, type LexemeNoteEntry, type LexemeRerunPad, type LexemeRerunRequest } from "../../../api/types";
 import { useEnrichmentStore } from "../../../stores/enrichmentStore";
+import { parseRealizationKey } from "../../../lib/conceptGrouping";
 import { LABEL_COL_PX, TranscriptionLanes } from "../TranscriptionLanes";
 import { SpectrogramSettings } from "../SpectrogramSettings";
 
@@ -87,6 +88,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   surveyColorCodingEnabled,
   activeSpeaker,
   conceptSurveyKey,
+  selectedRealizationKey,
   onSurveyChoiceChange,
   onDeleteConcept,
 }) => {
@@ -161,9 +163,22 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   const saveEnrichments = useEnrichmentStore((s) => s.save);
   const isConfirmed = Boolean(record?.concept_tags?.[concept.key]?.includes("confirmed"));
   const confirmedAnchor = record?.confirmed_anchors?.[concept.key] ?? null;
+  const focusedRealization = useMemo(
+    () => parseRealizationKey(selectedRealizationKey ?? null),
+    [selectedRealizationKey],
+  );
+  const focusedIntervalIndex = useMemo(() => {
+    if (!focusedRealization) return undefined;
+    if (focusedRealization.conceptId !== concept.key) return undefined;
+    return focusedRealization.intervalIndex;
+  }, [concept.key, focusedRealization]);
+  const focusedLookupOptions = useMemo(
+    () => ({ focusedIntervalIndex }),
+    [focusedIntervalIndex],
+  );
   const { conceptInterval, ipaInterval, orthoInterval, directOrthoInterval } = useMemo(
-    () => findAnnotationForConcept(record, concept),
-    [record, concept],
+    () => findAnnotationForConcept(record, concept, focusedLookupOptions),
+    [record, concept, focusedLookupOptions],
   );
 
   // Past-end-of-audio detection. The annotation can carry intervals whose
@@ -418,7 +433,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
         }
         const saveResult = await saveSpeaker(speaker, record);
         if (saveResult?.record) {
-          const reread = findAnnotationForConcept(saveResult.record, concept);
+          const reread = findAnnotationForConcept(saveResult.record, concept, focusedLookupOptions);
           savedConceptInterval = reread.conceptInterval ?? savedConceptInterval;
           savedIpaText = reread.ipaInterval?.text ?? savedIpaText;
           savedDirectOrthoText = reread.directOrthoInterval?.text ?? savedDirectOrthoText;
@@ -453,7 +468,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
       setDoneToast("Marked done. Time anchor skipped: no boundary.");
     }
   }, [
-    addRegion, concept, conceptInterval, directOrthoInterval, editEnd, editStart, ipa, ipaInterval,
+    addRegion, concept, conceptInterval, directOrthoInterval, editEnd, editStart, focusedLookupOptions, ipa, ipaInterval,
     isConfirmed, orthoUserEdited, pendingEdits, record, saveLexemeAnnotation, saveOrthoText, saveSpeaker,
     setConceptTag, setConfirmedAnchor, speaker,
   ]);
@@ -478,7 +493,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
         return;
       }
       const saveResult = await saveSpeaker(speaker, record);
-      const savedConceptInterval = saveResult?.record ? findAnnotationForConcept(saveResult.record, concept).conceptInterval : null;
+      const savedConceptInterval = saveResult?.record ? findAnnotationForConcept(saveResult.record, concept, focusedLookupOptions).conceptInterval : null;
       const savedStart = savedConceptInterval?.start ?? quickRetimeMenu.start;
       const savedEnd = savedConceptInterval?.end ?? quickRetimeMenu.end;
       const changedTierCount = saveResult?.changedTiers?.length ?? result.moved;
@@ -495,7 +510,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     } finally {
       setTimestampSaving(false);
     }
-  }, [addRegion, clearQuickRetimeSelection, concept, conceptInterval, ipa, orthoUserEdited, quickRetimeMenu, record, saveLexemeAnnotation, saveOrthoText, saveSpeaker, seek, speaker]);
+  }, [addRegion, clearQuickRetimeSelection, concept, conceptInterval, focusedLookupOptions, ipa, orthoUserEdited, quickRetimeMenu, record, saveLexemeAnnotation, saveOrthoText, saveSpeaker, seek, speaker]);
 
   const cancelQuickRetime = useCallback(() => {
     clearQuickRetimeSelection();
@@ -1458,7 +1473,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                       confirmed_at: new Date().toISOString(),
                     });
                     const saveResult = await saveSpeaker(speaker, record);
-                    const saved = saveResult?.record ? findAnnotationForConcept(saveResult.record, concept).conceptInterval : null;
+                    const saved = saveResult?.record ? findAnnotationForConcept(saveResult.record, concept, focusedLookupOptions).conceptInterval : null;
                     if (saved) {
                       storedIntervalRef.current = { start: saved.start, end: saved.end };
                       setEditStart(saved.start.toFixed(3));
@@ -1513,7 +1528,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                       setTimestampMessage({ kind: "err", text: result.error });
                     } else {
                       const saveResult = await saveSpeaker(speaker, record);
-                      const savedConceptInterval = saveResult?.record ? findAnnotationForConcept(saveResult.record, concept).conceptInterval : null;
+                      const savedConceptInterval = saveResult?.record ? findAnnotationForConcept(saveResult.record, concept, focusedLookupOptions).conceptInterval : null;
                       const savedStart = savedConceptInterval?.start ?? nextStart;
                       const savedEnd = savedConceptInterval?.end ?? nextEnd;
                       const changedTierCount = saveResult?.changedTiers?.length ?? result.moved;

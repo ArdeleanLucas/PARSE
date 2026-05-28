@@ -15,7 +15,83 @@ function makeRecordWithConceptIntervals(intervals: AnnotationRecord["tiers"][str
   };
 }
 
+function makeFail01HeadRecord(): AnnotationRecord {
+  return {
+    speaker: "Fail01",
+    source_wav: "Fail01.wav",
+    tiers: {
+      concept: {
+        name: "concept",
+        display_order: 1,
+        intervals: [
+          { start: 727.487, end: 728.211, text: "head", concept_id: "247" },
+          { start: 731.934, end: 732.612, text: "head", concept_id: "247" },
+          { start: 731.95, end: 732.705, text: "head", concept_id: "247" },
+        ],
+      },
+      ipa: {
+        name: "ipa",
+        display_order: 2,
+        intervals: [
+          { start: 727.487, end: 728.211, text: "sar" },
+          { start: 731.934, end: 732.612, text: "kapul-b" },
+          { start: 731.95, end: 732.705, text: "kapul-c" },
+        ],
+      },
+      ortho: {
+        name: "ortho",
+        display_order: 3,
+        intervals: [
+          { start: 727.487, end: 728.211, text: "سەر" },
+          { start: 731.934, end: 732.612, text: "کەپووڵ ب" },
+          { start: 731.95, end: 732.705, text: "کەپووڵ ج" },
+        ],
+      },
+    },
+  } as AnnotationRecord;
+}
+
+const fail01HeadConcept = { id: 247, key: "247", name: "head" };
+
 describe("annotation concept lookup", () => {
+  it("defaults to the first matching realization interval", () => {
+    const lookup = findAnnotationForConcept(makeFail01HeadRecord(), fail01HeadConcept);
+
+    expect(lookup.conceptInterval?.start).toBe(727.487);
+    expect(lookup.ipaInterval?.text).toBe("sar");
+    expect(lookup.orthoInterval?.text).toBe("سەر");
+  });
+
+  it("focusedIntervalIndex 0 returns the same realization as the default lookup", () => {
+    const record = makeFail01HeadRecord();
+    const defaultLookup = findAnnotationForConcept(record, fail01HeadConcept);
+    const focusedLookup = findAnnotationForConcept(record, fail01HeadConcept, { focusedIntervalIndex: 0 });
+
+    expect(focusedLookup.conceptInterval?.start).toBe(defaultLookup.conceptInterval?.start);
+    expect(focusedLookup.ipaInterval?.text).toBe("sar");
+  });
+
+  it("focusedIntervalIndex 1 pivots the lookup to realization B", () => {
+    const lookup = findAnnotationForConcept(makeFail01HeadRecord(), fail01HeadConcept, { focusedIntervalIndex: 1 });
+
+    expect(lookup.conceptInterval?.start).toBe(731.934);
+    expect(lookup.ipaInterval?.text).toBe("kapul-b");
+    expect(lookup.orthoInterval?.text).toBe("کەپووڵ ب");
+  });
+
+  it("focusedIntervalIndex 2 pivots the lookup to realization C", () => {
+    const lookup = findAnnotationForConcept(makeFail01HeadRecord(), fail01HeadConcept, { focusedIntervalIndex: 2 });
+
+    expect(lookup.conceptInterval?.start).toBe(731.95);
+    expect(lookup.ipaInterval?.text).toBe("kapul-c");
+  });
+
+  it("falls back to the first interval when focusedIntervalIndex is out of range", () => {
+    const lookup = findAnnotationForConcept(makeFail01HeadRecord(), fail01HeadConcept, { focusedIntervalIndex: 99 });
+
+    expect(lookup.conceptInterval?.start).toBe(727.487);
+    expect(lookup.ipaInterval?.text).toBe("sar");
+  });
   it("returns no concept interval when matching concept lacks concept_id on every candidate row", () => {
     const record = makeRecordWithConceptIntervals([
       { start: 100, end: 110, text: "ten" },
