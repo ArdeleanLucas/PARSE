@@ -1,5 +1,4 @@
 import type {
-  ConceptEntry,
   ConceptPromoteSurveyPrimaryRequest,
   ConceptPromoteSurveyPrimaryResponse,
   ConceptSurveyLinkMutation,
@@ -11,11 +10,6 @@ import type {
 import { apiFetch } from "./shared";
 import { startCompute } from "./chat-and-generic-compute";
 
-export interface ConceptDuplicateResponse {
-  primary: ConceptEntry;
-  sibling: ConceptEntry;
-}
-
 export interface ConceptDeleteResponse {
   ok: true;
   deleted_id: string;
@@ -24,22 +18,6 @@ export interface ConceptDeleteResponse {
 export interface ConceptDeleteConflict {
   error: string;
   blocking_speakers: string[];
-}
-
-/**
- * Duplicate a concept into A/B siblings.
- *
- * The backend renames the original row's `concept_en` from `X` to `X (A)`,
- * appends a new row `X (B)` with the same `source_item`/`source_survey`
- * and a fresh numeric id, then returns both rows. Throws on 409 ("concept
- * already part of an A/B pair") and other non-2xx codes — caller is
- * responsible for surfacing the error message.
- */
-export async function duplicateConcept(conceptId: string): Promise<ConceptDuplicateResponse> {
-  return apiFetch<ConceptDuplicateResponse>(
-    `/api/concepts/${encodeURIComponent(conceptId)}/duplicate`,
-    { method: "POST" },
-  );
 }
 
 export async function deleteConcept(conceptId: string): Promise<ConceptDeleteResponse> {

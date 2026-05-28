@@ -122,6 +122,41 @@ describe('Bug 2 — empty form.ipa when only a non-zero variant has data (Fail01
     expect(form.ipa).toBe('ɡap');
     expect(form.selectedIdx).toBe(2);
   });
+
+  it('post-migration singleton concept keeps a one-interval speaker realization even when another speaker has multiple intervals', () => {
+    const bigConcept: Concept = {
+      id: 53,
+      key: '53',
+      name: 'big',
+      tag: 'untagged',
+    };
+    const fail01 = makeRecord({
+      concept: [{ start: 3492.305, end: 3493.186, text: 'big', concept_id: '53' }],
+      ipa: [{ start: 3492.305, end: 3493.186, text: 'ɡap' }],
+      ortho_words: [{ start: 3492.305, end: 3493.186, text: 'گەپ' }],
+    });
+    const saha01 = makeRecord({
+      concept: [
+        { start: 10, end: 11, text: 'big', concept_id: '53' },
+        { start: 20, end: 21, text: 'big', concept_id: '53' },
+        { start: 30, end: 31, text: 'big', concept_id: '53' },
+      ],
+      ipa: [
+        { start: 10, end: 11, text: 'one' },
+        { start: 20, end: 21, text: 'two' },
+        { start: 30, end: 31, text: 'three' },
+      ],
+    });
+
+    const failForm = buildSpeakerForm(fail01, bigConcept, 'Fail01', {}, false, []);
+    const sahaForm = buildSpeakerForm(saha01, bigConcept, 'Saha01', {}, false, []);
+
+    expect(failForm.variantCount).toBe(1);
+    expect(failForm.ipa).toBe('ɡap');
+    expect(failForm.selectedIdx).toBe(0);
+    expect(sahaForm.variantCount).toBe(3);
+  });
+
 });
 
 describe('Bug 3 — findBundleForConcept collides sourceItem with csv row id', () => {

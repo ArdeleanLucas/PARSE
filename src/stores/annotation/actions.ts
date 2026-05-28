@@ -446,7 +446,6 @@ export function createAnnotationActionsSlice(
       const key = String(conceptId);
       const clone = deepClone(pre);
       const conceptTier = ensureAnnotationTier(clone, "concept");
-      if (conceptTier.intervals.some((interval) => String(interval.concept_id ?? "") === key)) return;
 
       conceptTier.intervals = [
         ...conceptTier.intervals,

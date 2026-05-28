@@ -1279,7 +1279,7 @@ describe('ConceptSidebar', () => {
     expect(screen.getByRole('button', { name: /show all/i })).toBeTruthy();
   });
 
-  describe('right-click → Duplicate (split into next variant)', () => {
+  describe('right-click → + Add elicitation', () => {
     const concepts = [
       { id: 1, key: '1', name: 'leaf', tag: 'untagged' as const, sourceItem: '102' },
       { id: 2, key: '2', name: 'rain (A)', tag: 'untagged' as const, sourceItem: '125' },
@@ -1297,7 +1297,7 @@ describe('ConceptSidebar', () => {
       { id: 4, key: '4', name: 'branch', tag: 'untagged' as const, sourceItem: '101' },
     ];
 
-    function renderWith(onDuplicateConcept: (concept: unknown) => void, onDeleteConcept: (concept: unknown) => void = vi.fn()) {
+    function renderWith(onAddElicitation: (concept: unknown) => void, onDeleteConcept: (concept: unknown) => void = vi.fn()) {
       return render(
         <ConceptSidebar
           query=""
@@ -1317,7 +1317,7 @@ describe('ConceptSidebar', () => {
           tags={[]}
           activeConceptId={1}
           onConceptSelect={vi.fn()}
-          onDuplicateConcept={onDuplicateConcept}
+          onAddElicitation={onAddElicitation}
           onDeleteConcept={onDeleteConcept}
         />,
       );
@@ -1329,26 +1329,26 @@ describe('ConceptSidebar', () => {
       fireEvent.contextMenu(button);
     }
 
-    it('fires onDuplicateConcept for a singleton concept', () => {
-      const onDuplicate = vi.fn();
-      renderWith(onDuplicate);
+    it('fires onAddElicitation for a singleton concept', () => {
+      const onAdd = vi.fn();
+      renderWith(onAdd);
       openMenuFor(/^leaf/);
-      const item = screen.getByRole('menuitem', { name: /Duplicate \(split into next variant\)/ });
+      const item = screen.getByRole('menuitem', { name: /\+ Add elicitation/ });
       expect(item.getAttribute('aria-disabled')).toBe('false');
       fireEvent.click(item);
-      expect(onDuplicate).toHaveBeenCalledTimes(1);
-      expect(onDuplicate.mock.calls[0][0].id).toBe(1);
+      expect(onAdd).toHaveBeenCalledTimes(1);
+      expect(onAdd.mock.calls[0][0].id).toBe(1);
     });
 
-    it('keeps duplicate enabled for grouped A/B concepts', () => {
-      const onDuplicate = vi.fn();
-      renderWith(onDuplicate);
+    it('keeps add elicitation enabled for grouped A/B concepts', () => {
+      const onAdd = vi.fn();
+      renderWith(onAdd);
       openMenuFor(/^new/);
-      const item = screen.getByRole('menuitem', { name: /Duplicate \(split into next variant\)/ });
+      const item = screen.getByRole('menuitem', { name: /\+ Add elicitation/ });
       expect(item.getAttribute('aria-disabled')).toBe('false');
-      expect(item.getAttribute('title')).toBe('Add a new variant');
+      expect(item.getAttribute('title')).toBe('Add another elicitation interval for this concept');
       fireEvent.click(item);
-      expect(onDuplicate).toHaveBeenCalledWith(expect.objectContaining({ key: '154', name: 'new' }));
+      expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({ key: '154', name: 'new' }));
     });
 
     it('renders selectable variant child rows under an expanded grouped parent', () => {
@@ -1567,13 +1567,13 @@ describe('ConceptSidebar', () => {
       expect(screen.queryByTestId('concept-variant-toggle-4')).toBeNull();
     });
 
-    it("right-click on a B child fires onDuplicateConcept with B's conceptKey", () => {
-      const onDuplicate = vi.fn();
-      renderWith(onDuplicate);
+    it("right-click on a B child fires onAddElicitation with B's conceptKey", () => {
+      const onAdd = vi.fn();
+      renderWith(onAdd);
             fireEvent.contextMenu(screen.getByTestId('concept-variant-pill-618'));
-      fireEvent.click(screen.getByRole('menuitem', { name: /Duplicate \(split into next variant\)/ }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /\+ Add elicitation/ }));
 
-      expect(onDuplicate).toHaveBeenCalledWith(expect.objectContaining({ key: '618', name: 'new (B)' }));
+      expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({ key: '618', name: 'new (B)' }));
     });
 
     it("renders Delete variant on a child variant row's context menu", () => {
@@ -1600,14 +1600,14 @@ describe('ConceptSidebar', () => {
     });
 
     it('does not disable a stem-named concept when no variants are present', () => {
-      const onDuplicate = vi.fn();
-      renderWith(onDuplicate);
+      const onAdd = vi.fn();
+      renderWith(onAdd);
       openMenuFor(/^branch/);
-      const item = screen.getByRole('menuitem', { name: /Duplicate \(split into next variant\)/ });
+      const item = screen.getByRole('menuitem', { name: /\+ Add elicitation/ });
       expect(item.getAttribute('aria-disabled')).toBe('false');
       fireEvent.click(item);
-      expect(onDuplicate).toHaveBeenCalledTimes(1);
-      expect(onDuplicate.mock.calls[0][0].id).toBe(4);
+      expect(onAdd).toHaveBeenCalledTimes(1);
+      expect(onAdd.mock.calls[0][0].id).toBe(4);
     });
   });
 
