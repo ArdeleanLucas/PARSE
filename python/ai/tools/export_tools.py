@@ -622,7 +622,6 @@ def export_review_data(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[st
     """Export a workspace to the legacy review_tool schema via the chat/MCP surface."""
     try:
         from export_review_data import (  # type: ignore[import]
-            DEFAULT_CONTACT_CONFIG_RELATIVE,
             DEFAULT_TAG_ID,
             build_review_data,
             write_outputs,
@@ -647,8 +646,7 @@ def export_review_data(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[st
     if contact_config_raw:
         contact_config = Path(contact_config_raw).expanduser().resolve()
     else:
-        repo_root = Path(__file__).resolve().parents[3]
-        contact_config = repo_root / DEFAULT_CONTACT_CONFIG_RELATIVE
+        contact_config = None
 
     speakers_raw = args.get("speakers")
     speakers = None

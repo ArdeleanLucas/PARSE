@@ -19,6 +19,7 @@ from export_review_data import (
     DEFAULT_TAG_ID,
     LEGACY_SCHEMA_VERSION,
     _crosstier_text,
+    _extract_form_from_contact_entry,
     _stem_label,
     _variant_letter,
     build_review_data,
@@ -433,6 +434,38 @@ class AnalyticalFieldsTests(unittest.TestCase):
         self.assertEqual(concept["arabic"]["ipa"], "")
         self.assertEqual(concept["persian"]["form"], "خاکستر")
         self.assertEqual(concept["persian"]["ipa"], "")
+
+    def test_contact_language_form_extractor_accepts_script_and_priority(self) -> None:
+        self.assertEqual(_extract_form_from_contact_entry([{"script": "رأس"}]), "رأس")
+        self.assertEqual(
+            _extract_form_from_contact_entry([{"form": "رماد", "script": "secondary"}]),
+            "رماد",
+        )
+        self.assertEqual(_extract_form_from_contact_entry([{"orthography": "خاکستر"}]), "خاکستر")
+        self.assertEqual(_extract_form_from_contact_entry([{"unknown_key": "ignored"}]), "")
+        self.assertEqual(_extract_form_from_contact_entry("bare-string"), "bare-string")
+
+    def test_build_review_data_prefers_workspace_contact_cache_when_present(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = self._two_speaker_ash_workspace(tmp)
+            workspace_config = workspace / "config"
+            workspace_config.mkdir()
+            (workspace_config / "sil_contact_languages.json").write_text(
+                json.dumps(
+                    {
+                        "ar": {"concepts": {"ash": [{"script": "رماد"}]}},
+                        "fa": {"concepts": {"ash": [{"script": "خاکستر"}]}},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            review_data, _ = build_review_data(workspace=workspace)
+
+        concept = review_data["concepts"][0]
+        self.assertEqual(concept["arabic"], {"form": "رماد", "ipa": ""})
+        self.assertEqual(concept["persian"], {"form": "خاکستر", "ipa": ""})
 
     def test_missing_contact_config_yields_empty_reference_forms(self) -> None:
         with TemporaryDirectory() as tmp:

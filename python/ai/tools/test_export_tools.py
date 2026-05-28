@@ -115,6 +115,35 @@ def test_export_review_data_chat_tool_happy_path_writes_review_data_summary(
     assert written["concepts"][0]["concept_en"] == "big"
 
 
+def test_export_review_data_chat_tool_prefers_workspace_contact_cache(
+    tmp_path: pathlib.Path,
+) -> None:
+    workspace = _make_review_export_workspace(tmp_path)
+    (workspace / "config").mkdir()
+    (workspace / "config" / "sil_contact_languages.json").write_text(
+        json.dumps(
+            {
+                "ar": {"concepts": {"big (A)": [{"script": "كبير"}]}},
+                "fa": {"concepts": {"big (A)": [{"script": "بزرگ"}]}},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "review-out"
+
+    result = ParseChatTools(project_root=tmp_path).execute(
+        "export_review_data",
+        {"workspace": str(workspace), "out": str(out_dir), "skip_audio": True},
+    )
+
+    assert result["ok"] is True
+    written = json.loads((out_dir / "review_data.json").read_text(encoding="utf-8"))
+    concept = written["concepts"][0]
+    assert concept["arabic"] == {"form": "كبير", "ipa": ""}
+    assert concept["persian"] == {"form": "بزرگ", "ipa": ""}
+
+
 def test_export_review_data_unknown_speaker_returns_invalid_args_envelope(
     tmp_path: pathlib.Path,
 ) -> None:
