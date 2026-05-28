@@ -1571,10 +1571,9 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         parts = self._path_parts(request_path)
-        if len(parts) == 4 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "duplicate": self._api_post_concept_duplicate(parts[2]); return
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "survey-links": self._api_post_concept_survey_link(parts[2]); return
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "promote-survey-primary": self._api_post_concept_promote_survey_primary(parts[2]); return
-        if len(parts) == 4 and parts[0] == "api" and parts[1] == "concepts": raise ApiError(HTTPStatus.BAD_REQUEST, "Malformed concept path")
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "concepts": raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "mcp" and parts[2] == "tools":
             self._api_post_mcp_tool(parts[3])

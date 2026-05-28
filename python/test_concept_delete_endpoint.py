@@ -111,7 +111,7 @@ def test_delete_returns_409_when_speaker_has_annotated_concept(tmp_path: pathlib
 
     assert status == HTTPStatus.CONFLICT
     assert payload == {
-        "error": "concept is annotated by one or more speakers",
+        "error": "canonical concept row is annotated by one or more speakers; cannot delete",
         "blocking_speakers": ["Qasr01"],
     }
     assert len(list(tmp_path.glob("concepts.csv.bak-*-pre-delete-322"))) == 0

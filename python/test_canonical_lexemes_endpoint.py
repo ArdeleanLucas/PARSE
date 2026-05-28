@@ -11,7 +11,6 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-import concepts_io
 import server
 from canonical_lexemes import load_canonical_lexemes
 
@@ -166,20 +165,6 @@ def test_dispatch_routes_use_path_parts_for_compare_canonical_endpoints(tmp_path
 
     assert handler.status == HTTPStatus.OK
     assert handler.wfile.payload()["bundle"]["bundle_id"] == "bundle:big"
-
-
-def test_duplicate_copies_canonical_lexeme_selection_to_new_sibling(tmp_path: pathlib.Path) -> None:
-    _seed_concepts(tmp_path)
-    (tmp_path / "parse-enrichments.json").write_text(
-        json.dumps({"manual_overrides": {"canonical_lexemes": {"bundle:big": {"Saha01": {"csv_row_id": "53", "source": "manual"}}}}}),
-        encoding="utf-8",
-    )
-
-    payload = concepts_io.duplicate_concept_variant(tmp_path, "53")
-
-    sibling_id = payload["sibling"]["id"]
-    selections = load_canonical_lexemes(tmp_path)
-    assert selections["bundle:big"]["Saha01"]["csv_row_id"] == sibling_id
 
 
 def test_canonical_report_endpoint_returns_tsv(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:

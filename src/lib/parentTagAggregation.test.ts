@@ -17,12 +17,11 @@ function groupWithVisibleParentTags(
   entries: ConceptEntry[],
   conceptTagsForSpeaker: Record<string, string[]>,
   visibleKeys: ReadonlySet<string>,
-  freshKeys: ReadonlySet<string> = new Set(),
   scopedToSpeaker = true,
 ) {
   const resolveParentTag = (keys: readonly string[]) => {
     const parentKeys = scopedToSpeaker && visibleKeys.size > 0
-      ? keys.filter((key) => visibleKeys.has(key) || freshKeys.has(key))
+      ? keys.filter((key) => visibleKeys.has(key))
       : keys;
     return getConceptStatus(parentKeys.flatMap((key) => getTagsForSpeaker(conceptTagsForSpeaker, key)));
   };
@@ -83,7 +82,6 @@ describe('parent concept tag aggregation', () => {
       entries,
       { 'white-a': [], 'white-b': ['problematic'] },
       new Set(['white-a']),
-      new Set(),
       false,
     );
 
@@ -104,18 +102,5 @@ describe('parent concept tag aggregation', () => {
     expect(grouped[0].tag).toBe('problematic');
   });
 
-  it('keeps fresh duplicate variants contributing to the scoped parent dot', () => {
-    const entries: ConceptEntry[] = [
-      { id: 'white-a', label: 'white (A)', source_item: '181', source_survey: 'JBIL' },
-      { id: 'white-b', label: 'white (B)', source_item: '181', source_survey: 'JBIL' },
-    ];
-    const grouped = groupWithVisibleParentTags(
-      entries,
-      { 'white-a': [], 'white-b': ['problematic'] },
-      new Set(['white-a']),
-      new Set(['white-b']),
-    );
 
-    expect(grouped[0].tag).toBe('problematic');
-  });
 });

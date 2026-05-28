@@ -1,23 +1,17 @@
-"""Tests for POST /api/concepts/{conceptId}/duplicate."""
+"""Regression tests proving the duplicate-concept route is removed."""
 
 from __future__ import annotations
 
-import csv
 import io
 import json
 import pathlib
 import sys
 from http import HTTPStatus
-
-import pytest
+from typing import cast
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import concepts_io
 import server
-from concepts_io import _variant_suffix
-from storage import tags_store
-
-
-FIELDNAMES = ["id", "concept_en", "source_item", "source_survey", "custom_order"]
 
 
 class _FakeWfile:
@@ -50,458 +44,34 @@ class _FakeHandler(server.RangeRequestHandler):
         pass
 
 
-def _write_concepts(path: pathlib.Path, rows: list[dict[str, str]]) -> bytes:
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=FIELDNAMES)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({key: row.get(key, "") for key in FIELDNAMES})
-    return path.read_bytes()
+def test_duplicate_concept_variant_is_removed() -> None:
+    assert not hasattr(
+        concepts_io,
+        "duplicate_concept_variant",
+    ), "duplicate_concept_variant should have been removed per MC-418-E"
 
 
-def _read_concepts(path: pathlib.Path) -> list[dict[str, str]]:
-    with path.open(newline="", encoding="utf-8") as handle:
-        return list(csv.DictReader(handle))
+def test_source_item_variant_suffixes_is_removed() -> None:
+    assert not hasattr(
+        concepts_io,
+        "_source_item_variant_suffixes",
+    ), "_source_item_variant_suffixes should have been removed per MC-418-E"
 
 
-def _source_item_suffixes(path: pathlib.Path, source_item: str) -> set[str]:
-    return {
-        _variant_suffix(row["concept_en"])
-        for row in _read_concepts(path)
-        if row["source_item"] == source_item
-    }
-
-
-def _post_duplicate(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, concept_id: str) -> tuple[int, dict]:
+def _assert_route_404(path: str, tmp_path: pathlib.Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
     server._install_route_bindings()
-    handler = _FakeHandler(f"/api/concepts/{concept_id}/duplicate")
-    assert handler._handle_api("POST") is True
-    assert handler.status is not None
-    return int(handler.status), handler.wfile.payload()
-
-
-def test_duplicate_single_row_renames_original_appends_sibling_and_writes_backup(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    concepts_path = tmp_path / "concepts.csv"
-    prewrite = _write_concepts(
-        concepts_path,
-        [
-            {"id": "12", "concept_en": "ash", "source_item": "12", "source_survey": "JBIL", "custom_order": "12"},
-            {"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"},
-            {"id": "617", "concept_en": "rain", "source_item": "150", "source_survey": "JBIL", "custom_order": "617"},
-        ],
-    )
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
-
-    assert status == HTTPStatus.OK
-    assert payload == {
-        "primary": {
-            "id": "322",
-            "concept_en": "leaf (A)",
-            "source_item": "102",
-            "source_survey": "JBIL",
-            "custom_order": "322",
-        },
-        "sibling": {
-            "id": "618",
-            "concept_en": "leaf (B)",
-            "source_item": "102",
-            "source_survey": "JBIL",
-            "custom_order": "",
-        },
-    }
-    assert _read_concepts(concepts_path) == [
-        {"id": "12", "concept_en": "ash", "source_item": "12", "source_survey": "JBIL", "custom_order": "12"},
-        {"id": "322", "concept_en": "leaf (A)", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"},
-        {"id": "617", "concept_en": "rain", "source_item": "150", "source_survey": "JBIL", "custom_order": "617"},
-        {"id": "618", "concept_en": "leaf (B)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
-    ]
-    backups = sorted(tmp_path.glob("concepts.csv.bak-*-pre-duplicate-322"))
-    assert len(backups) == 1
-    assert backups[0].read_bytes() == prewrite
-
-
-def test_duplicate_first_time_on_singleton_still_yields_A_and_B(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    concepts_path = tmp_path / "concepts.csv"
-    _write_concepts(
-        concepts_path,
-        [{"id": "527", "concept_en": "head", "source_item": "31", "source_survey": "JBIL", "custom_order": "527"}],
-    )
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "527")
-
-    assert status == HTTPStatus.OK
-    assert payload["primary"]["concept_en"] == "head (A)"
-    assert payload["sibling"]["concept_en"] == "head (B)"
-    assert _source_item_suffixes(concepts_path, "31") == {"A", "B"}
-
-
-def test_duplicate_rewrites_bare_primary_when_letters_already_taken(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A bare primary in an already-lettered bucket gets the first free letter before its sibling."""
-
-    concepts_path = tmp_path / "concepts.csv"
-    _write_concepts(
-        concepts_path,
-        [
-            {"id": "247", "concept_en": "head (A)", "source_item": "31", "source_survey": "JBIL", "custom_order": ""},
-            {"id": "248", "concept_en": "head (B)", "source_item": "31", "source_survey": "JBIL", "custom_order": ""},
-            {"id": "527", "concept_en": "head", "source_item": "31", "source_survey": "JBIL", "custom_order": ""},
-        ],
-    )
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "527")
-
-    assert status == HTTPStatus.OK
-    assert payload["primary"]["id"] == "527"
-    assert payload["primary"]["concept_en"] == "head (C)"
-    assert payload["sibling"]["concept_en"] == "head (D)"
-    assert _source_item_suffixes(concepts_path, "31") == {"A", "B", "C", "D"}
-
-
-def test_duplicate_post_condition_bucket_has_no_bare_when_any_letter_used(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    concepts_path = tmp_path / "concepts.csv"
-    _write_concepts(
-        concepts_path,
-        [
-            {"id": "10", "concept_en": "water", "source_item": "10", "source_survey": "JBIL", "custom_order": ""},
-            {"id": "247", "concept_en": "head (A)", "source_item": "31", "source_survey": "JBIL", "custom_order": ""},
-            {"id": "527", "concept_en": "head", "source_item": "31", "source_survey": "JBIL", "custom_order": ""},
-        ],
-    )
-
-    status, _payload = _post_duplicate(tmp_path, monkeypatch, "527")
-
-    assert status == HTTPStatus.OK
-    bucket_suffixes = _source_item_suffixes(concepts_path, "31")
-    assert "" not in bucket_suffixes
-    assert bucket_suffixes == {"A", "B", "C"}
-    singleton_suffixes = _source_item_suffixes(concepts_path, "10")
-    assert singleton_suffixes == {""}
-
-
-def test_duplicate_creates_C_when_AB_already_exist(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    concepts_path = tmp_path / "concepts.csv"
-    _write_concepts(
-        concepts_path,
-        [
-            {"id": "322", "concept_en": "leaf (A)", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"},
-            {"id": "618", "concept_en": "leaf (B)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
-        ],
-    )
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
-
-    assert status == HTTPStatus.OK
-    assert payload["primary"]["concept_en"] == "leaf (A)"
-    assert payload["sibling"] == {
-        "id": "619",
-        "concept_en": "leaf (C)",
-        "source_item": "102",
-        "source_survey": "JBIL",
-        "custom_order": "",
-    }
-    assert _read_concepts(concepts_path)[-1]["concept_en"] == "leaf (C)"
-
-
-def test_duplicate_creates_D_after_three(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    concepts_path = tmp_path / "concepts.csv"
-    _write_concepts(
-        concepts_path,
-        [
-            {"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"},
-            {"id": "618", "concept_en": "leaf (B)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
-        ],
-    )
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
-    assert status == HTTPStatus.OK
-    assert payload["sibling"]["concept_en"] == "leaf (C)"
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
-
-    assert status == HTTPStatus.OK
-    assert payload["primary"]["concept_en"] == "leaf (A)"
-    assert payload["sibling"]["id"] == "620"
-    assert payload["sibling"]["concept_en"] == "leaf (D)"
-    assert [row["concept_en"] for row in _read_concepts(concepts_path) if row["source_item"] == "102"] == [
-        "leaf (A)",
-        "leaf (B)",
-        "leaf (C)",
-        "leaf (D)",
-    ]
-
-
-def test_duplicate_falls_back_to_numeric_after_Z(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    concepts_path = tmp_path / "concepts.csv"
-    rows = [
-        {
-            "id": str(index),
-            "concept_en": f"leaf ({chr(64 + index)})",
-            "source_item": "102",
-            "source_survey": "JBIL",
-            "custom_order": "",
-        }
-        for index in range(1, 27)
-    ]
-    _write_concepts(concepts_path, rows)
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "1")
-
-    assert status == HTTPStatus.OK
-    assert payload["primary"]["concept_en"] == "leaf (A)"
-    assert payload["sibling"]["id"] == "27"
-    assert payload["sibling"]["concept_en"] == "leaf (27)"
-
-
-def test_duplicate_rewrites_bare_primary_when_A_sibling_already_exists(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    concepts_path = tmp_path / "concepts.csv"
-    _write_concepts(
-        concepts_path,
-        [
-            {"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"},
-            {"id": "618", "concept_en": "leaf (A)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
-        ],
-    )
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
-
-    assert status == HTTPStatus.OK
-    assert payload["primary"]["concept_en"] == "leaf (B)"
-    assert payload["sibling"]["concept_en"] == "leaf (C)"
-    assert _read_concepts(concepts_path) == [
-        {"id": "322", "concept_en": "leaf (B)", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"},
-        {"id": "618", "concept_en": "leaf (A)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
-        {"id": "619", "concept_en": "leaf (C)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
-    ]
-    assert "" not in _source_item_suffixes(concepts_path, "102")
-
-
-def test_duplicate_does_not_double_suffix_when_primary_already_lettered(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    concepts_path = tmp_path / "concepts.csv"
-    _write_concepts(concepts_path, [{"id": "322", "concept_en": "leaf (C)", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"}])
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
-
-    assert status == HTTPStatus.OK
-    assert payload["primary"]["concept_en"] == "leaf (C)"
-    # Sparse families intentionally allocate the first free label, not the next ordinal after the target.
-    assert payload["sibling"]["concept_en"] == "leaf (A)"
-    assert _read_concepts(concepts_path) == [
-        {"id": "322", "concept_en": "leaf (C)", "source_item": "102", "source_survey": "JBIL", "custom_order": "322"},
-        {"id": "323", "concept_en": "leaf (A)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
-    ]
-
-
-def test_duplicate_returns_404_when_concept_missing(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _write_concepts(tmp_path / "concepts.csv", [{"id": "1", "concept_en": "ash", "source_item": "1", "source_survey": "JBIL", "custom_order": ""}])
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
-
-    assert status == HTTPStatus.NOT_FOUND
-    assert payload == {"error": "concept not found"}
-
-
-def test_duplicate_returns_400_when_concept_id_is_not_numeric(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _write_concepts(tmp_path / "concepts.csv", [{"id": "1", "concept_en": "ash", "source_item": "1", "source_survey": "JBIL", "custom_order": ""}])
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "not-a-number")
-
-    assert status == HTTPStatus.BAD_REQUEST
-    assert payload == {"error": "conceptId must be numeric"}
-
-
-def test_duplicate_returns_400_for_malformed_concepts_duplicate_path(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _write_concepts(tmp_path / "concepts.csv", [{"id": "1", "concept_en": "ash", "source_item": "1", "source_survey": "JBIL", "custom_order": ""}])
-    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
-    server._install_route_bindings()
-    handler = _FakeHandler("/api/concepts/1/not-duplicate")
+    handler = _FakeHandler(path)
 
     assert handler._handle_api("POST") is True
 
-    assert int(handler.status or 0) == HTTPStatus.BAD_REQUEST
-    assert handler.wfile.payload() == {"error": "Malformed concept path"}
+    assert int(handler.status or 0) == HTTPStatus.NOT_FOUND
+    assert cast(_FakeWfile, handler.wfile).payload() == {"error": "Unknown API endpoint"}
 
 
-def test_duplicate_restores_backup_when_atomic_write_fails(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import concepts_io
-
-    concepts_path = tmp_path / "concepts.csv"
-    prewrite = _write_concepts(concepts_path, [{"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": ""}])
-
-    def fail_after_torn_write(path, rows, *, atomic=False):  # type: ignore[no-untyped-def]
-        path.write_text("torn write\n", encoding="utf-8")
-        raise OSError("simulated replace failure")
-
-    monkeypatch.setattr(concepts_io, "write_concepts_csv_rows", fail_after_torn_write)
-
-    with pytest.raises(concepts_io.ConceptDuplicateError) as excinfo:
-        concepts_io.duplicate_concept_variant(tmp_path, "322")
-
-    assert int(excinfo.value.status) == HTTPStatus.INTERNAL_SERVER_ERROR
-    assert str(excinfo.value) == "failed to duplicate concept"
-    assert concepts_path.read_bytes() == prewrite
-    backups = sorted(tmp_path.glob("concepts.csv.bak-*-pre-duplicate-322"))
-    assert len(backups) == 1
-    assert backups[0].read_bytes() == prewrite
-
-def test_duplicate_mirrors_global_tag_concept_membership(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PARSE_TAGS_PATH", str(tmp_path / "tags.json"))
-    tags_store.replace_all(
-        [
-            {"id": "t-thesis", "label": "Thesis", "color": "#000000", "concepts": ["53"], "lexemeTargets": []},
-            {"id": "t-other", "label": "Other", "color": "#111111", "concepts": ["999"], "lexemeTargets": []},
-        ]
-    )
-    _write_concepts(
-        tmp_path / "concepts.csv",
-        [{"id": "53", "concept_en": "big", "source_item": "4.1", "source_survey": "KLQ", "custom_order": "53"}],
-    )
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "53")
-
-    assert status == HTTPStatus.OK
-    sibling_id = payload["sibling"]["id"]
-    after = tags_store.fetch_all()["tags"]
-    thesis = next(tag for tag in after if tag["id"] == "t-thesis")
-    other = next(tag for tag in after if tag["id"] == "t-other")
-    assert thesis["concepts"] == ["53", sibling_id]
-    assert other["concepts"] == ["999"]
+def test_concepts_duplicate_route_returns_404(tmp_path: pathlib.Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _assert_route_404("/api/concepts/322/duplicate", tmp_path, monkeypatch)
 
 
-def test_duplicate_global_tag_mirror_is_idempotent(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PARSE_TAGS_PATH", str(tmp_path / "tags.json"))
-    tags_store.replace_all(
-        [{"id": "t-thesis", "label": "Thesis", "color": "#000000", "concepts": ["53"], "lexemeTargets": []}]
-    )
-    _write_concepts(
-        tmp_path / "concepts.csv",
-        [{"id": "53", "concept_en": "big", "source_item": "4.1", "source_survey": "KLQ", "custom_order": "53"}],
-    )
-
-    first_status, first_payload = _post_duplicate(tmp_path, monkeypatch, "53")
-    second_status, second_payload = _post_duplicate(tmp_path, monkeypatch, "53")
-
-    assert first_status == HTTPStatus.OK
-    assert second_status == HTTPStatus.OK
-    first_sibling_id = first_payload["sibling"]["id"]
-    second_sibling_id = second_payload["sibling"]["id"]
-    thesis = tags_store.fetch_all()["tags"][0]
-    assert thesis["concepts"].count("53") == 1
-    assert thesis["concepts"].count(first_sibling_id) == 1
-    assert thesis["concepts"].count(second_sibling_id) == 1
-
-
-def test_duplicate_succeeds_when_tag_store_unwritable(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
-    monkeypatch.setenv("PARSE_TAGS_PATH", str(tmp_path / "tags.json"))
-    tags_store.replace_all(
-        [{"id": "t-thesis", "label": "Thesis", "color": "#000000", "concepts": ["322"], "lexemeTargets": []}]
-    )
-    _write_concepts(tmp_path / "concepts.csv", [{"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": ""}])
-    annotations_dir = tmp_path / "annotations"
-    annotations_dir.mkdir()
-    annotation_path = annotations_dir / "Saha01.json"
-    annotation_path.write_text(
-        json.dumps({"version": 1, "speaker": "Saha01", "concept_tags": {"322": ["thesis"]}}),
-        encoding="utf-8",
-    )
-
-    def reject_tags(_tags):  # type: ignore[no-untyped-def]
-        raise tags_store.TagValidationError("simulated tag-store write failure")
-
-    monkeypatch.setattr(tags_store, "replace_all", reject_tags)
-    caplog.set_level("WARNING")
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
-
-    assert status == HTTPStatus.OK
-    sibling_id = payload["sibling"]["id"]
-    updated = json.loads(annotation_path.read_text(encoding="utf-8"))
-    assert updated["concept_tags"][sibling_id] == ["thesis"]
-    assert "simulated tag-store write failure" in caplog.text
-
-
-def test_duplicate_no_global_tag_mirror_when_primary_not_attached(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PARSE_TAGS_PATH", str(tmp_path / "tags.json"))
-    tags_store.replace_all(
-        [{"id": "t-other", "label": "Other", "color": "#111111", "concepts": ["999"], "lexemeTargets": []}]
-    )
-    _write_concepts(tmp_path / "concepts.csv", [{"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": ""}])
-    calls = 0
-    original_replace_all = tags_store.replace_all
-
-    def counting_replace_all(tag_payload):  # type: ignore[no-untyped-def]
-        nonlocal calls
-        calls += 1
-        return original_replace_all(tag_payload)
-
-    monkeypatch.setattr(tags_store, "replace_all", counting_replace_all)
-
-    status, _payload = _post_duplicate(tmp_path, monkeypatch, "322")
-
-    assert status == HTTPStatus.OK
-    assert calls == 0
-    assert tags_store.fetch_all()["tags"][0]["concepts"] == ["999"]
-
-
-def test_duplicate_copies_concept_tags_to_sibling_in_annotation_files(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    concepts_path = tmp_path / "concepts.csv"
-    _write_concepts(concepts_path, [{"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": ""}])
-
-    annotations_dir = tmp_path / "annotations"
-    annotations_dir.mkdir()
-    annotation_data = {
-        "version": 1,
-        "speaker": "Saha01",
-        "concept_tags": {
-            "322": ["thesis", "confirmed"],
-            "100": ["thesis"],
-        },
-    }
-    annotation_path = annotations_dir / "Saha01.json"
-    annotation_path.write_text(json.dumps(annotation_data), encoding="utf-8")
-
-    # Speaker with no tags for concept 322 — sibling slot must stay absent
-    empty_speaker_data = {"version": 1, "speaker": "Khan01", "concept_tags": {"100": ["thesis"]}}
-    (annotations_dir / "Khan01.json").write_text(json.dumps(empty_speaker_data), encoding="utf-8")
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
-
-    assert status == HTTPStatus.OK
-    sibling_id = payload["sibling"]["id"]
-
-    # Tags copied for Saha01 who had them
-    updated = json.loads(annotation_path.read_text(encoding="utf-8"))
-    assert updated["concept_tags"][sibling_id] == ["thesis", "confirmed"]
-    assert updated["concept_tags"]["322"] == ["thesis", "confirmed"]  # primary unchanged
-
-    # No spurious entry for Khan01 who had no tags for 322
-    khan_updated = json.loads((annotations_dir / "Khan01.json").read_text(encoding="utf-8"))
-    assert sibling_id not in khan_updated["concept_tags"]
-
-
-def test_duplicate_does_not_overwrite_existing_sibling_tags(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    concepts_path = tmp_path / "concepts.csv"
-    _write_concepts(concepts_path, [{"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": ""}])
-
-    annotations_dir = tmp_path / "annotations"
-    annotations_dir.mkdir()
-
-    # Sibling slot already populated — must not be overwritten
-    annotation_data = {
-        "version": 1,
-        "speaker": "Saha01",
-        "concept_tags": {
-            "322": ["thesis"],
-            "618": ["confirmed"],
-        },
-    }
-    annotation_path = annotations_dir / "Saha01.json"
-    annotation_path.write_text(json.dumps(annotation_data), encoding="utf-8")
-
-    status, payload = _post_duplicate(tmp_path, monkeypatch, "322")
-    assert status == HTTPStatus.OK
-
-    updated = json.loads(annotation_path.read_text(encoding="utf-8"))
-    # Existing sibling tags must be preserved, not overwritten
-    assert updated["concept_tags"]["618"] == ["confirmed"]
+def test_bare_concepts_duplicate_route_returns_404(tmp_path: pathlib.Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _assert_route_404("/api/concepts/duplicate", tmp_path, monkeypatch)

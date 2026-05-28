@@ -8,7 +8,7 @@ from pathlib import Path
 import server as _server
 from canonical_lexemes import drop_canonical_references_for
 from concept_relink import ConceptRelinkError, apply_relink_by_gloss, build_relink_by_gloss_plan
-from concepts_io import ConceptDeleteError, ConceptDuplicateError, delete_concept_variant, duplicate_concept_variant
+from concepts_io import ConceptDeleteError, delete_concept_variant
 from storage import tags_store
 from survey_overlap import load_survey_overlap_state, update_survey_overlap_state
 
@@ -86,64 +86,6 @@ def _api_post_tags_import(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
-def _copy_concept_tags_to_sibling(annotations_dir: Path, primary_id: str, sibling_id: str) -> None:
-    """Copy concept_tags[primary_id] to concept_tags[sibling_id] in every annotation JSON."""
-    if not annotations_dir.is_dir():
-        return
-    for annotation_path in sorted(annotations_dir.glob('*.json')):
-        try:
-            data = json.loads(annotation_path.read_text(encoding='utf-8'))
-        except (OSError, json.JSONDecodeError):
-            continue
-        concept_tags = data.get('concept_tags')
-        if not isinstance(concept_tags, dict):
-            continue
-        primary_tags = concept_tags.get(primary_id)
-        if not primary_tags or sibling_id in concept_tags:
-            continue
-        concept_tags[sibling_id] = list(primary_tags)
-        data['concept_tags'] = concept_tags
-        tmp = annotation_path.with_suffix('.json.tmp')
-        try:
-            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
-            tmp.replace(annotation_path)
-        except OSError:
-            pass
-
-def _mirror_global_tag_concepts_to_sibling(primary_id: str, sibling_id: str) -> None:
-    """Best-effort mirror of global tag concept membership onto a duplicate sibling."""
-    try:
-        current = tags_store.fetch_all()
-    except OSError as exc:
-        _LOGGER.warning("Failed to mirror duplicate concept global tags: fetch failed: %s", exc)
-        return
-
-    changed = False
-    next_tags = []
-    for tag in current.get("tags", []):
-        concepts = list(tag.get("concepts", []))
-        deduped: list[str] = []
-        seen: set[str] = set()
-        for concept_id in concepts:
-            if concept_id not in seen:
-                deduped.append(concept_id)
-                seen.add(concept_id)
-        if primary_id in seen and sibling_id not in seen:
-            deduped.append(sibling_id)
-            changed = True
-        if deduped != concepts:
-            changed = True
-        next_tags.append({**tag, "concepts": deduped})
-
-    if not changed:
-        return
-
-    try:
-        tags_store.replace_all(next_tags)
-    except (OSError, tags_store.TagValidationError) as exc:
-        _LOGGER.warning("Failed to mirror duplicate concept global tags: write failed: %s", exc)
-
-
 def _drop_concept_tags_from_annotations(annotations_dir: Path, concept_id: str) -> None:
     """Best-effort removal of one concept_tags entry from every annotation file."""
     if not annotations_dir.is_dir():
@@ -220,24 +162,6 @@ def _drop_canonical_references(project_root: Path, concept_id: str) -> None:
         _LOGGER.warning("Failed to drop deleted concept canonical references: %s", exc)
 
 
-def _api_post_concept_duplicate(self, concept_id: str) -> None:
-    """Duplicate one concepts.csv row into a new variant sibling."""
-    try:
-        payload = duplicate_concept_variant(_server._project_root(), concept_id)
-    except ConceptDuplicateError as exc:
-        raise _server.ApiError(exc.status, exc.message) from exc
-    _copy_concept_tags_to_sibling(
-        _server._annotations_dir_path(),
-        payload['primary']['id'],
-        payload['sibling']['id'],
-    )
-    _mirror_global_tag_concepts_to_sibling(
-        payload['primary']['id'],
-        payload['sibling']['id'],
-    )
-    self._send_json(_server.HTTPStatus.OK, payload)
-
-
 def _api_delete_concept(self, concept_id: str) -> None:
     """Delete one unannotated concepts.csv row and clean best-effort sidecars."""
     try:
@@ -301,4 +225,4 @@ def _api_delete_concept_survey_link(self, concept_id: str) -> None:
     self._send_json(response.status, response.payload)
 
 
-__all__ = ['_api_get_export_lingpy', '_api_get_export_nexus', '_api_post_concepts_import', '_api_post_concepts_relink_by_gloss', '_api_post_tags_import', '_api_post_concept_duplicate', '_api_delete_concept', '_api_post_concept_survey_link', '_api_post_concept_promote_survey_primary', '_api_delete_concept_survey_link']
+__all__ = ['_api_get_export_lingpy', '_api_get_export_nexus', '_api_post_concepts_import', '_api_post_concepts_relink_by_gloss', '_api_post_tags_import', '_api_delete_concept', '_api_post_concept_survey_link', '_api_post_concept_promote_survey_primary', '_api_delete_concept_survey_link']

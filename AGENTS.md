@@ -429,7 +429,6 @@ PARSE has crossed the React pivot and the unified UI redesign is **merged to `ma
   - PRs #267/#268/#270/#284 ship speaker-local `AnnotationRecord.concept_tags`, omit empty concept-tag sidecars, and keep tag filters/counts scoped to the active speaker while preserving the shared tag vocabulary.
   - PRs #271/#272/#273/#278 harden source-item backfill/import so `concepts.csv` keeps the five-column schema and MCP/processed-speaker onboarding does not collapse `source_item` / `source_survey` metadata.
   - PRs #291/#292/#295/#303 add `survey-overlap.json`, `GET`/`POST /api/survey-overlap`, survey label/color controls, per-speaker choices, Current-survey copy, sidebar badges, and initial multi-survey chips; PRs #492/#496/#503 relocate active multi-survey choices to the Annotate header chip row while keeping sidebar badges/context-menu promotion.
-  - PRs #297/#296 add `POST /api/concepts/{conceptId}/duplicate` and a sidebar right-click duplicate action that renames the source row to `X (A)`, appends `X (B)` with the same source metadata, and refreshes the workstation.
 - **Streaming responses shipped**:
   - Additive WebSocket sidecar in `python/external_api/streaming.py`
   - Dedicated port via `PARSE_WS_PORT` (default `8767`)
