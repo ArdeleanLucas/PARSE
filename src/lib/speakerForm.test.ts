@@ -599,4 +599,63 @@ describe('buildSpeakerForm', () => {
     });
   });
 
+  it('uses the focused interval index for same-concept elicitations and falls back per speaker', () => {
+    const record = makeRecord({
+      concept: [
+        { start: 1, end: 2, text: 'head', concept_id: '527' },
+        { start: 3, end: 4, text: 'head', concept_id: '527' },
+        { start: 5, end: 6, text: 'head', concept_id: '527' },
+      ],
+      ipa: [
+        { start: 1, end: 2, text: 'sar' },
+        { start: 3, end: 4, text: 'kapul' },
+        { start: 5, end: 6, text: 'kapul-dup' },
+      ],
+      ortho_words: [
+        { start: 1, end: 2, text: 'سەر' },
+        { start: 3, end: 4, text: 'کەپول' },
+        { start: 5, end: 6, text: 'کەپول٢' },
+      ],
+    });
+    const head: Concept = { id: 527, key: '527', name: 'head', tag: 'untagged' };
+
+    const oneIntervalRecord = makeRecord({
+      concept: [{ start: 9, end: 10, text: 'head', concept_id: '527' }],
+      ipa: [{ start: 9, end: 10, text: 'saha-first' }],
+      ortho_words: [{ start: 9, end: 10, text: 'سەر' }],
+    });
+
+    expect(buildSpeakerForm(record, head, 'Fail01', {}, false, [], '527', 1).ipa).toBe('kapul');
+    expect(buildSpeakerForm(record, head, 'Fail01', {}, false, [], '527', 2).ortho).toBe('کەپول٢');
+    expect(buildSpeakerForm(record, head, 'Fail01', {}, false, [], '527', 99).ipa).toBe('sar');
+    expect(buildSpeakerForm(oneIntervalRecord, head, 'Saha01', {}, false, [], '527', 2).ipa).toBe('saha-first');
+  });
+
+  it('uses the focused grouped variant key for source-item variants', () => {
+    const sourceConcept: Concept = {
+      id: 31,
+      key: '31',
+      name: 'head',
+      tag: 'untagged',
+      sourceItem: '31',
+      variants: [
+        { conceptKey: '247', conceptEn: 'head (A)', variantLabel: 'A' },
+        { conceptKey: '527', conceptEn: 'head', variantLabel: 'B' },
+      ],
+    };
+    const record = makeRecord({
+      concept: [
+        { start: 1, end: 2, text: 'head (A)', concept_id: '247' },
+        { start: 3, end: 4, text: 'head', concept_id: '527' },
+      ],
+      ipa: [
+        { start: 1, end: 2, text: 'sar-a' },
+        { start: 3, end: 4, text: 'sar-b' },
+      ],
+    });
+
+    expect(buildSpeakerForm(record, sourceConcept, 'Fail01', {}, false, [], '527', 0).ipa).toBe('sar-b');
+    expect(buildSpeakerForm(record, sourceConcept, 'Fail01', {}, false, [], 'missing', 0).ipa).toBe('sar-a');
+  });
+
 });

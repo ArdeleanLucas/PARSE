@@ -654,6 +654,7 @@ export function ConceptSidebar({
                           active={childActive}
                           aria-label={`${parentName} variant ${variant.variantLabel} ${variant.conceptEn}`}
                           title={`${variant.conceptEn} (${variant.conceptKey})`}
+                          data-realization-key={realizationKey}
                           data-testid={`concept-variant-pill-${variant.conceptKey}`}
                           onClick={() => onConceptSelect(concept.id, realizationKey)}
                           onContextMenu={(event) => {
@@ -681,6 +682,7 @@ export function ConceptSidebar({
                           aria-label={`${parentName} (${letter})`}
                           title={`${parentName} (${letter})`}
                           active={childActive}
+                          data-realization-key={realizationKey}
                           data-testid={`concept-elicitation-pill-${concept.key ?? concept.id}-${intervalIndex}`}
                           onClick={() => onConceptSelect(concept.id, realizationKey)}
                           onContextMenu={(event) => {

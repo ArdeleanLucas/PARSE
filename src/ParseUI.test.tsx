@@ -862,6 +862,76 @@ describe("MC-418-B add elicitation", () => {
     expect(within(row).getByRole("button", { name: "head (A)" })).toBeTruthy();
     expect(within(row).getByRole("button", { name: "head (B)" })).toBeTruthy();
   });
+
+  it("cycles same-concept realizations with ArrowDown and scrolls the active chip into view", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+    mockConfig = {
+      ...mockConfig!,
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "527", label: "head", source_item: "10", source_survey: "jbil" },
+        { id: "600", label: "water", source_item: "11", source_survey: "jbil" },
+      ],
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "head", conceptId: "527", ipa: "sar", start: 1, end: 2 },
+        { conceptText: "head", conceptId: "527", ipa: "kapul", start: 3, end: 4 },
+        { conceptText: "head", conceptId: "527", ipa: "kapul", start: 5, end: 6 },
+        { conceptText: "water", conceptId: "600", ipa: "aw", start: 7, end: 8 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    expect(within(sidebar).getByTestId("concept-elicitation-pill-527-0").className).toContain("bg-indigo-50");
+
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-elicitation-pill-527-1").className).toContain("bg-indigo-50"));
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "nearest" });
+
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-elicitation-pill-527-2").className).toContain("bg-indigo-50"));
+
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(await screen.findByRole("heading", { name: "water" })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "PageUp" });
+    expect(await screen.findByRole("heading", { name: "head" })).toBeTruthy();
+    await waitFor(() => expect(within(sidebar).getByTestId("concept-elicitation-pill-527-0").className).toContain("bg-indigo-50"));
+  });
+
+  it("does not cycle realizations while an annotation input has focus", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      ...mockConfig!,
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "527", label: "head", source_item: "10", source_survey: "jbil" },
+        { id: "600", label: "water", source_item: "11", source_survey: "jbil" },
+      ],
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "head", conceptId: "527", ipa: "sar", start: 1, end: 2 },
+        { conceptText: "head", conceptId: "527", ipa: "kapul", start: 3, end: 4 },
+        { conceptText: "water", conceptId: "600", ipa: "aw", start: 7, end: 8 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    const ipaInput = screen.getByPlaceholderText("Enter IPA…");
+    fireEvent.focus(ipaInput);
+    fireEvent.keyDown(ipaInput, { key: "ArrowDown" });
+
+    expect(within(sidebar).getByTestId("concept-elicitation-pill-527-0").className).toContain("bg-indigo-50");
+    expect(screen.getByRole("heading", { name: "head" })).toBeTruthy();
+  });
 });
 
 describe('ParseUI survey primary promotion', () => {
@@ -3510,7 +3580,7 @@ describe("ParseUI", () => {
     expect(await screen.findByRole("heading", { name: "water" })).toBeTruthy();
   });
 
-  it("uses ArrowUp/Down to change annotate concepts from focused fields, but preserves Left/Right for caret movement", async () => {
+  it("preserves arrow keys for focused annotation fields", async () => {
     render(<ParseUI />);
     await switchToAnnotateMode();
 
@@ -3519,16 +3589,14 @@ describe("ParseUI", () => {
     expect(screen.getByRole("heading", { name: "water" })).toBeTruthy();
 
     fireEvent.keyDown(ipaInput, { key: "ArrowDown" });
-    expect(await screen.findByRole("heading", { name: "fire" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "water" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "fire" })).toBeNull();
 
-    const focusedIpa = screen.getByPlaceholderText("Enter IPA…");
-    fireEvent.focus(focusedIpa);
-    fireEvent.keyDown(focusedIpa, { key: "ArrowLeft" });
-    expect(screen.getByRole("heading", { name: "fire" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "water" })).toBeNull();
+    fireEvent.keyDown(ipaInput, { key: "ArrowLeft" });
+    expect(screen.getByRole("heading", { name: "water" })).toBeTruthy();
 
-    fireEvent.keyDown(focusedIpa, { key: "ArrowRight" });
-    expect(screen.getByRole("heading", { name: "fire" })).toBeTruthy();
+    fireEvent.keyDown(ipaInput, { key: "ArrowRight" });
+    expect(screen.getByRole("heading", { name: "water" })).toBeTruthy();
   });
 
   it("uses arrow keys to follow the sorted annotate concept list selection path", async () => {
