@@ -262,16 +262,11 @@ class BuildReviewDataTests(unittest.TestCase):
                     },
                 },
             )
-            review_data, _ = build_review_data(workspace=workspace)
+            review_data, clip_plan = build_review_data(workspace=workspace)
 
-        paths = [c["forms"][0]["audio_path"] for c in review_data["concepts"]]
-        self.assertEqual(
-            paths,
-            [
-                "audio/Fail01/JBIL_79_A_dog_Fail01.wav",
-                "audio/Fail01/JBIL_79_B_dog_Fail01.wav",
-            ],
-        )
+        self.assertEqual([c["concept_en"] for c in review_data["concepts"]], ["dog"])
+        self.assertEqual(review_data["concepts"][0]["forms"][0]["audio_path"], "audio/Fail01/JBIL_79_B_dog_Fail01.wav")
+        self.assertEqual(len(clip_plan), 1)
 
     def test_metadata_block_matches_legacy_keys(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -329,6 +324,123 @@ class BuildReviewDataTests(unittest.TestCase):
 
         self.assertEqual(review_data["concepts"], [])
         self.assertEqual(clip_plan, [])
+
+    def test_default_mode_collapses_clarifier_siblings_to_one_row(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = _make_workspace(
+                Path(tmp),
+                concepts=[
+                    {"id": "1", "concept_en": "hair", "source_item": "32", "source_survey": "KLQ"},
+                    {"id": "2", "concept_en": "hair (men)", "source_item": "32", "source_survey": "JBIL"},
+                    {"id": "3", "concept_en": "hair (women)", "source_item": "32", "source_survey": "JBIL"},
+                ],
+                speakers={
+                    "Fail01": {
+                        "concept_intervals": [{"concept_id": "1", "start": 0.0, "end": 0.5}],
+                        "ipa_intervals": [{"conceptId": "1", "start": 0.0, "end": 0.5, "text": "mu"}],
+                        "tagged_ids": ["1"],
+                    },
+                    "Kalh01": {
+                        "concept_intervals": [{"concept_id": "2", "start": 1.0, "end": 1.5}],
+                        "ipa_intervals": [{"conceptId": "2", "start": 1.0, "end": 1.5, "text": "boːrʌk"}],
+                        "tagged_ids": ["2"],
+                    },
+                    "Khan02": {
+                        "concept_intervals": [{"concept_id": "3", "start": 2.0, "end": 2.5}],
+                        "ipa_intervals": [{"conceptId": "3", "start": 2.0, "end": 2.5, "text": "pɪrç"}],
+                        "tagged_ids": ["3"],
+                    },
+                },
+            )
+            review_data, clip_plan = build_review_data(workspace=workspace)
+
+        self.assertEqual([concept["concept_en"] for concept in review_data["concepts"]], ["hair"])
+        self.assertEqual(review_data["metadata"]["total_concepts"], 1)
+        forms = {form["speaker"]: form for form in review_data["concepts"][0]["forms"]}
+        self.assertEqual(forms["Fail01"]["ipa"], "mu")
+        self.assertEqual(forms["Kalh01"]["ipa"], "boːrʌk")
+        self.assertEqual(forms["Khan02"]["ipa"], "pɪrç")
+        self.assertEqual(len(clip_plan), 3)
+
+    def test_collapse_picks_longest_ipa_realization(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = _make_workspace(
+                Path(tmp),
+                concepts=[
+                    {"id": "1", "concept_en": "hair", "source_item": "32", "source_survey": "KLQ"},
+                    {"id": "2", "concept_en": "hair (men)", "source_item": "32", "source_survey": "JBIL"},
+                ],
+                speakers={
+                    "Fail01": {
+                        "concept_intervals": [
+                            {"concept_id": "1", "start": 0.0, "end": 0.5},
+                            {"concept_id": "2", "start": 1.0, "end": 1.5},
+                        ],
+                        "ipa_intervals": [
+                            {"conceptId": "1", "start": 0.0, "end": 0.5, "text": "mu"},
+                            {"conceptId": "2", "start": 1.0, "end": 1.5, "text": "boːrʌk"},
+                        ],
+                        "tagged_ids": ["1", "2"],
+                    },
+                },
+            )
+            review_data, clip_plan = build_review_data(workspace=workspace)
+
+        [concept] = review_data["concepts"]
+        self.assertEqual(concept["concept_en"], "hair")
+        self.assertEqual(concept["forms"][0]["ipa"], "boːrʌk")
+        self.assertEqual(len(clip_plan), 1)
+        self.assertEqual(clip_plan[0][1]["ipa"], "boːrʌk")
+
+    def test_collapse_preserves_clarifier_in_notes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = _make_workspace(
+                Path(tmp),
+                concepts=[
+                    {"id": "1", "concept_en": "hair", "source_item": "32", "source_survey": "KLQ"},
+                    {"id": "2", "concept_en": "hair (women) (B)", "source_item": "32", "source_survey": "JBIL"},
+                ],
+                speakers={
+                    "Fail01": {
+                        "concept_intervals": [{"concept_id": "2", "start": 1.0, "end": 1.5}],
+                        "ipa_intervals": [{"conceptId": "2", "start": 1.0, "end": 1.5, "text": "pɪrç"}],
+                        "tagged_ids": ["1", "2"],
+                    },
+                },
+            )
+            review_data, _clip_plan = build_review_data(workspace=workspace)
+
+        [concept] = review_data["concepts"]
+        self.assertEqual(concept["notes"], ["clarifier_variant: (women)"])
+        self.assertEqual(concept["forms"][0]["notes"], ["clarifier_variant: (women)"])
+
+    def test_anchored_mode_concept_count_unchanged_by_default_clarifier_collapse(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = _make_workspace(
+                Path(tmp),
+                concepts=[
+                    {"id": "1", "concept_en": "hair", "source_item": "32", "source_survey": "KLQ"},
+                    {"id": "2", "concept_en": "hair (men)", "source_item": "32", "source_survey": "JBIL"},
+                ],
+                speakers={
+                    "Fail01": {
+                        "concept_intervals": [{"concept_id": "1", "start": 0.0, "end": 0.5}],
+                        "ipa_intervals": [{"conceptId": "1", "start": 0.0, "end": 0.5, "text": "mu"}],
+                        "tagged_ids": ["1"],
+                    },
+                },
+            )
+            anchor = _write_legacy_anchor(
+                Path(tmp),
+                concepts=[
+                    {"concept_id": "32", "concept_en": "hair", "forms": [{"speaker": "Fail01", "source": "KLQ"}]},
+                    {"concept_id": "32m", "concept_en": "hair (men)", "forms": [{"speaker": "Fail01", "source": "JBIL"}]},
+                ],
+            )
+            review_data, _clip_plan = build_review_data_anchored(workspace=workspace, legacy_anchor=anchor)
+
+        self.assertEqual(len(review_data["concepts"]), 2)
+        self.assertEqual(review_data["metadata"]["total_concepts"], 2)
 
 
 class WriteOutputsTests(unittest.TestCase):

@@ -44,6 +44,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from concept_canonical import strip_clarifier
 from concept_source_item import (
     parse_cue_name,
     read_concepts_csv_rows,
@@ -67,6 +68,7 @@ def _empty_enrichments() -> dict[str, dict[str, Any]]:
     return {"cognate_sets": {}, "similarity": {}, "borrowing_flags": {}}
 
 _REVIEW_VARIANT_CODE_RE = re.compile(r"\s*\(([A-Za-z0-9]+)\)\s*$")
+_PAREN_CONTENT_RE = re.compile(r"\(([^)]*)\)")
 _TRAILING_PAREN_RE = re.compile(r"\s*\([^)]*\)\s*$")
 _FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -109,6 +111,148 @@ def _variant_letter(label: str) -> str:
     """
     match = _REVIEW_VARIANT_CODE_RE.search(str(label or "").strip())
     return match.group(1) if match else ""
+
+
+def _clarifier_notes(label: str) -> list[str]:
+    """Return semantic parenthetical clarifiers as review notes.
+
+    Export-time dedup needs to preserve ``(men)`` / ``(women)`` while ignoring
+    variant-only suffixes like ``(A)``. The public stripping primitive remains
+    :func:`concept_canonical.strip_clarifier`; this helper only decides which
+    stripped chunks are human-review notes rather than variant codes.
+    """
+
+    notes: list[str] = []
+    for match in _PAREN_CONTENT_RE.finditer(str(label or "")):
+        token = match.group(1).strip()
+        if not token or re.fullmatch(r"(?:[A-Z]|\d+)", token):
+            continue
+        note = f"clarifier_variant: ({token})"
+        if note not in notes:
+            notes.append(note)
+    return notes
+
+
+def _append_note(target: dict[str, Any], note: str) -> None:
+    if not note:
+        return
+    current = target.get("notes")
+    if current is None:
+        target["notes"] = [note]
+        return
+    if isinstance(current, list):
+        if note not in current:
+            current.append(note)
+        return
+    existing = str(current).strip()
+    target["notes"] = [value for value in (existing, note) if value]
+
+
+def _form_ipa_length(form: Mapping[str, Any]) -> int:
+    ipa = str(form.get("ipa") or "").strip()
+    if ipa in {"", "?"}:
+        return 0
+    return len(ipa)
+
+
+def _entry_ipa_length(entry: Mapping[str, Any]) -> int:
+    return sum(_form_ipa_length(form) for form in entry.get("forms", []) if isinstance(form, Mapping))
+
+
+def _entry_has_semantic_clarifier(entry: Mapping[str, Any]) -> bool:
+    return bool(_clarifier_notes(str(entry.get("_source_full_label") or entry.get("concept_en") or "")))
+
+
+def _clip_plan_by_speaker(entry: Mapping[str, Any]) -> Mapping[str, tuple[str, dict[str, Any]]]:
+    clips = entry.get("_clip_plan_by_speaker")
+    return clips if isinstance(clips, Mapping) else {}
+
+
+def _collapse_clarifier_siblings(
+    concept_entries: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[tuple[str, dict[str, Any]]]]:
+    """Collapse default-export duplicate gloss siblings without touching anchored mode."""
+
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for entry in concept_entries:
+        label = str(entry.get("_source_full_label") or entry.get("concept_en") or "")
+        base = strip_clarifier(label).casefold() or str(entry.get("concept_en") or "").casefold()
+        groups.setdefault(base, []).append(entry)
+
+    collapsed: list[dict[str, Any]] = []
+    clip_plan: list[tuple[str, dict[str, Any]]] = []
+    for siblings in groups.values():
+        if len(siblings) == 1:
+            for entry in siblings:
+                collapsed.append(_public_concept_entry(entry))
+                clip_plan.extend(entry.get("_clip_plan", []))
+            continue
+
+        winner = max(
+            siblings,
+            key=lambda entry: (
+                _entry_ipa_length(entry),
+                not _entry_has_semantic_clarifier(entry),
+                -int(entry.get("_source_index") or 0),
+            ),
+        )
+        merged = dict(winner)
+        merged["concept_en"] = strip_clarifier(str(winner.get("_source_full_label") or winner.get("concept_en") or "")) or str(
+            winner.get("concept_en") or ""
+        )
+
+        for sibling in siblings:
+            for note in _clarifier_notes(str(sibling.get("_source_full_label") or sibling.get("concept_en") or "")):
+                _append_note(merged, note)
+
+        speaker_order = [str(form.get("speaker") or "") for form in winner.get("forms", []) if isinstance(form, Mapping)]
+        for sibling in siblings:
+            for form in sibling.get("forms", []) or []:
+                if not isinstance(form, Mapping):
+                    continue
+                speaker = str(form.get("speaker") or "")
+                if speaker and speaker not in speaker_order:
+                    speaker_order.append(speaker)
+
+        merged_forms: list[dict[str, Any]] = []
+        merged_clips: list[tuple[str, dict[str, Any]]] = []
+        for speaker in speaker_order:
+            candidates: list[tuple[dict[str, Any], Mapping[str, Any]]] = []
+            for sibling in siblings:
+                for form in sibling.get("forms", []) or []:
+                    if isinstance(form, Mapping) and str(form.get("speaker") or "") == speaker:
+                        candidates.append((sibling, form))
+            if not candidates:
+                continue
+            chosen_entry, chosen_form = max(
+                candidates,
+                key=lambda item: (
+                    _form_ipa_length(item[1]),
+                    bool(item[1].get("audio_path")),
+                    bool(str(item[1].get("ortho") or "").strip()),
+                    not _entry_has_semantic_clarifier(item[0]),
+                    item[0] is winner,
+                    -int(item[0].get("_source_index") or 0),
+                ),
+            )
+            public_form = dict(chosen_form)
+            for note in _clarifier_notes(str(chosen_entry.get("_source_full_label") or chosen_entry.get("concept_en") or "")):
+                _append_note(public_form, note)
+            merged_forms.append(public_form)
+            chosen_clip = _clip_plan_by_speaker(chosen_entry).get(speaker)
+            if chosen_clip is not None:
+                merged_clips.append(chosen_clip)
+
+        merged["forms"] = merged_forms
+        merged["_clip_plan"] = merged_clips
+        collapsed.append(_public_concept_entry(merged))
+        clip_plan.extend(merged_clips)
+
+    return collapsed, clip_plan
+
+
+def _public_concept_entry(entry: Mapping[str, Any]) -> dict[str, Any]:
+    return {str(key): value for key, value in entry.items() if not str(key).startswith("_")}
 
 
 def _slug_for_filename(value: str) -> str:
@@ -1032,9 +1176,8 @@ def build_review_data(
     if not ordered_concept_ids and tagged_union:
         ordered_concept_ids = sorted(tagged_union)
 
-    clip_plan: list[tuple[str, dict[str, Any]]] = []
     concept_entries: list[dict[str, Any]] = []
-    for concept_id in ordered_concept_ids:
+    for concept_index, concept_id in enumerate(ordered_concept_ids):
         row = concept_by_id.get(concept_id, {})
         full_label = row_value(row, "concept_en") or row_value(row, "label")
         gloss = _stem_label(full_label) or full_label or concept_id
@@ -1049,6 +1192,7 @@ def build_review_data(
                 source_item = cue_item
 
         forms: list[dict[str, Any]] = []
+        entry_clip_plan_by_speaker: dict[str, tuple[str, dict[str, Any]]] = {}
         for speaker in speakers:
             payload = annotation_payloads.get(speaker, {})
             tagged_for_speaker = thesis_ids_by_speaker.get(speaker, set())
@@ -1096,20 +1240,18 @@ def build_review_data(
             )
             forms.append(form)
 
-            clip_plan.append(
-                (
-                    source_wav_rel,
-                    {
-                        "speaker": speaker,
-                        "audio_path": audio_relpath,
-                        "start_sec": start_sec,
-                        "duration_sec": duration_sec,
-                        "concept_id": concept_id,
-                        "concept_en": gloss,
-                        "ipa": form["ipa"],
-                        "ortho": form["ortho"],
-                    },
-                )
+            entry_clip_plan_by_speaker[speaker] = (
+                source_wav_rel,
+                {
+                    "speaker": speaker,
+                    "audio_path": audio_relpath,
+                    "start_sec": start_sec,
+                    "duration_sec": duration_sec,
+                    "concept_id": concept_id,
+                    "concept_en": gloss,
+                    "ipa": form["ipa"],
+                    "ortho": form["ortho"],
+                },
             )
 
         contact_forms = _contact_forms_for_concept(contact_langs, concept_id, full_label)
@@ -1120,8 +1262,14 @@ def build_review_data(
                 "arabic": contact_forms["arabic"],
                 "persian": contact_forms["persian"],
                 "forms": forms,
+                "_clip_plan": list(entry_clip_plan_by_speaker.values()),
+                "_clip_plan_by_speaker": entry_clip_plan_by_speaker,
+                "_source_full_label": full_label,
+                "_source_index": concept_index,
             }
         )
+
+    concept_entries, clip_plan = _collapse_clarifier_siblings(concept_entries)
 
     metadata = {
         "generated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),

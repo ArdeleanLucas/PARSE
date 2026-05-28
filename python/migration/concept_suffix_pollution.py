@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from concept_canonical import canonicalize_label, strip_cue_prefix, variant_stem, variant_suffix
+from concept_canonical import canonicalize_label, strip_clarifier, strip_cue_prefix, variant_stem, variant_suffix
 from concept_registry import concept_label_key
 
 _BACKUP_SUFFIX = "pre-suffix-canonicalization"
@@ -394,7 +394,7 @@ def validate_cross_survey_links(workspace: Path) -> list[str]:
         if not isinstance(targets, dict):
             violations.append(f"link source id {source_id} has non-object targets")
             continue
-        source_label = concept_label_key(canonicalize_label(source_row.get("concept_en") or ""))
+        source_label = concept_label_key(strip_clarifier(canonicalize_label(source_row.get("concept_en") or "")))
         for target_survey, target_item in targets.items():
             survey_key = _clean(target_survey).casefold()
             item_key = _clean(target_item)
@@ -402,7 +402,10 @@ def validate_cross_survey_links(workspace: Path) -> list[str]:
             if not candidates:
                 violations.append(f"link target ({target_survey}, {target_item}) has no concept")
                 continue
-            if not any(concept_label_key(canonicalize_label(candidate.get("concept_en") or "")) == source_label for candidate in candidates):
+            if not any(
+                concept_label_key(strip_clarifier(canonicalize_label(candidate.get("concept_en") or ""))) == source_label
+                for candidate in candidates
+            ):
                 violations.append(
                     f"link target ({target_survey}, {target_item}) hosts no concept matching label {source_label!r} (links {source_id})"
                 )
