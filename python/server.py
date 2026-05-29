@@ -708,14 +708,29 @@ def _annotation_language_code(fallback_record: Optional[Dict[str, Any]] = None) 
     return "und"
 
 
-def _annotation_source_entries_for_speaker(speaker: str) -> List[Dict[str, Any]]:
+def _annotation_source_entry_for_speaker(speaker: str) -> Optional[Dict[str, Any]]:
     source_index = _annotation_source_index_payload()
     speakers_block = source_index.get("speakers") if isinstance(source_index, dict) else {}
     if not isinstance(speakers_block, dict):
-        return []
+        return None
 
     speaker_entry = speakers_block.get(speaker)
     if not isinstance(speaker_entry, dict):
+        return None
+
+    return speaker_entry
+
+
+def _annotation_audio_less_for_speaker(speaker: str) -> Optional[bool]:
+    speaker_entry = _annotation_source_entry_for_speaker(speaker)
+    if speaker_entry is None or "audio_less" not in speaker_entry:
+        return None
+    return _coerce_bool_like(speaker_entry.get("audio_less"), False)
+
+
+def _annotation_source_entries_for_speaker(speaker: str) -> List[Dict[str, Any]]:
+    speaker_entry = _annotation_source_entry_for_speaker(speaker)
+    if speaker_entry is None:
         return []
 
     for key in ("source_wavs", "source_files"):
