@@ -299,8 +299,20 @@ def _parse_annotation_file(path: Path) -> List[FormRecord]:
         if end_sec < start_sec:
             continue
 
-        concept_id, concept_label = _split_concept_text(concept_interval.get("text"))
-        concept_id = _normalize_concept_key(concept_id)
+        raw_text = concept_interval.get("text")
+        text_id, text_label = _split_concept_text(raw_text)
+        stable_id = _normalize_concept_key(
+            concept_interval.get("concept_id") or concept_interval.get("conceptId")
+        )
+        if stable_id:
+            # Prefer the stable concept id so exported forms share the same
+            # key namespace as id-keyed cognate sets / tags; keep the interval
+            # text as the human label.
+            concept_id = stable_id
+            concept_label = text_label or _normalize_space(raw_text)
+        else:
+            concept_id = _normalize_concept_key(text_id)
+            concept_label = text_label
         if not concept_id:
             continue
 

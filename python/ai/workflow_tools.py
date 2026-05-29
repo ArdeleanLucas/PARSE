@@ -190,8 +190,8 @@ class WorkflowTools:
                 name="export_complete_lingpy_dataset",
                 description=(
                     "Export a complete PARSE phylogenetics bundle using the existing low-level export tools. "
-                    "Writes LingPy TSV and NEXUS under exports/lingpy/, and can optionally refresh contact "
-                    "lexeme references before export."
+                    "Writes LingPy TSV and NEXUS under the chosen output directory (default exports/lingpy/), "
+                    "and can optionally refresh contact lexeme references before export."
                 ),
                 parameters={
                     "type": "object",
@@ -200,6 +200,12 @@ class WorkflowTools:
                         "with_contact_lexemes": {
                             "type": "boolean",
                             "description": "If true, run contact_lexeme_lookup before the export steps.",
+                        },
+                        "outputDir": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "description": "Project-relative output directory for the bundle (default exports/lingpy). Use a date-stamped path to avoid clobbering prior evidence.",
                         },
                         "dryRun": {"type": "boolean", "description": "Preview the export bundle and planned artifacts without writing files."},
                     },
@@ -1238,7 +1244,7 @@ class WorkflowTools:
     def _tool_export_complete_lingpy_dataset(self, args: Dict[str, Any]) -> Dict[str, Any]:
         with_contact_lexemes = bool(args.get("with_contact_lexemes", True))
         dry_run = bool(args.get("dryRun", False))
-        export_dir = "exports/lingpy"
+        export_dir = (str(args.get("outputDir") or "").strip().rstrip("/\\")) or "exports/lingpy"
         lingpy_path = "{0}/wordlist.tsv".format(export_dir)
         nexus_path = "{0}/dataset.nex".format(export_dir)
 
@@ -1273,13 +1279,24 @@ class WorkflowTools:
             "payload": nexus_payload,
         })
 
+        warnings: List[str] = []
+        for stage in stages:
+            payload = stage.get("payload")
+            if isinstance(payload, dict):
+                stage_warnings = payload.get("warnings")
+                if isinstance(stage_warnings, list):
+                    warnings.extend(str(item) for item in stage_warnings)
+
         return {
             "dryRun": dry_run,
             "readOnly": dry_run,
             "previewOnly": dry_run,
             "with_contact_lexemes": with_contact_lexemes,
+            "outputDir": export_dir,
             "artifacts": artifacts,
             "stages": stages,
+            "warnings": warnings,
+            "beast2_ready": not warnings,
             "final_status": "preview" if dry_run else "complete",
             "exported_at": _utc_now_iso(),
         }

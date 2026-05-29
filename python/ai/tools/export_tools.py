@@ -367,6 +367,85 @@ def export_annotations_csv(tools: "ParseChatTools", args: Dict[str, Any]) -> Dic
         }
 
 
+def lingpy_tsv_readiness(tsv_text: str) -> List[str]:
+        """Return BEAST2-readiness warnings for a LingPy wordlist TSV.
+
+        An empty list means no readiness problems were detected. The file
+        write still succeeds; these warnings only flag that the artifact is
+        not phylogenetically informative.
+        """
+        warnings: List[str] = []
+        lines = [line for line in tsv_text.splitlines() if line.strip()]
+        if len(lines) < 2:
+            warnings.append("Wordlist has no data rows: no exportable forms were found.")
+            return warnings
+
+        header = lines[0].split("\t")
+        try:
+            cogid_idx = header.index("COGID")
+        except ValueError:
+            return warnings
+
+        cogid_values = {
+            row[cogid_idx].strip()
+            for row in (line.split("\t") for line in lines[1:])
+            if len(row) > cogid_idx
+        }
+        if cogid_values and cogid_values <= {"0", ""}:
+            warnings.append(
+                "All COGID values are 0: no cognate sets are assigned, so this "
+                "wordlist is not phylogenetically informative for BEAST2."
+            )
+        return warnings
+
+
+def nexus_readiness(nexus_text: str) -> List[str]:
+        """Return BEAST2-readiness warnings for a NEXUS character matrix."""
+        import re
+
+        warnings: List[str] = []
+
+        nchar_match = re.search(r"NCHAR\s*=\s*(\d+)", nexus_text, re.IGNORECASE)
+        nchar = int(nchar_match.group(1)) if nchar_match else 0
+        if nchar == 0:
+            warnings.append(
+                "NEXUS matrix has no characters (NCHAR=0): there are no cognate "
+                "sets to analyze."
+            )
+            return warnings
+
+        matrix_match = re.search(r"MATRIX\s*(.*?);", nexus_text, re.DOTALL | re.IGNORECASE)
+        if not matrix_match:
+            return warnings
+
+        total_cells = 0
+        missing_cells = 0
+        fully_missing: List[str] = []
+        for raw_row in matrix_match.group(1).splitlines():
+            parts = raw_row.split()
+            if len(parts) < 2:
+                continue
+            taxon, seq = parts[0], parts[1]
+            total_cells += len(seq)
+            missing_cells += seq.count("?")
+            if seq and all(ch == "?" for ch in seq):
+                fully_missing.append(taxon)
+
+        if fully_missing:
+            warnings.append(
+                "{0} taxa have no character data (all '?'): {1}.".format(
+                    len(fully_missing), ", ".join(fully_missing)
+                )
+            )
+        if total_cells and (missing_cells / total_cells) >= 0.5:
+            warnings.append(
+                "High missingness: {0:.0f}% of matrix cells are '?'.".format(
+                    100.0 * missing_cells / total_cells
+                )
+            )
+        return warnings
+
+
 def export_lingpy_tsv(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
         """Export LingPy wordlist TSV. Preview = first 20 lines via temp file; write requires outputPath."""
         if cognate_compute_module is None:
@@ -394,6 +473,7 @@ def export_lingpy_tsv(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str
                     except OSError:
                         pass
                 lines = content.splitlines()
+                warnings = lingpy_tsv_readiness(content)
                 return {
                     "readOnly": True,
                     "previewOnly": True,
@@ -401,6 +481,8 @@ def export_lingpy_tsv(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str
                     "totalLines": len(lines),
                     "truncated": len(lines) > 20,
                     "rowCount": count,
+                    "warnings": warnings,
+                    "beast2_ready": not warnings,
                 }
 
             out_path = tools._resolve_project_path(output_path_str, allowed_roots=[tools.project_root])
@@ -408,7 +490,14 @@ def export_lingpy_tsv(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str
             count = cognate_compute_module.export_wordlist_tsv(
                 tools.enrichments_path, tools.annotations_dir, out_path
             )
-            return {"success": True, "outputPath": str(out_path), "rowCount": count}
+            warnings = lingpy_tsv_readiness(out_path.read_text(encoding="utf-8"))
+            return {
+                "success": True,
+                "outputPath": str(out_path),
+                "rowCount": count,
+                "warnings": warnings,
+                "beast2_ready": not warnings,
+            }
         except ChatToolError:
             raise
         except Exception as exc:
@@ -425,6 +514,8 @@ def export_nexus(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any
         except Exception as exc:
             raise ChatToolExecutionError("NEXUS build failed: {0}".format(exc)) from exc
 
+        warnings = nexus_readiness(nexus_text)
+
         if dry_run or not output_path_str:
             return {
                 "readOnly": True,
@@ -432,12 +523,20 @@ def export_nexus(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any
                 "preview": nexus_text[:2000],
                 "truncated": len(nexus_text) > 2000,
                 "totalChars": len(nexus_text),
+                "warnings": warnings,
+                "beast2_ready": not warnings,
             }
 
         out_path = tools._resolve_project_path(output_path_str, allowed_roots=[tools.project_root])
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(nexus_text, encoding="utf-8")
-        return {"success": True, "outputPath": str(out_path), "totalChars": len(nexus_text)}
+        return {
+            "success": True,
+            "outputPath": str(out_path),
+            "totalChars": len(nexus_text),
+            "warnings": warnings,
+            "beast2_ready": not warnings,
+        }
 
 
 def build_nexus_text(tools: "ParseChatTools") -> str:
@@ -694,6 +793,8 @@ __all__ = [
     "EXPORT_TOOL_SPECS",
     "EXPORT_TOOL_HANDLERS",
     "build_nexus_text",
+    "lingpy_tsv_readiness",
+    "nexus_readiness",
     "export_annotations_csv",
     "export_lingpy_tsv",
     "export_nexus",
