@@ -385,6 +385,71 @@ def test_export_complete_lingpy_dataset_chains_contact_lookup_and_exports(tmp_pa
     assert payload["artifacts"]["nexus"] == "exports/lingpy/dataset.nex"
 
 
+def test_export_complete_lingpy_dataset_honors_output_dir(tmp_path: pathlib.Path) -> None:
+    workflow = WorkflowTools(project_root=tmp_path)
+    calls: List[Tuple[str, Dict[str, Any]]] = []
+
+    workflow._parse_tools._tool_contact_lexeme_lookup = lambda args: {"ok": True}
+    workflow._parse_tools._tool_export_lingpy_tsv = lambda args: calls.append(("export_lingpy_tsv", dict(args))) or {
+        "success": True,
+        "outputPath": args["outputPath"],
+        "rowCount": 5,
+    }
+    workflow._parse_tools._tool_export_nexus = lambda args: calls.append(("export_nexus", dict(args))) or {
+        "success": True,
+        "outputPath": args["outputPath"],
+        "totalChars": 99,
+    }
+
+    result = workflow.execute(
+        "export_complete_lingpy_dataset",
+        {"with_contact_lexemes": False, "outputDir": "exports/beast2/2026-05-29-smoke/", "dryRun": False},
+    )
+    payload = result["result"]
+
+    assert payload["outputDir"] == "exports/beast2/2026-05-29-smoke"
+    assert payload["artifacts"]["lingpy_tsv"] == "exports/beast2/2026-05-29-smoke/wordlist.tsv"
+    assert payload["artifacts"]["nexus"] == "exports/beast2/2026-05-29-smoke/dataset.nex"
+    routed = {name: args for name, args in calls}
+    assert routed["export_lingpy_tsv"]["outputPath"] == "exports/beast2/2026-05-29-smoke/wordlist.tsv"
+    assert routed["export_nexus"]["outputPath"] == "exports/beast2/2026-05-29-smoke/dataset.nex"
+
+
+def test_export_complete_lingpy_dataset_aggregates_readiness_warnings(tmp_path: pathlib.Path) -> None:
+    workflow = WorkflowTools(project_root=tmp_path)
+
+    workflow._parse_tools._tool_export_lingpy_tsv = lambda args: {
+        "success": True,
+        "outputPath": args["outputPath"],
+        "rowCount": 3,
+        "warnings": ["All COGID values are 0: no cognate sets are assigned."],
+        "beast2_ready": False,
+    }
+    workflow._parse_tools._tool_export_nexus = lambda args: {
+        "success": True,
+        "outputPath": args["outputPath"],
+        "totalChars": 10,
+        "warnings": ["2 taxa have no character data (all '?'): Foo, Bar."],
+        "beast2_ready": False,
+    }
+
+    payload = workflow.execute(
+        "export_complete_lingpy_dataset",
+        {"with_contact_lexemes": False, "dryRun": False},
+    )["result"]
+
+    assert payload["beast2_ready"] is False
+    assert len(payload["warnings"]) == 2
+    assert any("COGID" in w for w in payload["warnings"])
+    assert any("no character data" in w for w in payload["warnings"])
+
+
+def test_export_complete_lingpy_dataset_publishes_output_dir_param(tmp_path: pathlib.Path) -> None:
+    workflow = WorkflowTools(project_root=tmp_path)
+    spec = workflow.tool_spec("export_complete_lingpy_dataset")
+    assert "outputDir" in spec.parameters["properties"]
+
+
 def test_workflow_tools_publish_metadata_for_macro_specs(tmp_path: pathlib.Path) -> None:
     workflow = WorkflowTools(project_root=tmp_path)
 
