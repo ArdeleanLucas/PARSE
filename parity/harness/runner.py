@@ -475,7 +475,7 @@ def prepare_fixture_bundle(root: Path, *, fixture_name: str = DEFAULT_FIXTURE_NA
 
     fixture_root = _fixture_root_for_name(fixture_name)
 
-    for relative_name in ("concepts-import.csv", "tags-import.csv", "onboard-concepts.csv", "lexeme-notes.csv"):
+    for relative_name in ("concepts-import.csv", "tags-import.csv", "onboard-concepts.csv", "onboard-lexical.csv", "lexeme-notes.csv"):
         shutil.copy2(fixture_root / relative_name, input_root / relative_name)
 
     onboard_dir = input_root / "onboard"
