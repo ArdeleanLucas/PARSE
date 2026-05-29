@@ -1642,9 +1642,12 @@ export function ParseUI() {
 
       const isVerticalArrow = e.key === 'ArrowUp' || e.key === 'ArrowDown';
       const isHorizontalArrow = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
-      const isArrowKey = isVerticalArrow || isHorizontalArrow;
-      const inTextEditingField = e.target instanceof Element
-        && (['input', 'textarea', 'select'].includes(e.target.tagName.toLowerCase()) || (e.target as HTMLElement).isContentEditable);
+      const targetElement = e.target instanceof Element ? e.target : null;
+      const targetTag = targetElement?.tagName.toLowerCase();
+      const inTextEditingField = targetTag === 'input'
+        || targetTag === 'textarea'
+        || targetTag === 'select'
+        || Boolean((targetElement as HTMLElement | null)?.isContentEditable);
       if (e.key === 'Delete' && currentMode !== 'tags' && selectedRealizationKey) {
         if (inTextEditingField) return;
         if (dispatchSelectedSidebarDelete()) {
@@ -1653,7 +1656,10 @@ export function ParseUI() {
         return;
       }
       const inInteractiveField = isInteractiveHotkeyTarget(e.target);
-      if (currentMode === 'annotate' && isArrowKey) {
+      if (
+        currentMode === 'annotate'
+        && (isVerticalArrow || (isHorizontalArrow && !inTextEditingField))
+      ) {
         e.preventDefault();
         const offset = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1;
         if (goToRealizationOffset(offset) === 'no-pills') {

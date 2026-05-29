@@ -3729,6 +3729,14 @@ describe("ParseUI", () => {
     const ipaInput = await screen.findByPlaceholderText("Enter IPA…");
     fireEvent.focus(ipaInput);
     fireEvent.keyDown(ipaInput, { key: "ArrowRight" });
+    await waitFor(() => expect(activeKey()).toBe("concept-a:0"));
+
+    fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowLeft" });
+    await waitFor(() => expect(activeKey()).toBe("concept-a:0"));
+
+    fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowDown" });
     await waitFor(() => expect(activeKey()).toBe("concept-b:0"));
 
     fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
@@ -3753,20 +3761,79 @@ describe("ParseUI", () => {
     await waitFor(() => expect(activeKey()).toBe("527:0"));
 
     fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
-    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowLeft" });
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowUp" });
     await waitFor(() => expect(activeKey()).toBe("middle-empty:0"));
 
     fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
-    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowLeft" });
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowUp" });
     await waitFor(() => expect(activeKey()).toBe("concept-b:0"));
 
     fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
-    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowLeft" });
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowUp" });
     await waitFor(() => expect(activeKey()).toBe("concept-a:0"));
 
     fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
     fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowUp" });
     await waitFor(() => expect(activeKey()).toBe("concept-a:0"));
+  });
+
+  it("horizontal arrows preserve caret in IPA/ORTH inputs but still navigate from button focus", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    window.localStorage.setItem("parse.sidebar.scopedToSpeaker.annotate", "false");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "concept-a", label: "brother of husband A", source_item: "2.15", source_survey: "KLQ", custom_order: 1 },
+        { id: "concept-b", label: "brother of husband B", source_item: "2.15", source_survey: "KLQ", custom_order: 2 },
+        { id: "middle-empty", label: "empty concept", source_item: "9", source_survey: "JBIL", custom_order: 3 },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "brother of husband", conceptId: "concept-a", ipa: "ba", ortho: "با", start: 1, end: 2 },
+        { conceptText: "brother of husband", conceptId: "concept-b", ipa: "bb", ortho: "بب", start: 3, end: 4 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    const activeKey = () => Array.from(sidebar.querySelectorAll<HTMLElement>("[data-realization-key]"))
+      .find((chip) => chip.className.includes("bg-indigo-50"))
+      ?.getAttribute("data-realization-key");
+
+    const firstPill = await screen.findByTestId("concept-variant-pill-concept-a");
+    fireEvent.click(firstPill);
+    expect(activeKey()).toBe("concept-a:0");
+
+    const ipaInput = await screen.findByPlaceholderText("Enter IPA…");
+    fireEvent.focus(ipaInput);
+    fireEvent.keyDown(ipaInput, { key: "ArrowRight" });
+    await waitFor(() => expect(activeKey()).toBe("concept-a:0"));
+    fireEvent.keyDown(ipaInput, { key: "ArrowLeft" });
+    await waitFor(() => expect(activeKey()).toBe("concept-a:0"));
+
+    const orthoInput = screen.getByPlaceholderText("Enter orthographic form…");
+    fireEvent.focus(orthoInput);
+    fireEvent.keyDown(orthoInput, { key: "ArrowRight" });
+    await waitFor(() => expect(activeKey()).toBe("concept-a:0"));
+    fireEvent.keyDown(orthoInput, { key: "ArrowLeft" });
+    await waitFor(() => expect(activeKey()).toBe("concept-a:0"));
+
+    fireEvent.focus(ipaInput);
+    fireEvent.keyDown(ipaInput, { key: "ArrowDown" });
+    await waitFor(() => expect(activeKey()).toBe("concept-b:0"));
+
+    const secondPill = screen.getByTestId("concept-variant-pill-concept-b");
+    fireEvent.click(secondPill);
+    secondPill.focus();
+    expect(document.activeElement?.tagName).toBe("BUTTON");
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    await waitFor(() => expect(activeKey()).toBe("middle-empty:0"));
   });
 
   it("arrow keys navigate concepts when focus is on a button (chip click leaves button focused)", async () => {
