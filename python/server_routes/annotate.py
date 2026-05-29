@@ -589,19 +589,45 @@ def _annotation_record_from_flat_entries(raw_entries: _server.Any, speaker_hint:
     _server._annotation_touch_metadata(record, preserve_created=True)
     return record
 
+
+def _annotation_mark_audio_less(normalized: _server.Dict[str, _server.Any], raw_record: _server.Any, speaker: str) -> _server.Dict[str, _server.Any]:
+    source_index_audio_less = _server._annotation_audio_less_for_speaker(speaker)
+    if source_index_audio_less is not None:
+        if source_index_audio_less:
+            normalized['audio_less'] = True
+        else:
+            normalized.pop('audio_less', None)
+        return normalized
+
+    if not isinstance(raw_record, dict):
+        return normalized
+
+    metadata = raw_record.get('metadata')
+    metadata_audio_less = isinstance(metadata, dict) and _server._coerce_bool_like(metadata.get('audio_less'), False)
+    if _server._coerce_bool_like(raw_record.get('audio_less'), False) or metadata_audio_less:
+        normalized['audio_less'] = True
+    else:
+        normalized.pop('audio_less', None)
+    return normalized
+
+
 def _normalize_annotation_record(raw_record: _server.Any, speaker_hint: str) -> _server.Dict[str, _server.Any]:
     speaker_from_hint = str(speaker_hint or '').strip()
     if isinstance(raw_record, list):
-        return _server._annotation_record_from_flat_entries(raw_record, speaker_from_hint, '')
+        normalized = _server._annotation_record_from_flat_entries(raw_record, speaker_from_hint, '')
+        return _annotation_mark_audio_less(normalized, raw_record, str(normalized.get('speaker') or speaker_from_hint).strip())
     if not isinstance(raw_record, dict):
         source_audio = _server._annotation_primary_source_wav(speaker_from_hint)
         source_duration = _server._annotation_source_duration(speaker_from_hint, source_audio)
-        return _server._annotation_empty_record(speaker_from_hint, source_audio, source_duration or 0.0, None)
+        normalized = _server._annotation_empty_record(speaker_from_hint, source_audio, source_duration or 0.0, None)
+        return _annotation_mark_audio_less(normalized, raw_record, speaker_from_hint)
     annotations_block = raw_record.get('annotations')
     if isinstance(annotations_block, list):
         speaker_from_record = str(raw_record.get('speaker') or speaker_from_hint).strip()
         source_from_record = str(raw_record.get('source_audio') or raw_record.get('sourceWav') or raw_record.get('source_wav') or '').strip()
-        return _server._annotation_record_from_flat_entries(annotations_block, speaker_from_record, source_from_record)
+        normalized = _server._annotation_record_from_flat_entries(annotations_block, speaker_from_record, source_from_record)
+        return _annotation_mark_audio_less(normalized, raw_record, speaker_from_record)
+
     speaker = str(raw_record.get('speaker') or speaker_from_hint).strip()
     source_audio = str(raw_record.get('source_audio') or raw_record.get('sourceWav') or raw_record.get('source_wav') or '').strip()
     source_duration = _server._coerce_finite_float(raw_record.get('source_audio_duration_sec'))
@@ -678,7 +704,7 @@ def _normalize_annotation_record(raw_record: _server.Any, speaker_hint: str) -> 
     _annotation_enforce_concept_ids(normalized, speaker)
     _server._annotation_sync_speaker_tier(normalized)
     _server._annotation_sort_all_intervals(normalized)
-    return normalized
+    return _annotation_mark_audio_less(normalized, raw_record, speaker)
 
 def _normalize_speaker_id(raw_speaker: _server.Any) -> str:
     return _shared_normalize_speaker_id(raw_speaker)
@@ -4089,7 +4115,8 @@ def _api_get_annotation(self, speaker: str) -> None:
     if target is None:
         raise _server.ApiError(_server.HTTPStatus.NOT_FOUND, 'No annotation file for speaker: {0}'.format(safe_speaker))
     payload = _server._read_json_file(target, {})
-    self._send_json(_server.HTTPStatus.OK, payload)
+    normalized = _server._normalize_annotation_record(payload, safe_speaker)
+    self._send_json(_server.HTTPStatus.OK, normalized)
 
 def _api_get_stt_segments(self, speaker_part: str) -> None:
     """Return cached STT segments for a speaker.

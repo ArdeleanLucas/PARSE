@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
+from http import HTTPStatus
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -31,6 +32,79 @@ def _base_annotation(speaker: str = "Saha01") -> dict[str, object]:
         "confirmed_anchors": {},
         "metadata": {"language_code": "sdh", "created": "2026-05-02T00:00:00Z", "modified": "2026-05-02T00:00:00Z"},
     }
+
+
+class _CaptureJsonResponse:
+    status: HTTPStatus | int | None = None
+    payload: object | None = None
+
+    def _send_json(self, status: HTTPStatus | int, payload: object) -> None:
+        self.status = status
+        self.payload = payload
+
+
+def test_get_annotation_serves_audio_less_flag_only_for_audio_less_speakers(
+    tmp_path: pathlib.Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    annotations_dir = tmp_path / "annotations"
+    annotations_dir.mkdir()
+    source_index = {
+        "speakers": {
+            "Lex01": {"source_wavs": [], "audio_less": True},
+            "False01": {"source_wavs": [], "audio_less": False},
+            "Saha01": {
+                "source_wavs": [
+                    {
+                        "filename": "audio/working/Saha01/working.wav",
+                        "duration_sec": 12.0,
+                        "is_primary": True,
+                    },
+                ],
+            },
+        },
+    }
+    (tmp_path / "source_index.json").write_text(json.dumps(source_index), encoding="utf-8")
+    lexical_record = _base_annotation("Lex01")
+    lexical_record["source_audio"] = ""
+    lexical_record["metadata"] = {"language_code": "sdh", "audio_less": True}
+    metadata_only_record = _base_annotation("Meta01")
+    metadata_only_record["source_audio"] = ""
+    metadata_only_record["metadata"] = {"language_code": "sdh", "audio_less": True}
+    false_index_record = _base_annotation("False01")
+    false_index_record["source_audio"] = ""
+    false_index_record["metadata"] = {"language_code": "sdh", "audio_less": True}
+    normal_record = _base_annotation("Saha01")
+    normal_record["source_audio"] = ""
+    (annotations_dir / "Lex01.parse.json").write_text(json.dumps(lexical_record), encoding="utf-8")
+    (annotations_dir / "Meta01.parse.json").write_text(json.dumps(metadata_only_record), encoding="utf-8")
+    (annotations_dir / "False01.parse.json").write_text(json.dumps(false_index_record), encoding="utf-8")
+    (annotations_dir / "Saha01.parse.json").write_text(json.dumps(normal_record), encoding="utf-8")
+
+    lexical_response = _CaptureJsonResponse()
+    server._api_get_annotation(lexical_response, "Lex01")
+    metadata_only_response = _CaptureJsonResponse()
+    server._api_get_annotation(metadata_only_response, "Meta01")
+    false_index_response = _CaptureJsonResponse()
+    server._api_get_annotation(false_index_response, "False01")
+    normal_response = _CaptureJsonResponse()
+    server._api_get_annotation(normal_response, "Saha01")
+
+    assert lexical_response.status == HTTPStatus.OK
+    assert isinstance(lexical_response.payload, dict)
+    assert lexical_response.payload["audio_less"] is True
+    assert lexical_response.payload["source_audio"] == ""
+    assert metadata_only_response.status == HTTPStatus.OK
+    assert isinstance(metadata_only_response.payload, dict)
+    assert metadata_only_response.payload["audio_less"] is True
+    assert false_index_response.status == HTTPStatus.OK
+    assert isinstance(false_index_response.payload, dict)
+    assert "audio_less" not in false_index_response.payload
+    assert normal_response.status == HTTPStatus.OK
+    assert isinstance(normal_response.payload, dict)
+    assert "audio_less" not in normal_response.payload
+    assert normal_response.payload["source_audio"] == "audio/working/Saha01/working.wav"
 
 
 def test_ipa_sidecars_round_trip_through_annotation_normalizer_and_json_save(tmp_path: pathlib.Path) -> None:
