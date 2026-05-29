@@ -31,10 +31,10 @@ export function Modal({ open, onClose, title, children, dismissible = true }: Mo
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] min-w-[20rem] max-w-[90vw] overflow-auto rounded-lg bg-white p-6 text-slate-900 shadow-xl ring-1 ring-slate-200"
+        className="max-h-[90vh] min-w-[20rem] max-w-[90vw] overflow-auto rounded-lg bg-white p-6 text-slate-900 shadow-xl ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-700"
       >
         {title && (
-          <div className="mb-4 font-mono text-base font-semibold text-slate-900">
+          <div className="mb-4 font-mono text-base font-semibold text-slate-900 dark:text-slate-100">
             {title}
           </div>
         )}

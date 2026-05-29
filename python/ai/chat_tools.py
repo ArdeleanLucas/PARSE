@@ -73,6 +73,7 @@ LEGACY_CURATED_MCP_TOOL_NAMES = (
     "import_processed_speaker",
     "csv_only_reimport",
     "revert_csv_reimport",
+    "delete_speaker",
     "export_review_data",
     "migrate_concept_suffix_pollution",
     "parse_memory_read",
@@ -129,6 +130,7 @@ WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "import_processed_speaker",
     "csv_only_reimport",
     "revert_csv_reimport",
+    "delete_speaker",
     "set_concept_field",
     "lexeme_notes_write",
     "onboard_speaker_import",
@@ -555,6 +557,10 @@ from ai.tools.speaker_import_tools import (
     tool_onboard_speaker_import,
     tool_revert_csv_reimport,
 )
+from ai.tools.speaker_delete_tools import (
+    SPEAKER_DELETE_TOOL_SPECS,
+    tool_delete_speaker,
+)
 from ai.tools.tag_filter_tools import (
     TAG_FILTER_TOOL_SPECS,
     tool_list_concepts_by_tag,
@@ -582,6 +588,7 @@ REGISTRY: Dict[str, ChatToolSpec] = {
     **ACOUSTIC_STARTER_TOOL_SPECS,
     **PIPELINE_ORCHESTRATION_TOOL_SPECS,
     **SPEAKER_IMPORT_TOOL_SPECS,
+    **SPEAKER_DELETE_TOOL_SPECS,
     **MEMORY_TOOL_SPECS,
     **MIGRATION_TOOL_SPECS,
     **COMPARATIVE_TOOL_SPECS,
@@ -692,6 +699,7 @@ class ParseChatTools:
             **ACOUSTIC_STARTER_TOOL_SPECS,
             **PIPELINE_ORCHESTRATION_TOOL_SPECS,
             **SPEAKER_IMPORT_TOOL_SPECS,
+            **SPEAKER_DELETE_TOOL_SPECS,
             **MEMORY_TOOL_SPECS,
             **MIGRATION_TOOL_SPECS,
             **COMPARATIVE_TOOL_SPECS,
@@ -1449,6 +1457,9 @@ class ParseChatTools:
 
     def _tool_onboard_speaker_import(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_onboard_speaker_import(self, args)
+
+    def _tool_delete_speaker(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        return tool_delete_speaker(self, args)
 
     def _tool_parse_memory_read(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_parse_memory_read(self, args)
