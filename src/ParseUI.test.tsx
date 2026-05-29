@@ -3499,6 +3499,7 @@ describe("ParseUI", () => {
 
   it("uses all arrow keys to cycle sidebar realization pills in DOM order regardless of focused element", async () => {
     window.localStorage.setItem("parse.currentMode", "annotate");
+    window.localStorage.setItem("parse.sidebar.scopedToSpeaker.annotate", "false");
     mockConfig = {
       project_name: "PARSE",
       language_code: "ku",
@@ -3506,7 +3507,8 @@ describe("ParseUI", () => {
       concepts: [
         { id: "concept-a", label: "brother of husband A", source_item: "2.15", source_survey: "KLQ", custom_order: 1 },
         { id: "concept-b", label: "brother of husband B", source_item: "2.15", source_survey: "KLQ", custom_order: 2 },
-        { id: "527", label: "head", source_item: "10", source_survey: "JBIL", custom_order: 3 },
+        { id: "middle-empty", label: "empty concept", source_item: "9", source_survey: "JBIL", custom_order: 3 },
+        { id: "527", label: "head", source_item: "10", source_survey: "JBIL", custom_order: 4 },
       ],
       audio_dir: "audio",
       annotations_dir: "annotations",
@@ -3527,6 +3529,7 @@ describe("ParseUI", () => {
     expect(chips.map((chip) => chip.getAttribute("data-realization-key"))).toEqual([
       "concept-a:0",
       "concept-b:0",
+      "middle-empty:0",
       "527:0",
       "527:1",
     ]);
@@ -3545,6 +3548,11 @@ describe("ParseUI", () => {
 
     fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
     fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowDown" });
+    await waitFor(() => expect(activeKey()).toBe("middle-empty:0"));
+    expect(screen.getByRole("heading", { name: "empty concept" })).toBeTruthy();
+
+    fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowDown" });
     await waitFor(() => expect(activeKey()).toBe("527:0"));
 
     fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
@@ -3558,6 +3566,10 @@ describe("ParseUI", () => {
     fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
     fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowUp" });
     await waitFor(() => expect(activeKey()).toBe("527:0"));
+
+    fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowLeft" });
+    await waitFor(() => expect(activeKey()).toBe("middle-empty:0"));
 
     fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
     fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowLeft" });
