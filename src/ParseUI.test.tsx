@@ -3552,12 +3552,24 @@ describe("ParseUI", () => {
     await waitFor(() => expect(activeKey()).toBe("527:1"));
 
     fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowDown" });
+    await waitFor(() => expect(activeKey()).toBe("527:1"));
+
+    fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
     fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowUp" });
     await waitFor(() => expect(activeKey()).toBe("527:0"));
 
     fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
     fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowLeft" });
     await waitFor(() => expect(activeKey()).toBe("concept-b:0"));
+
+    fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowLeft" });
+    await waitFor(() => expect(activeKey()).toBe("concept-a:0"));
+
+    fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowUp" });
+    await waitFor(() => expect(activeKey()).toBe("concept-a:0"));
   });
 
   it("arrow keys navigate concepts when focus is on a button (chip click leaves button focused)", async () => {

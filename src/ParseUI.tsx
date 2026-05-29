@@ -1527,28 +1527,30 @@ export function ParseUI() {
     return target ? { conceptId: target.id, conceptKey: target.key ?? null } : null;
   }, [conceptId, concepts, navigationConcepts]);
 
-  const goToRealizationOffset = useCallback((offset: number): boolean => {
+  type RealizationNavigationResult = 'navigated' | 'clamped' | 'no-pills';
+
+  const goToRealizationOffset = useCallback((offset: number): RealizationNavigationResult => {
     const chips = Array.from(document.querySelectorAll<HTMLElement>('[data-realization-key]'));
-    if (chips.length === 0) return false;
+    if (chips.length === 0) return 'no-pills';
 
     const currentIndex = selectedRealizationKey
       ? chips.findIndex((chip) => chip.getAttribute('data-realization-key') === selectedRealizationKey)
       : -1;
-    const nextIndex = currentIndex < 0
-      ? (offset > 0 ? 0 : chips.length - 1)
-      : (currentIndex + offset + chips.length) % chips.length;
+    const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+    const nextIndex = Math.min(chips.length - 1, Math.max(0, baseIndex + offset));
+    if (nextIndex === currentIndex) return 'clamped';
     const nextKey = chips[nextIndex]?.getAttribute('data-realization-key') ?? null;
     const nextRealization = parseRealizationKey(nextKey);
-    if (!nextKey || !nextRealization) return false;
+    if (!nextKey || !nextRealization) return 'no-pills';
 
     const owner = navigationConcepts.find((candidate) =>
       conceptUnderlyingKeys(candidate).includes(nextRealization.conceptId),
     );
-    if (!owner) return false;
+    if (!owner) return 'no-pills';
 
     setConceptId(owner.id);
     setSelectedRealizationKey(nextKey);
-    return true;
+    return 'navigated';
   }, [navigationConcepts, selectedRealizationKey]);
 
   const goToConceptOffset = useCallback((offset: number) => {
@@ -1581,7 +1583,7 @@ export function ParseUI() {
       if (currentMode === 'annotate' && isArrowKey) {
         e.preventDefault();
         const offset = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1;
-        if (!goToRealizationOffset(offset)) {
+        if (goToRealizationOffset(offset) === 'no-pills') {
           goToConceptOffset(offset);
         }
         return;
