@@ -13,6 +13,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import compare.cognate_compute as cognate_compute
+import ai.chat_tools  # noqa: F401  # import first: export_tools <-> chat_tools have a load-order cycle
 from ai.tools.export_tools import lingpy_tsv_readiness, nexus_readiness
 
 
