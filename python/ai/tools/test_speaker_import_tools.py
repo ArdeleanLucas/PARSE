@@ -219,11 +219,23 @@ def test_tool_onboard_lexical_speaker_writes_ipa_ortho_concepts_and_audio_less_i
     ipa_intervals = annotation["tiers"]["ipa"]["intervals"]
     ortho_intervals = annotation["tiers"]["ortho"]["intervals"]
     assert len(concept_intervals) == 3
-    assert len([item for item in concept_intervals if item["text"].startswith("2:")]) == 2
+    assert concept_intervals == [
+        {"start": 0.0, "end": 1.0, "text": "ash", "concept_id": "1", "manuallyAdjusted": False, "import_index": 0},
+        {"start": 1.0, "end": 2.0, "text": "dog", "concept_id": "2", "manuallyAdjusted": False, "import_index": 1},
+        {"start": 2.0, "end": 3.0, "text": "dog", "concept_id": "2", "manuallyAdjusted": False, "import_index": 2},
+    ]
     assert [(item["start"], item["end"]) for item in concept_intervals] == [(item["start"], item["end"]) for item in ipa_intervals]
     assert [(item["start"], item["end"]) for item in concept_intervals] == [(item["start"], item["end"]) for item in ortho_intervals]
-    assert [item["text"] for item in ipa_intervals] == ["aʃ", "sɛg", "kutʃ"]
-    assert [item["text"] for item in ortho_intervals] == ["aʃ", "sɛg", "kutʃ"]
+    assert ipa_intervals == [
+        {"start": 0.0, "end": 1.0, "text": "aʃ", "conceptId": "1", "source": "concept_window_ipa", "manuallyAdjusted": False},
+        {"start": 1.0, "end": 2.0, "text": "sɛg", "conceptId": "2", "source": "concept_window_ipa", "manuallyAdjusted": False},
+        {"start": 2.0, "end": 3.0, "text": "kutʃ", "conceptId": "2", "source": "concept_window_ipa", "manuallyAdjusted": False},
+    ]
+    assert ortho_intervals == [
+        {"start": 0.0, "end": 1.0, "text": "aʃ", "conceptId": "1", "source": "concept_window_ortho", "manuallyAdjusted": False},
+        {"start": 1.0, "end": 2.0, "text": "sɛg", "conceptId": "2", "source": "concept_window_ortho", "manuallyAdjusted": False},
+        {"start": 2.0, "end": 3.0, "text": "kutʃ", "conceptId": "2", "source": "concept_window_ortho", "manuallyAdjusted": False},
+    ]
     assert annotation["tiers"]["speaker"]["intervals"] == []
 
     _fieldnames, concept_rows = _read_concepts_fixture(project_root / "concepts.csv")
@@ -242,6 +254,37 @@ def test_tool_onboard_lexical_speaker_writes_ipa_ortho_concepts_and_audio_less_i
     assert speaker_entry["legacy_transcript_csv"] == "imports/lexical/Qorv01/qorv01.csv"
     assert "lexical/wordlist import, no audio" in speaker_entry["notes"]
     assert (project_root / "imports" / "lexical" / "Qorv01" / "qorv01.csv").read_text(encoding="utf-8") == source_csv.read_text(encoding="utf-8")
+
+
+def test_tool_onboard_lexical_speaker_links_concept_ipa_and_ortho_by_canonical_concept_id(tmp_path) -> None:
+    external_root = tmp_path / "external"
+    source_csv = external_root / "qorv01.csv"
+    rows = _lexical_rows()
+    _write_lexical_wordlist(source_csv, rows)
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+
+    speaker_import_tools.tool_onboard_lexical_speaker(
+        tools,
+        {"speaker": "Qorv01", "sourceCsv": str(source_csv), "languageCode": "sdh", "dryRun": False},
+    )
+
+    annotation = json.loads((project_root / "annotations" / "Qorv01.parse.json").read_text(encoding="utf-8"))
+    concept_intervals = annotation["tiers"]["concept"]["intervals"]
+    ipa_intervals = annotation["tiers"]["ipa"]["intervals"]
+    ortho_intervals = annotation["tiers"]["ortho"]["intervals"]
+    assert len(concept_intervals) == len(ipa_intervals) == len(ortho_intervals) == len(rows)
+    for row, concept, ipa, ortho in zip(rows, concept_intervals, ipa_intervals, ortho_intervals):
+        concept_id = str(row["concept_id"])
+        assert concept["concept_id"] == concept_id
+        assert ipa["conceptId"] == concept_id
+        assert ortho["conceptId"] == concept_id
+        assert concept["concept_id"] == ipa["conceptId"] == ortho["conceptId"]
+        assert concept["text"] == row["gloss"]
+        assert concept["text"] != f"{concept_id}: {row['gloss']}"
+        assert ipa["source"] == "concept_window_ipa"
+        assert ortho["source"] == "concept_window_ortho"
 
 
 def test_tool_onboard_lexical_speaker_feeds_audio_less_forms_to_cognate_compute(tmp_path) -> None:

@@ -693,9 +693,36 @@ def _build_lexical_annotation(speaker: str, rows: Sequence[Dict[str, Any]], lang
         concept_id = _normalize_space(row.get("concept_id"))
         gloss = _normalize_space(row.get("gloss"))
         ipa_form = _normalize_space(row.get("ipa_form"))
-        concept_intervals.append({"start": start, "end": end, "text": "{0}: {1}".format(concept_id, gloss)})
-        ipa_intervals.append({"start": start, "end": end, "text": ipa_form})
-        ortho_intervals.append({"start": start, "end": end, "text": ipa_form})
+        concept_intervals.append(
+            {
+                "start": start,
+                "end": end,
+                "text": gloss,
+                "concept_id": concept_id,
+                "manuallyAdjusted": False,
+                "import_index": index,
+            }
+        )
+        ipa_intervals.append(
+            {
+                "start": start,
+                "end": end,
+                "text": ipa_form,
+                "conceptId": concept_id,
+                "source": "concept_window_ipa",
+                "manuallyAdjusted": False,
+            }
+        )
+        ortho_intervals.append(
+            {
+                "start": start,
+                "end": end,
+                "text": ipa_form,
+                "conceptId": concept_id,
+                "source": "concept_window_ortho",
+                "manuallyAdjusted": False,
+            }
+        )
     return {
         "version": 1,
         "speaker": speaker,
