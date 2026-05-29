@@ -1527,6 +1527,32 @@ export function ParseUI() {
     return target ? { conceptId: target.id, conceptKey: target.key ?? null } : null;
   }, [conceptId, concepts, navigationConcepts]);
 
+  type RealizationNavigationResult = 'navigated' | 'clamped' | 'no-pills';
+
+  const goToRealizationOffset = useCallback((offset: number): RealizationNavigationResult => {
+    const chips = Array.from(document.querySelectorAll<HTMLElement>('[data-realization-key]'));
+    if (chips.length === 0) return 'no-pills';
+
+    const currentIndex = selectedRealizationKey
+      ? chips.findIndex((chip) => chip.getAttribute('data-realization-key') === selectedRealizationKey)
+      : -1;
+    const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+    const nextIndex = Math.min(chips.length - 1, Math.max(0, baseIndex + offset));
+    if (nextIndex === currentIndex) return 'clamped';
+    const nextKey = chips[nextIndex]?.getAttribute('data-realization-key') ?? null;
+    const nextRealization = parseRealizationKey(nextKey);
+    if (!nextKey || !nextRealization) return 'no-pills';
+
+    const owner = navigationConcepts.find((candidate) =>
+      conceptUnderlyingKeys(candidate).includes(nextRealization.conceptId),
+    );
+    if (!owner) return 'no-pills';
+
+    setConceptId(owner.id);
+    setSelectedRealizationKey(nextKey);
+    return 'navigated';
+  }, [navigationConcepts, selectedRealizationKey]);
+
   const goToConceptOffset = useCallback((offset: number) => {
     setSelectedRealizationKey(null);
     setConceptId((id) => {
@@ -1552,17 +1578,13 @@ export function ParseUI() {
 
       const isVerticalArrow = e.key === 'ArrowUp' || e.key === 'ArrowDown';
       const isHorizontalArrow = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+      const isArrowKey = isVerticalArrow || isHorizontalArrow;
       const inInteractiveField = isInteractiveHotkeyTarget(e.target);
-      if (
-        currentMode === 'annotate'
-        && navigationTotal > 1
-        && (isVerticalArrow || (isHorizontalArrow && !inInteractiveField))
-      ) {
+      if (currentMode === 'annotate' && isArrowKey) {
         e.preventDefault();
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-          goPrev();
-        } else {
-          goNext();
+        const offset = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1;
+        if (goToRealizationOffset(offset) === 'no-pills') {
+          goToConceptOffset(offset);
         }
         return;
       }
@@ -1605,7 +1627,7 @@ export function ParseUI() {
 
     window.addEventListener('keydown', onGlobalKeyDown);
     return () => window.removeEventListener('keydown', onGlobalKeyDown);
-  }, [currentMode, navigationTotal, goPrev, goNext]);
+  }, [currentMode, navigationTotal, goPrev, goNext, goToConceptOffset, goToRealizationOffset]);
 
   useEffect(() => {
     if (!selectedRealizationKey) return;

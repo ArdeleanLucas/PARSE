@@ -3497,38 +3497,79 @@ describe("ParseUI", () => {
     expect(await screen.findByRole("button", { name: /Accept concept/i })).toBeTruthy();
   });
 
-  it("uses arrow keys to change concepts in annotate mode", async () => {
+  it("uses all arrow keys to cycle sidebar realization pills in DOM order regardless of focused element", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "concept-a", label: "brother of husband A", source_item: "2.15", source_survey: "KLQ", custom_order: 1 },
+        { id: "concept-b", label: "brother of husband B", source_item: "2.15", source_survey: "KLQ", custom_order: 2 },
+        { id: "527", label: "head", source_item: "10", source_survey: "JBIL", custom_order: 3 },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "brother of husband", conceptId: "concept-a", ipa: "ba", start: 1, end: 2 },
+        { conceptText: "brother of husband", conceptId: "concept-b", ipa: "bb", start: 3, end: 4 },
+        { conceptText: "head", conceptId: "527", ipa: "late", start: 10, end: 11 },
+        { conceptText: "head", conceptId: "527", ipa: "early", start: 5, end: 6 },
+      ]),
+    };
+
     render(<ParseUI />);
-    await switchToAnnotateMode();
 
-    expect(screen.getByRole("heading", { name: "water" })).toBeTruthy();
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    const chips = Array.from(sidebar.querySelectorAll<HTMLElement>("[data-realization-key]"));
+    expect(chips.map((chip) => chip.getAttribute("data-realization-key"))).toEqual([
+      "concept-a:0",
+      "concept-b:0",
+      "527:0",
+      "527:1",
+    ]);
 
-    fireEvent.keyDown(window, { key: "ArrowRight" });
-    expect(await screen.findByRole("heading", { name: "fire" })).toBeTruthy();
+    const activeKey = () => Array.from(sidebar.querySelectorAll<HTMLElement>("[data-realization-key]"))
+      .find((chip) => chip.className.includes("bg-indigo-50"))
+      ?.getAttribute("data-realization-key");
 
-    fireEvent.keyDown(window, { key: "ArrowUp" });
-    expect(await screen.findByRole("heading", { name: "water" })).toBeTruthy();
-  });
+    fireEvent.click(screen.getByTestId("concept-variant-pill-concept-a"));
+    expect(activeKey()).toBe("concept-a:0");
 
-  it("uses ArrowUp/Down to change annotate concepts from focused fields, but preserves Left/Right for caret movement", async () => {
-    render(<ParseUI />);
-    await switchToAnnotateMode();
-
-    const ipaInput = screen.getByPlaceholderText("Enter IPA…");
+    const ipaInput = await screen.findByPlaceholderText("Enter IPA…");
     fireEvent.focus(ipaInput);
-    expect(screen.getByRole("heading", { name: "water" })).toBeTruthy();
+    fireEvent.keyDown(ipaInput, { key: "ArrowRight" });
+    await waitFor(() => expect(activeKey()).toBe("concept-b:0"));
 
-    fireEvent.keyDown(ipaInput, { key: "ArrowDown" });
-    expect(await screen.findByRole("heading", { name: "fire" })).toBeTruthy();
+    fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowDown" });
+    await waitFor(() => expect(activeKey()).toBe("527:0"));
 
-    const focusedIpa = screen.getByPlaceholderText("Enter IPA…");
-    fireEvent.focus(focusedIpa);
-    fireEvent.keyDown(focusedIpa, { key: "ArrowLeft" });
-    expect(screen.getByRole("heading", { name: "fire" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "water" })).toBeNull();
+    fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowDown" });
+    await waitFor(() => expect(activeKey()).toBe("527:1"));
 
-    fireEvent.keyDown(focusedIpa, { key: "ArrowRight" });
-    expect(screen.getByRole("heading", { name: "fire" })).toBeTruthy();
+    fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowDown" });
+    await waitFor(() => expect(activeKey()).toBe("527:1"));
+
+    fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowUp" });
+    await waitFor(() => expect(activeKey()).toBe("527:0"));
+
+    fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowLeft" });
+    await waitFor(() => expect(activeKey()).toBe("concept-b:0"));
+
+    fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowLeft" });
+    await waitFor(() => expect(activeKey()).toBe("concept-a:0"));
+
+    fireEvent.focus(screen.getByPlaceholderText("Enter IPA…"));
+    fireEvent.keyDown(screen.getByPlaceholderText("Enter IPA…"), { key: "ArrowUp" });
+    await waitFor(() => expect(activeKey()).toBe("concept-a:0"));
   });
 
   it("arrow keys navigate concepts when focus is on a button (chip click leaves button focused)", async () => {
