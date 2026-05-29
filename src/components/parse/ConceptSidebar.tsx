@@ -685,7 +685,7 @@ export function ConceptSidebar({
                             <VariantChip
                               as="button"
                               key={realizationKey}
-                              letter={`${variant.variantLabel}·${letter}`}
+                              letter={letter}
                               dotClassName={tagDot[variant.tag ?? concept.tag]}
                               dotTestId={`concept-variant-pill-dot-${variant.conceptKey}`}
                               conceptEn={variant.conceptEn}
