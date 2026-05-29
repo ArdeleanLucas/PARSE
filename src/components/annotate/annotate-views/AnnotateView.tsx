@@ -285,6 +285,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     setUserNote(lexemeNotesBlock?.user_note ?? "");
   }, [speaker, concept.key, lexemeNotesBlock?.user_note]);
 
+  const hasAudio = audioUrl.trim().length > 0;
   const [spectroOn, setSpectroOn] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
   const [readyAudioUrl, setReadyAudioUrl] = useState("");
@@ -403,6 +404,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   }, [conceptInterval, editEnd, editStart, ipa, ipaInterval, orthoUserEdited]);
 
   const handleMarkDone = useCallback(async () => {
+    if (!hasAudio) return;
     if (isConfirmed) return;
     let savedConceptInterval = conceptInterval;
     let savedIpaText = ipaInterval?.text ?? "";
@@ -468,7 +470,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
       setDoneToast("Marked done. Time anchor skipped: no boundary.");
     }
   }, [
-    addRegion, concept, conceptInterval, directOrthoInterval, editEnd, editStart, focusedLookupOptions, ipa, ipaInterval,
+    addRegion, concept, conceptInterval, directOrthoInterval, editEnd, editStart, focusedLookupOptions, hasAudio, ipa, ipaInterval,
     isConfirmed, orthoUserEdited, pendingEdits, record, saveLexemeAnnotation, saveOrthoText, saveSpeaker,
     setConceptTag, setConfirmedAnchor, speaker,
   ]);
@@ -695,6 +697,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   }, [cancelCreateLexeme, cancelQuickRetime, cancelRetimeAnother, createLexemeMenu, quickRetimeMenu, retimeAnotherMenu]);
 
   const handlePlayToggle = useCallback(() => {
+    if (!hasAudio) return;
     if (currentConceptPastEoa) {
       setPastEoaToast('Cannot seek past end of source audio.');
       return;
@@ -708,7 +711,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
     } else {
       playPause();
     }
-  }, [currentConceptPastEoa, isPlaying, selectedRegion, pause, playRange, playPause]);
+  }, [hasAudio, currentConceptPastEoa, isPlaying, selectedRegion, pause, playRange, playPause]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -1004,7 +1007,8 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
       <button
         type="button"
         data-testid={field === "ipa" ? "run-ipa-button" : "run-orth-button"}
-        disabled={!conceptInterval || Boolean(rerunBusy)}
+        disabled={!hasAudio || !conceptInterval || Boolean(rerunBusy)}
+        title={!hasAudio ? "Audio re-run unavailable for lexical/wordlist speakers without audio." : undefined}
         onClick={() => startRerun(field)}
         className={rerunButtonClass}
       >
@@ -1035,6 +1039,8 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
   return (
     <main className="flex-1 overflow-y-auto bg-slate-50">
       <section className="border-b border-slate-200 bg-white">
+        {hasAudio ? (
+          <React.Fragment>
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-2.5">
           <div className="flex items-center gap-1">
             <button
@@ -1303,6 +1309,17 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
         </div>
 
         <TranscriptionLanes speaker={speaker} wsRef={wsRef} audioReady={audioReady} onSeek={seek} />
+          </React.Fragment>
+        ) : (
+          <div data-testid="annotate-no-audio-state" className="px-8 py-6">
+            <div className="mx-auto max-w-4xl rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-sm text-slate-700">
+              <div className="font-semibold text-slate-900">No audio — lexical/wordlist speaker</div>
+              <p className="mt-1 text-xs leading-5 text-slate-600">
+                {speaker} has annotation tiers but no source audio. Waveform, player, spectrogram, drag retiming, and audio re-run controls are unavailable; concept, IPA, and ORTH values are shown below read-only.
+              </p>
+            </div>
+          </div>
+        )}
       </section>
 
       <SpeakerHeader
@@ -1355,6 +1372,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
             </div>
             <input
               value={ipa}
+              readOnly={!hasAudio}
               onChange={(e) => setIpa(e.target.value)}
               placeholder="Enter IPA…"
               dir="ltr"
@@ -1369,6 +1387,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
             </div>
             <input
               value={ortho}
+              readOnly={!hasAudio}
               onChange={(e) => {
                 setOrthoUserEdited(true);
                 setOrtho(e.target.value);
@@ -1384,6 +1403,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
             <textarea
               data-testid={`lexeme-user-note-${speaker}-${concept.key}`}
               value={userNote}
+              readOnly={!hasAudio}
               onChange={(e) => setUserNote(e.target.value)}
               onBlur={() => void handleSaveNote()}
               placeholder="Add notes specific to this speaker/lexeme…"
@@ -1409,6 +1429,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                     step={0.001}
                     min={0}
                     value={editStart}
+                    readOnly={!hasAudio}
                     onChange={(e) => setEditStart(e.target.value)}
                     className="w-28 rounded-md border border-slate-200 bg-slate-50/70 px-2 py-1 font-mono text-xs text-slate-800 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:opacity-50"
                   />
@@ -1421,6 +1442,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                     step={0.001}
                     min={0}
                     value={editEnd}
+                    readOnly={!hasAudio}
                     onChange={(e) => setEditEnd(e.target.value)}
                     className="w-28 rounded-md border border-slate-200 bg-slate-50/70 px-2 py-1 font-mono text-xs text-slate-800 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:opacity-50"
                   />
@@ -1430,7 +1452,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                   data-testid="confirm-time"
                   aria-pressed={Boolean(confirmedAnchor)}
                   title="Confirms the lexeme boundaries without requiring transcription. Used by cross-speaker anchor discovery in lexeme_search Signal B, audio re-STT priors, forced-alignment training data, and future audio-similarity discovery."
-                  disabled={timestampSaving}
+                  disabled={!hasAudio || timestampSaving}
                   onClick={async () => {
                     const nextStart = parseFloat(editStart);
                     const nextEnd = parseFloat(editEnd);
@@ -1507,7 +1529,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
             {conceptInterval && (
               <button
                 data-testid="save-lexeme-annotation"
-                disabled={timestampSaving}
+                disabled={!hasAudio || timestampSaving}
                 onClick={async () => {
                   const nextStart = parseFloat(editStart);
                   const nextEnd = parseFloat(editEnd);
@@ -1563,8 +1585,9 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
                 type="button"
                 data-testid="annotate-mark-done"
                 aria-pressed={isConfirmed}
+                disabled={!hasAudio}
                 onClick={handleMarkDone}
-                className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold shadow-sm transition ${
+                className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
                   isConfirmed
                     ? "bg-emerald-700 text-white hover:bg-emerald-700"
                     : "border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
@@ -1586,6 +1609,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
         </div>
       </section>
 
+      {hasAudio ? (
       <section className="sticky bottom-0 border-t border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-4xl items-center gap-3 px-8 py-3">
           <button onClick={() => skip(-5)} title="-5s" className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"><SkipBack className="h-4 w-4" /></button>
@@ -1667,6 +1691,7 @@ export const AnnotateView: React.FC<AnnotateViewProps> = ({
           </div>
         )}
       </section>
+      ) : null}
       {rerunDialog && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4"

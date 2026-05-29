@@ -60,6 +60,10 @@ describe('parseUIUtils', () => {
     expect(deriveAudioUrl(null, { dev: false })).toBe('');
   });
 
+  it('honors explicit audio_less annotation records as having no playable audio', () => {
+    expect(deriveAudioUrl(makeRecord({ audio_less: true, source_audio: 'audio/working/Qorv01.wav' }), { dev: false })).toBe('');
+  });
+
   it('routes heavy media assets directly to the backend target during localhost dev', () => {
     expect(resolveAssetUrl('/peaks/Fail01.json', { dev: true, apiTarget: 'http://127.0.0.1:8866' })).toBe('http://127.0.0.1:8866/peaks/Fail01.json');
     expect(deriveAudioUrl(makeRecord({ source_audio: 'audio/working/Fail02/foo.wav' }), { dev: true, apiTarget: 'http://127.0.0.1:8866/' })).toBe('http://127.0.0.1:8866/audio/working/Fail02/foo.wav');

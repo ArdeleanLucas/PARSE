@@ -73,6 +73,7 @@ export function deriveAudioUrl(
   record: AnnotationRecord | null | undefined,
   options: AssetUrlOptions = {},
 ): string {
+  if (record?.audio_less === true) return '';
   const raw = (record?.source_audio ?? record?.source_wav ?? '').trim();
   if (!raw) return '';
   const cleaned = raw.replace(/\\/g, '/').replace(/^\/+/, '');

@@ -68,4 +68,17 @@ describe('SpeakersSection context menu', () => {
 
     expect(screen.queryByTestId('speaker-context-menu')).toBeNull();
   });
+  it('keeps an audio-less lexical speaker selectable in the speaker list', () => {
+    const { onToggleSpeaker } = renderSection({
+      currentMode: 'annotate',
+      selectedSpeakers: ['Saha01'],
+      speakers: ['Saha01', 'Qorv01'],
+    });
+
+    const select = screen.getByRole('combobox') as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.value)).toContain('Qorv01');
+    fireEvent.click(screen.getByRole('button', { name: /Qorv01/ }));
+    expect(onToggleSpeaker).toHaveBeenCalledWith('Qorv01');
+  });
+
 });

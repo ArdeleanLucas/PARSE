@@ -149,6 +149,35 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('SpeakerFormsTable header & layout', () => {
+  it('renders an audio-less lexical speaker as a normal Compare doculect row', () => {
+    render(
+      <SpeakerFormsTable
+        bundle={makeBundle({
+          candidates: {
+            Qorv01: {
+              '53': {
+                csv_row_id: '53',
+                ipa: 'aw',
+                ortho: 'ئاو',
+                start_sec: null,
+                end_sec: null,
+                realization_index: 0,
+              },
+            },
+          },
+        })}
+        speakers={['Qorv01']}
+        speakerForms={[makeForm({ speaker: 'Qorv01', ipa: 'aw', ortho: 'ئاو' })]}
+        primaryContactCodes={PRIMARY_CODES}
+        contactLanguageNames={CONTACT_NAMES}
+        conceptKey="big"
+      />,
+    );
+
+    expect(screen.getByTestId('speaker-row-Qorv01')).toBeTruthy();
+    expect(screen.getByTestId('ipa-cell-Qorv01').textContent).toContain('aw');
+  });
+
   it('renders all six column headers (with one SIM. per primary contact code)', () => {
     render(
       <SpeakerFormsTable
