@@ -13,7 +13,7 @@ Transcribe recordings, keep timestamps trustworthy, compare forms across speaker
   <img src="docs/pr-assets/pr76-compare-table.png" alt="Compare mode concept by speaker matrix" width="32%" />
 </p>
 
-> **Status**: Active research software. Thesis-critical features land frequently and file contracts still evolve.
+> **Status**: Active research software. Fieldwork-facing features land frequently and file contracts still evolve.
 
 ## The Problem
 Fieldwork data often ends up split across audio editors, spreadsheets, scripts, and notes. That makes it easy to lose track of where a form came from, which timestamp was reviewed, and which comparison decisions are final. PARSE keeps the audio, annotations, comparison table, notes, borrowing evidence, and exports in one workspace.
@@ -146,7 +146,7 @@ For setup and the full automation reference, see the [MCP Guide](docs/mcp-guide.
 - [Contributing](CONTRIBUTING.md)
 
 ## Research & Citation
-PARSE was developed for a **Southern Kurdish dialect phylogenetics thesis** at the **University of Bamberg**, but the workstation is general-purpose and applies to any fieldwork-driven comparative linguistics workflow involving long recordings, concept-based wordlists, cognate review, borrowing adjudication, and downstream analysis in **LingPy**, **LexStat**, or **BEAST 2**. If you use PARSE in academic work, cite it as research software via [`CITATION.cff`](CITATION.cff) or GitHub's **Cite this repository** UI.
+PARSE is general-purpose research software for fieldwork-driven comparative linguistics: long recordings, concept-based wordlists, cognate review, borrowing adjudication, and downstream analysis in **LingPy**, **LexStat**, or **BEAST 2**. It originated in University of Bamberg comparative-linguistics research, but it is not tied to one language family or thesis corpus. If you use PARSE in academic work, cite it as research software via [`CITATION.cff`](CITATION.cff) or GitHub's **Cite this repository** UI.
 
 > Ardelean, L. M. (2026). *PARSE: Phonetic Analysis & Review Source Explorer* [Computer software]. University of Bamberg. https://github.com/ArdeleanLucas/PARSE
 
@@ -154,7 +154,7 @@ See [Research Context](docs/research-context.md) for full citation guidance and 
 
 ### Talks & Presentations
 
-- **AI as a scout, not a judge: PARSE & Southern Kurdish dialect phylogenetics** (2026) — 15-minute talk demonstrating PARSE in an active thesis workflow. [Slides](https://ardeleanlucas.github.io/parse-ai-talk/) · [Repository](https://github.com/ArdeleanLucas/parse-ai-talk)
+- **AI as a scout, not a judge: PARSE & Southern Kurdish dialect phylogenetics** (2026) — 15-minute case-study talk showing PARSE applied to one comparative-linguistics project. [Slides](https://ardeleanlucas.github.io/parse-ai-talk/) · [Repository](https://github.com/ArdeleanLucas/parse-ai-talk)
 
 ## License
 [MIT License](LICENSE)

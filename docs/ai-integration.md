@@ -100,7 +100,7 @@ cp config/ai_config.example.json config/ai_config.json
 
 The file is gitignored because it includes machine-specific paths and secrets.
 
-If the file is missing, the backend can still start with built-in defaults, but runtime behavior will not necessarily match a thesis-ready setup.
+If the file is missing, the backend can still start with built-in defaults, but runtime behavior will not necessarily match your project-specific language/model setup.
 
 ### Key config sections
 
@@ -113,7 +113,7 @@ Portable STT fields shown in docs:
 ```json
 "stt": {
   "provider": "faster-whisper",
-  "language": "ku",
+  "language": "en",
   "device": "cuda",
   "compute_type": "float16",
   "beam_size": 5
@@ -134,7 +134,7 @@ Operational notes from the current README and template:
 
 This block configures the orthographic transcription path.
 
-Current recommended ORTH block for `ai_config.json`:
+Example ORTH block for a language-specific Hugging Face Whisper model:
 
 ```json
 "ortho": {
@@ -154,19 +154,21 @@ Current recommended ORTH block for `ai_config.json`:
 }
 ```
 
+Replace `repo_id`, `language`, and any `initial_prompt` with values appropriate for your project. The example above is the bundled SDH preset, not a statement that PARSE is limited to that language.
+
 If you inherited a flat ORTH block, run `python python/tools/migrate_ai_config_ortho.py --workspace <path>` first to preview the migration, then add `--apply` after reviewing the timestamped backup path.
 
 Key behavior:
 
-- **Razhan** (`razhan/whisper-base-sdh`) is still the canonical Southern Kurdish source model, and `ortho.backend` now defaults to the Hugging Face Transformers backend with `ortho.model.repo_id` pointing at a Hugging Face repo id or local HF-format directory.
+- **Razhan** (`razhan/whisper-base-sdh`) is one bundled language-specific ORTH preset. `ortho.backend` now defaults to the Hugging Face Transformers backend with `ortho.model.repo_id` pointing at a Hugging Face repo id or local HF-format directory.
 - Cite the Razhan/DOLMA model references together with [Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*](https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf), Interspeech 2025, doi:[10.21437/Interspeech.2025-2296](https://doi.org/10.21437/Interspeech.2025-2296)
 - Legacy ORTH through faster-whisper/CTranslate2 is still selectable with `ortho.backend="faster-whisper"` and a local CT2 conversion directory. In that local_whisper/faster-whisper mode, the flat compatibility keys (`model_path`, `compute_type`, `vad_filter`, `vad_parameters`) still belong to CT2; HF ignores them and strict HF configs should not include them.
-- `ortho.generation.language` may be `sd`/`sdh` in config or annotations; the Razhan/DOLMA provider maps those tokens to `fa` for Whisper decoding because the fine-tune used `--language="persian"`, while PARSE annotation/project metadata should still preserve Southern Kurdish as `sdh`.
+- Some language-specific models need provider-side decode-token mapping. For the bundled SDH preset, `ortho.generation.language` may be `sd`/`sdh` in config or annotations; the Razhan/DOLMA provider maps those tokens to `fa` for Whisper decoding because the fine-tune used `--language="persian"`, while PARSE annotation/project metadata can still preserve the project's real language code.
 - HF ORTH uses low-level `WhisperProcessor` + `WhisperForConditionalGeneration.generate()`, 30-second full-file chunks, generated-token logprob confidence, non-16 kHz in-memory resampling, and concept-window decoding without `return_timestamps=True`.
 - ORTH responses preserve `confidence` as the legacy float and may also include `confidence_source` (`"avg_logprob"` or `"constant_fallback"`) plus `confidence_n_tokens` (count of lexical tokens contributing to the avg log-prob, excluding Whisper special tokens).
 - HF ORTH consumes decode-level anti-cascade guards from `ortho.generation`: `condition_on_prev_tokens=false`, `compression_ratio_threshold=1.8`, `no_repeat_ngram_size=3`, `repetition_penalty=1.2`, deterministic sampling flags, and prompt ids from `ortho.decoding.initial_prompt` only when a caller opts in.
-- If `ortho.decoding.initial_prompt` is omitted, ORTH uses the built-in Southern Kurdish Arabic-script decoder prime shown above; an explicit `"initial_prompt": ""` remains the opt-out.
-- Concept-window ORTH/refine short clips deliberately do **not** seed Whisper with English PARSE concept IDs or glosses, though they can still inherit the built-in Kurdish decoder prime unless explicitly opted out.
+- If `ortho.decoding.initial_prompt` is omitted, ORTH may use the built-in decoder prime for the selected preset; an explicit `"initial_prompt": ""` remains the opt-out.
+- Concept-window ORTH/refine short clips deliberately do **not** seed Whisper with English PARSE concept IDs or glosses, though they can still inherit the configured preset's decoder prime unless explicitly opted out.
 - STT/ORTH/IPA language resolves from request payload first, then `annotation.metadata.language_code`; if both are absent, PARSE warns before allowing auto-detect.
 - `ortho.decoding.refine_lexemes=true` adds a short-clip lexeme refinement pass after forced alignment and uses the same language-resolution guard.
 - Full-pipeline runs unload HF ORTH before wav2vec2 IPA and can cooperatively cancel ORTH through `POST /api/compute/{jobId}/cancel`, returning `partial_cancelled` with already-persisted intervals when cancellation lands mid-run.
@@ -239,12 +241,12 @@ When PARSE has no chat provider configured yet, the AI chat dock opens to the em
 
 | Field | Value |
 |---|---|
-| Task | ORTH transcription / Southern Kurdish speech recognition |
+| Task | ORTH transcription for projects using the bundled SDH preset |
 | Source | Hugging Face Transformers repo `razhan/whisper-base-sdh` by default; local CT2 conversion only for explicit faster-whisper opt-in |
 | Primary citation | [Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*](https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf), Interspeech 2025, doi:[10.21437/Interspeech.2025-2296](https://doi.org/10.21437/Interspeech.2025-2296) |
-| Role in PARSE | Speaker-level orthographic transcription for Southern Kurdish recordings |
+| Role in PARSE | Speaker-level orthographic transcription when this language-specific model is configured |
 
-The current README emphasizes that Razhan produces **Kurdish Arabic-script orthographic transcription with word-level timestamps**. It is **not** the IPA engine. The provider passes Whisper the `<|fa|>` token for these DOLMA/Razhan SDH models while preserving `sdh` as PARSE linguistic metadata, and it uses the built-in Kurdish Arabic-script decoder prime unless the ORTH config explicitly opts out.
+For projects that use the bundled Razhan/DOLMA preset, Razhan produces **Kurdish Arabic-script orthographic transcription with word-level timestamps**. It is **not** the IPA engine. The provider passes Whisper the `<|fa|>` token for these SDH models while preserving the project's linguistic metadata, and it uses the preset decoder prime unless the ORTH config explicitly opts out.
 
 ### `facebook/wav2vec2-xlsr-53-espeak-cv-ft`
 
@@ -289,7 +291,7 @@ The current README includes a citation-oriented table for core external models a
 
 | Component | Type | Used in PARSE for | Link |
 |---|---|---|---|
-| `razhan/whisper-base-sdh` | Model | ORTH transcription of Southern Kurdish speech | https://huggingface.co/razhan/whisper-base-sdh; [Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*](https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf), Interspeech 2025, doi:[10.21437/Interspeech.2025-2296](https://doi.org/10.21437/Interspeech.2025-2296) |
+| `razhan/whisper-base-sdh` | Model | ORTH transcription when the bundled SDH preset is configured | https://huggingface.co/razhan/whisper-base-sdh; [Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*](https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf), Interspeech 2025, doi:[10.21437/Interspeech.2025-2296](https://doi.org/10.21437/Interspeech.2025-2296) |
 | `facebook/wav2vec2-xlsr-53-espeak-cv-ft` | Model | Acoustic IPA transcription + forced alignment | https://huggingface.co/facebook/wav2vec2-xlsr-53-espeak-cv-ft |
 | Silero VAD | Model / repo | Voice activity detection during Whisper-style decoding | https://github.com/snakers4/silero-vad |
 | faster-whisper | Repository / library | Local STT + ORTH inference backend | https://github.com/SYSTRAN/faster-whisper |
@@ -436,7 +438,12 @@ Not every in-app chat tool is exported over MCP, and MCP also exposes 3 workflow
 - **Legacy curated opt-out surface with explicit `expose_all_tools=false`**: 47
 - **Full MCP adapter surface with `expose_all_tools=true`**: 67
 
-The shipped default includes the BND tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus write-capable `clef_clear_data`, `csv_only_reimport`, `revert_csv_reimport`, and `populate_cross_survey_links`, plus export/migration tools `export_review_data` and `migrate_concept_suffix_pollution`. Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` opts back into the legacy curated 43-tool parse-task subset preserved in `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES`. The underlying boundary-constrained STT compute path also accepts `bnd_stt` as an HTTP/worker alias, but `bnd_stt` is not a separate `ParseChatTools` registration.
+The shipped default includes these notable MCP-visible additions:
+
+- BND tools: `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`.
+- Write/export tools: `clef_clear_data`, `csv_only_reimport`, `revert_csv_reimport`, `populate_cross_survey_links`, `export_review_data`, and `migrate_concept_suffix_pollution`.
+
+Explicit `config/mcp_config.json` → `{ "expose_all_tools": false }` opts back into the legacy curated 43-tool parse-task subset preserved in `python/ai/chat_tools.py::LEGACY_CURATED_MCP_TOOL_NAMES`. The underlying boundary-constrained STT compute path also accepts `bnd_stt` as an HTTP/worker alias, but `bnd_stt` is not a separate `ParseChatTools` registration.
 
 Task 5 adds an HTTP MCP bridge on top of that same schema surface:
 - `GET /api/mcp/exposure`

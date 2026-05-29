@@ -49,7 +49,11 @@ Verified current counts from `python/ai/chat_tools.py`, `python/ai/workflow_tool
 - **43** legacy curated opt-out task tools from `LEGACY_CURATED_MCP_TOOL_NAMES`
 - **47** total adapter tools when `config/mcp_config.json` explicitly sets `expose_all_tools=false`
 
-The shipped default includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus write/export-capable `clef_clear_data`, `csv_only_reimport`, `revert_csv_reimport`, `populate_cross_survey_links`, `export_review_data`, and `migrate_concept_suffix_pollution`. The boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is an HTTP/worker compute alias rather than a separately registered MCP tool name.
+The shipped default includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`.
+
+It also includes the write/export-capable tools `clef_clear_data`, `csv_only_reimport`, `revert_csv_reimport`, `populate_cross_survey_links`, `export_review_data`, and `migrate_concept_suffix_pollution`.
+
+The boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is an HTTP/worker compute alias rather than a separately registered MCP tool name.
 
 ## Tool schema shape
 
@@ -123,7 +127,7 @@ Compute status tools and HTTP polling endpoints return a generic job snapshot wh
   "message": "Compute complete",
   "error": null,
   "result": {
-    "speaker": "Khan01",
+    "speaker": "SpeakerA",
     "steps_run": ["stt", "ortho", "ipa"],
     "results": {}
   }
@@ -188,7 +192,7 @@ Short-audio STT example:
 {
   "speaker": "Short01",
   "sourceWav": "audio/working/Short01/Short01.wav",
-  "language": "sdh",
+  "language": "en",
   "segments": [{"start": 0.4, "end": 2.1, "text": "..."}],
   "chunks": [],
   "duration_sec": 60.0,
@@ -200,7 +204,7 @@ Long-audio STT example with one failed chunk:
 
 ```json
 {
-  "speaker": "Fail01",
+  "speaker": "Long01",
   "segments": [{"start": 0.5, "end": 599.0, "text": "..."}],
   "chunks": [
     {"idx": 0, "span": {"idx": 0, "start": 0.0, "end": 600.0}, "status": "ok"},

@@ -7,12 +7,12 @@
 **Estimated Tokens:** ~350 (short) / ~900 (full)
 
 ## One-Sentence Summary
-Dry-runs, applies, or verifies the PARSE concept-identity migration that canonicalizes stored variant suffix pollution and collapses same-slot clarifier sibling rows with backup-backed rewrites.
+Dry-runs, applies, or verifies the PARSE concept-identity cleanup for workspaces where labels such as `water (A)` or duplicate same-slot clarifiers were accidentally stored as permanent concept names.
 
 ## When to Use
 - Before or after a concept-identity migration of a PARSE workspace.
-- To verify that `concepts.csv`, annotations, tags, and survey sidecars no longer point at suffix-polluted IDs.
-- To collapse same `(source_survey, source_item, strip_clarifier(concept_en))` sibling rows while preserving provenance in δ-format notes.
+- To verify that `concepts.csv`, annotations, tags, and survey sidecars no longer point at old variant-suffixed concept IDs.
+- To collapse same-survey/same-item clarifier siblings while preserving provenance in δ-format notes (notes that record the before/after label change).
 
 ## When NOT to Use
 - For ordinary concept editing during annotation; use UI/API concept tools instead.
@@ -28,7 +28,7 @@ Dry-runs, applies, or verifies the PARSE concept-identity migration that canonic
 | `verifyOnly` | boolean | No | Run verification/audit checks without migration writes. | `false` | `true` |
 
 ## Expected Output
-Dry-run returns merge-map counts, planned annotation/tag/survey rewrites, clarifier-collapse counts, and `backups: 0`. Live apply returns the same counters after writing backups and atomically replacing changed files. Verify-only reports hard post-migration violations and data-audit findings without rewriting.
+Dry-run returns merge-map counts, planned annotation/tag/survey rewrites, clarifier-collapse counts, and `backups: 0`. Live apply returns the same counters after writing backups and atomically replacing changed files. Verify-only reports hard migration violations plus non-blocking data-audit findings without rewriting.
 
 ## Example Successful Call
 Dry-run first:

@@ -27,7 +27,7 @@ Exports a PARSE workspace to the legacy `review_tool` v4.1 schema: `review_data.
 | `out` | string | Yes | Output directory for `review_data.json`, timestamps, and optional audio clips. | — | `"/tmp/review-export"` |
 | `tag_id` | string | No | `parse-tags.json` tag id used to filter concepts. | `custom-sk-concept-list` | `"custom-sk-concept-list"` |
 | `contact_config` | string | No | Path to `sil_contact_languages.json`; omit to use the exporter/script default. | exporter default | `"/path/to/config/sil_contact_languages.json"` |
-| `speakers` | string[] | No | Speaker subset; project order is preserved and unknown speakers fail. | all project speakers | `["Fail01", "Saha01"]` |
+| `speakers` | string[] | No | Speaker subset; project order is preserved and unknown speakers fail. | all project speakers | `["SpeakerA", "SpeakerB"]` |
 | `skip_audio` | boolean | No | Skip ffmpeg clip materialization and write JSON/timestamps only. | `false` | `true` |
 
 ## Expected Output
@@ -38,7 +38,7 @@ Returns a summary with `review_data_path`, `concept_count`, `speaker_count`, `cl
 {
   "workspace": "/path/to/parse-workspace",
   "out": "/tmp/parse-review-export",
-  "speakers": ["Fail01", "Saha01", "Mand01"],
+  "speakers": ["SpeakerA", "SpeakerB", "SpeakerC"],
   "skip_audio": true
 }
 ```
@@ -48,7 +48,7 @@ Returns a summary with `review_data_path`, `concept_count`, `speaker_count`, `cl
 | Failure | Symptom | Recovery |
 |---|---|---|
 | Unknown speaker subset | `invalid_args` / failed execution | Re-check `speakers_list` or omit `speakers` to export all project speakers. |
-| Empty contact refs | Low `concepts_with_arabic_ref` / `concepts_with_persian_ref` | Confirm the workspace contact cache path or set `contact_config` explicitly. |
+| Empty contact refs | Low contact-reference counters in the summary | Confirm the workspace contact cache path or set `contact_config` explicitly. |
 | Output overwrote a clone unexpectedly | Dirty `review_tool` clone | Inspect `git -C <out> diff`; reset only after preserving any needed local work. |
 | Audio clipping slow or unavailable | ffmpeg errors / long runtime | Retry with `skip_audio: true` for JSON-only validation, then fix ffmpeg/audio paths before final sync. |
 

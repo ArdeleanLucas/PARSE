@@ -27,7 +27,14 @@ These counts were verified against `python/ai/chat_tools.py`, `python/ai/workflo
 
 The shipped default includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`. The boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is a compute alias rather than a separately registered MCP tool name.
 
-Current default write/export-capable surface additions include `clef_clear_data`, `csv_only_reimport`, `revert_csv_reimport`, `populate_cross_survey_links`, `export_review_data`, and `migrate_concept_suffix_pollution`. `export_review_data` prepares legacy review_tool bundles; `migrate_concept_suffix_pollution` dry-runs/applies the concept-identity migration, including same-slot clarifier collapse. `clef_clear_data` wraps `POST /api/clef/clear`, preserves `_meta` and language metadata, supports `dryRun=true`, and can optionally remove known provider caches. `populate_cross_survey_links` populates survey sidecar links from a reference CSV. `csv_only_reimport` re-runs Audition cue/comments CSV import for an already-onboarded speaker using the registered WAV from `source_index.json` and a mandatory backup; `revert_csv_reimport` restores the files captured by that backup.
+Current default write/export-capable additions are easiest to read as a short operator map:
+
+- `clef_clear_data` wraps `POST /api/clef/clear`, preserves `_meta` and language metadata, supports `dryRun=true`, and can optionally remove known provider caches.
+- `populate_cross_survey_links` populates survey sidecar links from a reference CSV.
+- `export_review_data` prepares legacy `review_tool` bundles.
+- `migrate_concept_suffix_pollution` dry-runs or applies the concept-identity cleanup, including same-slot clarifier collapse.
+- `csv_only_reimport` re-runs Audition cue/comments CSV import for an already-onboarded speaker using the registered WAV from `source_index.json` and a mandatory backup.
+- `revert_csv_reimport` restores the files captured by a csv-only reimport backup.
 
 `run_full_annotation_pipeline` now supports concept-scoped reruns through `run_mode` (`full`, `concept-windows`, `edited-only`) and optional `concept_ids`. Non-full responses include `affected_concepts`; empty `edited-only` runs return a no-op instead of starting an empty job. `apply_timestamp_offset` responses include `shiftedConcepts` alongside `shiftedIntervals`.
 

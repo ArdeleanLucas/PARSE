@@ -110,7 +110,11 @@ MC-420 is closed with this release because the only board sublane present at clo
 
 ### Clarifier parentheses after MC-425
 
-The MC-418 canonicalizer removes variant suffixes such as `big (A)` and cue prefixes such as `1.2 big`; singleton semantic clarifiers such as `green (grass)` or `to bathe (wash oneself)` remain concept labels when there is no same-slot sibling to merge. MC-425-A/B extended the migration with a same-slot clarifier-collapse pass: rows sharing `(source_survey, source_item, strip_clarifier(concept_en))` collapse to one canonical id, references are re-keyed, and the removed labels are preserved in δ-format notes under `parseui-compare-notes-v1.json`. Live acceptance is recorded in [`docs/reports/2026-05-28-mc-425-clarifier-collapse-acceptance.md`](../reports/2026-05-28-mc-425-clarifier-collapse-acceptance.md).
+The MC-418 canonicalizer removes variant suffixes such as `big (A)` and cue prefixes such as `1.2 big`. Singleton semantic clarifiers such as `green (grass)` or `to bathe (wash oneself)` remain concept labels when there is no same-slot sibling to merge.
+
+MC-425-A/B extended the migration with a same-slot clarifier-collapse pass. Rows sharing `(source_survey, source_item, strip_clarifier(concept_en))` collapse to one canonical id, references are re-keyed, and the removed labels are preserved in δ-format notes (compare notes that record the before/after label change) under `parseui-compare-notes-v1.json`.
+
+Live acceptance is recorded in [`docs/reports/2026-05-28-mc-425-clarifier-collapse-acceptance.md`](../reports/2026-05-28-mc-425-clarifier-collapse-acceptance.md).
 
 ## Migration invocation
 
@@ -159,7 +163,7 @@ The strict MC-418 invariant is met: concept labels should no longer carry stored
 2. **Text-vs-`concept_en` inconsistencies.** Some annotation interval `text` values do not match their referenced canonical `concept_en`. These are annotation-tier data-quality issues for manual triage, not migration blockers.
 3. **KLQ 4.18 hard/soft duplicate-row quirk.** The live data contains a pre-existing duplicate/truncated row case that is outside MC-418's suffix-pollution target.
 
-Current follow-up status: MC-422-D added clarifier-tolerant validation/export de-dup, and MC-425-A/B applied same-slot clarifier collapse with δ-format provenance notes. Singleton parenthetical rows are still intentionally preserved when there is no same-slot sibling group.
+Current follow-up status: MC-422-D added clarifier-tolerant validation/export de-dup, and MC-425-A/B applied same-slot clarifier collapse with provenance notes. Singleton parenthetical rows are still intentionally preserved when there is no same-slot sibling group.
 
 ## Cross-references
 

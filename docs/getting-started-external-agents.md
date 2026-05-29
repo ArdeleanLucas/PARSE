@@ -1,6 +1,6 @@
 # Getting Started with External Agents
 
-> Last updated: 2026-04-27
+> Last updated: 2026-05-29
 >
 > This guide covers the external-agent interfaces that are currently shipped in the PARSE repository. The commands and tool counts below were cross-checked against `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`), `python/ai/chat_tools.py` (registry/orchestrator; concrete tool modules live under `python/ai/tools/` and `python/ai/chat_tools/`), `python/ai/workflow_tools.py`, `python/adapters/test_mcp_adapter.py`, and the launcher/config docs already in this repo.
 
@@ -138,8 +138,8 @@ with:
 
 Examples:
 
-- “Run `run_full_annotation_pipeline` for speaker `Fail02` with `dryRun=true` first, then rerun only edited concepts with `run_mode="edited-only"` if the preview is clean.”
-- “Prepare compare mode for concepts `1-25` across `Fail01`, `Mand01`, and `Qasr01`.”
+- “Run `run_full_annotation_pipeline` for speaker `SpeakerA` with `dryRun=true` first, then rerun only edited concepts with `run_mode="edited-only"` if the preview is clean.”
+- “Prepare compare mode for concepts `1-25` across `SpeakerA`, `SpeakerB`, and `SpeakerC`.”
 - “List active jobs, then show logs for the stalled job.”
 - “Run `compute_boundaries_start` for one speaker, then `retranscribe_with_boundaries_start` after `tiers.ortho_words` is ready.”
 - “Export the complete LingPy dataset after refreshing contact lexeme references.”
@@ -170,7 +170,7 @@ http://localhost:8766
 ### Example: read pipeline state
 
 ```bash
-curl http://localhost:8766/api/pipeline/state/Fail02
+curl http://localhost:8766/api/pipeline/state/SpeakerA
 ```
 
 ### Example: start STT
@@ -179,9 +179,8 @@ curl http://localhost:8766/api/pipeline/state/Fail02
 curl -X POST http://localhost:8766/api/stt \
   -H 'Content-Type: application/json' \
   -d '{
-    "speaker": "Fail02",
-    "source_wav": "audio/working/Fail02/Fail02.wav",
-    "language": "ku"
+    "speaker": "SpeakerA",
+    "source_wav": "audio/working/SpeakerA/SpeakerA.wav"
   }'
 ```
 
@@ -267,7 +266,12 @@ Keep only the essentials in the client config and move the rest into repo-local 
 
 Current PARSE defaults to the full safe 67-tool adapter surface: 63 `ParseChatTools`, 3 workflow macros, and `mcp_get_exposure_mode`. If you need the older smaller surface, set `{"expose_all_tools": false}` in `config/mcp_config.json`; that publishes the legacy 47-tool adapter surface.
 
-The default set includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`, plus write-capable `clef_clear_data`, `csv_only_reimport`, `revert_csv_reimport`, and `populate_cross_survey_links` tools for dry-run-capable CLEF reset and Audition CSV reimport/revert workflows. The shorter name `bnd_stt` is only a compute-type alias for the HTTP/background-job path, not a separately registered MCP tool name.
+The default set includes:
+
+- BND-facing tools: `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`.
+- Write/export tools: `clef_clear_data`, `csv_only_reimport`, `revert_csv_reimport`, `populate_cross_survey_links`, `export_review_data`, and `migrate_concept_suffix_pollution`.
+
+The shorter name `bnd_stt` is only a compute-type alias for the HTTP/background-job path, not a separately registered MCP tool name.
 
 ### Can I use an official `parse_mcp` Python package or an HTTP MCP bridge?
 

@@ -1,6 +1,6 @@
 # review_tool export
 
-How to sync PARSE thesis-workspace data into the active
+How to sync a PARSE workspace into the active
 [`ArdeleanLucas/review_tool`](https://github.com/ArdeleanLucas/review_tool)
 repo (the post-cutover home — NOT `review_tool_archived`).
 
@@ -31,9 +31,9 @@ somewhere else.
 From the PARSE repo root:
 
 ```bash
-PARSE_WORKSPACE=/home/lucas/parse-workspace \
+PARSE_WORKSPACE=/path/to/parse-workspace \
 REVIEW_TOOL_CLONE=$HOME/gh/ardeleanlucas/review_tool \
-SPEAKERS="Fail01 Saha01 Mand01 Qasr01 Kalh01 Khan02" \
+SPEAKERS="SpeakerA SpeakerB SpeakerC" \
   bash scripts/sync_review_tool.sh
 ```
 
@@ -46,7 +46,7 @@ Useful env-gated flags:
   default config location. If unset, the wrapper prefers
   `$PARSE_WORKSPACE/config/sil_contact_languages.json` when present, then
   falls back to the repo-local config.
-- `SPEAKERS="Fail01 Saha01"` — restrict the export to a space-separated
+- `SPEAKERS="SpeakerA SpeakerB"` — restrict the export to a space-separated
   speaker subset, forwarded as repeated `--speakers` arguments. Use this
   when preparing the reviewer parity subset rather than every project
   speaker.
@@ -61,9 +61,9 @@ data from PARSE workspace (YYYY-MM-DD)`. If nothing changed, it prints
 The bootstrap-once / export-and-push-many pattern:
 
 1. **Bootstrap (one-off, refresh on concept-list change).** PARSE's
-   `contact_lexeme_fetcher` populates `parse-enrichments.json` with Arabic
-   and Persian lexemes via an AI provider. This costs real money per call,
-   so only re-run it when the thesis concept list itself changes.
+   `contact_lexeme_fetcher` populates `parse-enrichments.json` with contact-language
+   reference forms via an AI or lexical-data provider. This can cost real money per call,
+   so only re-run it when the project concept list or contact-language setup changes.
 2. **Compute (when annotations change).** PARSE's `cognate_compute`
    recomputes cognate-class assignments and similarity scores. Cheap
    (seconds-to-minutes); run after any meaningful annotation pass.
@@ -78,7 +78,7 @@ The bootstrap-once / export-and-push-many pattern:
 
 If `parse-enrichments.json` only contains `lexeme_notes` (i.e. the
 bootstrap/compute steps haven't run yet), the export emits null/zero
-defaults for `cognate_class`, `similarity`, and the Arabic/Persian columns.
+defaults for `cognate_class`, `similarity`, and contact-language reference columns.
 The wrapper detects this and prints a reminder — this is expected
 pre-bootstrap. Running `contact_lexeme_fetcher` + `cognate_compute` and
 re-syncing will populate the missing fields.

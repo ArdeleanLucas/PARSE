@@ -104,12 +104,12 @@ This is the main starting point for locating lexical material in long recordings
 
 #### ORTH
 
-The speaker-level ORTH job (`computeType='ortho'`) now defaults to the Hugging Face Transformers `HFWhisperProvider` on Razhan (`razhan/whisper-base-sdh`) for Southern Kurdish orthographic transcription; cite Razhan model usage with [Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*](https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf), Interspeech 2025, doi:[10.21437/Interspeech.2025-2296](https://doi.org/10.21437/Interspeech.2025-2296).
+The speaker-level ORTH job (`computeType='ortho'`) is configurable. It can run a Hugging Face Transformers `HFWhisperProvider` model selected for the project's language and script. If you use the bundled Razhan (`razhan/whisper-base-sdh`) SDH preset, cite [Hameed, Ahmadi, Hadi, and Sennrich 2025, *Automatic Speech Recognition for Low-Resourced Middle Eastern Languages*](https://sinaahmadi.github.io/docs/articles/hameed2025ASR-ME.pdf), Interspeech 2025, doi:[10.21437/Interspeech.2025-2296](https://doi.org/10.21437/Interspeech.2025-2296).
 
 Current runtime truth:
-- `ortho.backend` defaults to `"hf"`; `ortho.model.repo_id` should be a HF repo id such as `razhan/whisper-base-sdh` or a local HF-format directory.
+- `ortho.backend` defaults to `"hf"`; `ortho.model.repo_id` should be a Hugging Face repo id for your project language or a local HF-format directory.
 - Legacy ORTH through faster-whisper/CTranslate2 remains available with `ortho.backend="faster-whisper"` plus an explicit local CT2 directory. CT2-looking directories are rejected by `backend="hf"` with an actionable error.
-- Provider-side Whisper decoding maps `ortho.generation.language` values `sd`/`sdh` to `fa`; PARSE project and annotation metadata should still keep Southern Kurdish as `sdh`.
+- Some language-specific providers need decode-token mapping. PARSE keeps project/annotation metadata separate from provider-specific Whisper language tokens.
 - HF ORTH uses 30-second low-level `WhisperForConditionalGeneration.generate()` chunks for whole-file transcription, resamples non-16 kHz in-memory clips, keeps concept-window timing from caller-supplied windows, and avoids `return_timestamps=True` in concept-window generation.
 - HF ORTH exposes confidence as a triplet where available: `confidence` (legacy float), `confidence_source` (`"avg_logprob"` or `"constant_fallback"`), and `confidence_n_tokens` (lexical token count used for the avg log-prob, excluding Whisper special tokens).
 - HF ORTH applies decode-level anti-cascade guards from `ortho.generation`: `condition_on_prev_tokens=false`, `compression_ratio_threshold=1.8`, `no_repeat_ngram_size=3`, `repetition_penalty=1.2`, deterministic temperature/sample settings, and explicit prompt ids only when a caller opts in; legacy `compute_type` and VAD options are faster-whisper/CT2-only compatibility settings.
@@ -186,7 +186,7 @@ That distinction matters in real fieldwork, where older runs may have seeded a t
 
 ### Processing Long Recordings
 
-Long recordings are first-class PARSE inputs. Current behavior is designed for recordings on the Khan01/Fail01 scale rather than just short elicitation clips.
+Long recordings are first-class PARSE inputs. Current behavior is designed for multi-hour speaker recordings, not just short elicitation clips.
 
 Default behavior in brief:
 
@@ -219,10 +219,10 @@ Scoped modes hide whole-file-only actions such as Normalize and ORTH refine-lexe
 
 #### Tagged-concepts-only run mode
 
-The transcription run modal also exposes a fourth scope filter targeting tag membership. When one or more global tag labels are selected, IPA / ORTH / Full pipeline runs restrict the rerun set to concepts that carry those tags on the selected speakers. This is meant for review-driven sweeps such as "rerun every concept I tagged `needs-second-pass`" or "rerun only the borrowing-suspect set on speakers KLQ-03..05".
+The transcription run modal also exposes a fourth scope filter targeting tag membership. When one or more global tag labels are selected, IPA / ORTH / Full pipeline runs restrict the rerun set to concepts that carry those tags on the selected speakers. This is meant for review-driven sweeps such as "rerun every concept I tagged `needs-second-pass`" or "rerun only the borrowing-suspect set on SpeakerA/SpeakerB".
 
 <p align="center">
-  <img src="./pr-assets/user-guide-pipeline-tag-filter.png" alt="Tag filter dropdown inside the run modal with Review needed, Confirmed, Problematic, and Thesis options and an AND-mode toggle" width="55%" />
+  <img src="./pr-assets/user-guide-pipeline-tag-filter.png" alt="Tag filter dropdown inside the run modal with project tags and an AND-mode toggle" width="55%" />
 </p>
 
 *Figure: the **Tag filter** inside the run modal scopes the rerun to concepts carrying the chosen tags. Match semantics default to `any`; switch to `all` (AND) for a stricter intersection.*
@@ -243,7 +243,7 @@ The **Linguistic Tags** drawer manages the project-wide tag vocabulary that powe
   <img src="./pr-assets/user-guide-tags-drawer.png" alt="Linguistic Tags drawer with vocabulary on the left, tag creation and existing tag list in the middle, and the concept list filtered to the selected tag on the right" width="85%" />
 </p>
 
-*Figure: opening **Tags** exposes the global vocabulary (here: Review needed, Confirmed, Problematic, Thesis) plus a per-tag concept list. Selecting a tag filters the right-hand concept list to the matching membership for the active speaker; the same vocabulary is what the Tagged-concepts-only run mode consumes.*
+*Figure: opening **Tags** exposes the global vocabulary plus a per-tag concept list. Selecting a tag filters the right-hand concept list to the matching membership for the active speaker; the same vocabulary is what the Tagged-concepts-only run mode consumes.*
 
 From this drawer you can:
 
@@ -304,7 +304,7 @@ PARSE compares unassigned segments against verified annotations from other speak
 - phonetic rule-based
 - positional prior
 
-The phonetic-rule layer is designed to tolerate documented Southern Kurdish alternations such as onset voicing, nucleus variation, and coda deletion.
+The phonetic-rule layer is designed to tolerate project-specific sound correspondences, such as onset voicing, nucleus variation, or coda deletion, when those rules are configured for the language set under review.
 
 ### Confidence model
 
@@ -352,7 +352,10 @@ The current Compare interface provides:
 - grouped source-item variant rows when multiple concepts share the same `source_item`, with A/B/C realization pills in speaker forms
 - per-speaker canonical realization picks persisted under `manual_overrides.canonical_realizations`
 - manual concept merge/unmerge overrides persisted under `manual_overrides.concept_merges`, combining forms for review without rewriting source concepts or annotation intervals; merge overrides are Compare-mode-only and do not collapse Annotate navigation
-- per-speaker elicitation chips on the same canonical `concept_id`: **+ Add elicitation** adds another interval, render-time A/B/C labels come from interval order, and **Delete this interval** removes one selected realization plus same-time mirror-tier rows without deleting the concept row
+- per-speaker elicitation chips on the same canonical `concept_id`:
+  - **+ Add elicitation** adds another recording interval
+  - A/B/C labels come from the speaker's interval order
+  - **Delete this interval** removes only the selected realization plus its matching IPA/orthography/word-boundary rows without deleting the concept row
 - **cognate controls** for accept, split, merge, and cycle
 - per-row cognate-group editing
 - speaker flags and secondary-action controls
@@ -370,14 +373,15 @@ Typical use:
 
 1. Open a concept row across speakers
 2. Review the forms side by side
-3. Review grouped source-item variants and choose canonical speaker-specific realizations when a form has multiple IPA/ORTH observations; selecting an A/B/C chip pivots the right-panel and Annotate editor to that realization
+3. Review grouped source-item variants and choose the speaker-specific realization to use when a form has multiple IPA/ORTH observations
 4. Use concept merge/unmerge when two source concepts should be compared as one analytical row, while preserving the original concept ids underneath
-5. Add another elicitation when one speaker has multiple intervals for the same canonical concept, or delete only the selected realization when an interval is wrong; the canonical concept row and other speakers stay intact
-6. Use ArrowDown/ArrowUp to walk realization chips before moving concepts, or PageDown/PageUp to jump concept-to-concept
-7. Accept, split, merge, or cycle cognate groups
-8. Mark speaker-level irregularities or flags where needed
-9. Consult enrichment overlays and contact-language evidence
-10. Preserve manual adjudications for export
+5. Select an A/B/C chip to move the right panel and Annotate editor to that exact realization
+6. Add another elicitation when one speaker has multiple intervals for the same canonical concept, or delete only the selected realization when an interval is wrong; the canonical concept row and other speakers stay intact
+7. Use ArrowDown/ArrowUp to move between realization chips before moving concepts, or PageDown/PageUp to jump concept-to-concept
+8. Accept, split, merge, or cycle cognate groups
+9. Mark speaker-level irregularities or flags where needed
+10. Consult enrichment overlays and contact-language evidence
+11. Preserve manual adjudications for export
 
 The goal is not just visualization — it is structured decision-making for downstream comparative analysis.
 
@@ -412,9 +416,9 @@ Populate jobs now follow the same global-job pattern as other heavy PARSE workfl
 - empty-populate outcomes surface explicit `no_forms` or `provider_error` banners rather than silently looking like success
 - that banner includes **Retry with different providers** so you can reopen the modal directly on the auto-populate tab
 
-The Compare table and detail views also follow the configured CLEF primaries dynamically: similarity columns are no longer hard-coded to Arabic/Persian, and the **Reference Forms** panel can render multiple forms per language.
+The Compare table and detail views also follow the configured CLEF primaries dynamically: similarity columns are no longer hard-coded to any fixed contact languages, and the **Reference Forms** panel can render multiple forms per language.
 
-The local `lingpy_wordlist` / CLDF-family providers now match doculect identifiers by exact case-insensitive equality (with whitespace / dash / underscore folding), not substring containment. That prevents contact-language buckets such as Arabic from accidentally absorbing unrelated doculects like Avar, Karelian, or Hungarian simply because their identifiers contain `ar`.
+The local `lingpy_wordlist` / CLDF-family providers now match doculect identifiers by exact case-insensitive equality (with whitespace / dash / underscore folding), not substring containment. That prevents one contact-language bucket from accidentally absorbing unrelated doculects just because their identifiers contain the same short letter sequence.
 
 Each reference form row has a checkbox. Those selections persist to `sil_contact_languages.json._meta.form_selections`, and only the selected forms contribute to the similarity score.
 
@@ -431,10 +435,10 @@ On a fresh workspace, the first run of **Borrowing detection (CLEF)** now opens 
 The modal is organized into three tabs:
 
 <p align="center">
-  <img src="./pr-assets/clef-languages-tab.png" alt="Configure CLEF modal - Languages tab with Arabic and Persian selected as primary contact languages" width="85%" />
+  <img src="./pr-assets/clef-languages-tab.png" alt="Configure CLEF modal - Languages tab with two primary contact languages selected" width="85%" />
 </p>
 
-*Figure: **1. Languages** — pick 1–2 primary contact languages from the bundled SIL/ISO catalog (here Arabic + Persian for a Southern Kurdish workspace). Custom SIL/ISO codes can be added at the bottom.*
+*Figure: **1. Languages** — pick 1–2 primary contact languages from the bundled SIL/ISO catalog. Custom SIL/ISO codes can be added at the bottom.*
 
 <p align="center">
   <img src="./pr-assets/clef-sources-tab.png" alt="Configure CLEF modal - Sources tab listing open lexical databases, local sources, and the LLM-augmented Grok provider" width="85%" />
@@ -492,7 +496,7 @@ The report now also includes an **Academic citations** section for the providers
 - **Copy citation** and, where applicable, **Copy BibTeX** actions
 - an **Export BibTeX** action when at least one contributing provider has a bibliographic entry
 
-This gives thesis workflows a direct path from populated reference forms to footnotes and reference-manager imports, instead of treating provider chips as informal provenance only.
+This gives research workflows a direct path from populated reference forms to footnotes and reference-manager imports, instead of treating provider chips as informal provenance only.
 
 ## AI Workflow Assistant in daily use
 
@@ -546,7 +550,7 @@ Supported source artifacts currently include:
 - optional legacy transcript CSV under `imports/legacy/<Speaker>/`
 - Adobe Audition marker CSV/TSV uploads to `POST /api/onboard/speaker`; when PARSE detects `Name`/`Start` headers after concepts-style parsing fails, it seeds CSV-order `concept` and `ortho_words` intervals with preserved cue timestamps, integer PARSE concept ids, and `import_index` / `audition_prefix` trace metadata. The same upload can include a companion `commentsCsv` file whose rows are joined by physical row index into per-lexeme import notes, and bracket/bare/malformed-prefix cue rows are imported rather than dropped. See [Audition CSV speaker import](./runtime/audition-csv-import.md).
 
-This matters for thesis workflows where the richest aligned source may be an already processed speaker package or an Audition cue export rather than a brand-new pipeline run.
+This matters for fieldwork workflows where the richest aligned source may be an already processed speaker package or an Audition cue export rather than a brand-new pipeline run.
 
 ## Recommended user path
 

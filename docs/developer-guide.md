@@ -293,7 +293,7 @@ The top-level docs now serve distinct audiences more cleanly:
 - `docs/architecture.md` plus `docs/architecture/` — system design, data model, compute, and worker topology
 - `docs/release-notes/` — release/change summaries for major shipped series
 - `docs/developer-guide.md` — contributor-facing implementation guide
-- `docs/research-context.md` — thesis and citation framing
+- `docs/research-context.md` — research and citation framing
 
 Existing planning and historical material remains available under the existing `docs/`, `docs/plans/`, and `docs/archive/` structure.
 
@@ -498,4 +498,4 @@ Be careful with any change that assumes the repo itself is the live data root. I
 - User workflow: [User Guide](./user-guide.md)
 - AI providers and tool surface: [AI Integration](./ai-integration.md)
 - System shape and data model: [Architecture](./architecture.md)
-- Thesis/citation framing: [Research Context](./research-context.md)
+- Research/citation framing: [Research Context](./research-context.md)

@@ -125,7 +125,7 @@ WebSocket streaming is additive. Clients can continue polling `/api/stt/status`,
 | Endpoint | Purpose | Notes |
 |---|---|---|
 | `POST /api/annotations/{speaker}` | Save one speaker annotation record | Writes normalized annotation JSON |
-| `POST /api/annotations/intervals/delete` | Delete one elicitation interval | Removes the selected concept-tier interval plus same-time IPA/ortho/ortho_words/speaker mirror rows; creates a `.bak-<UTC>-pre-interval-delete` backup; does not delete the canonical concept row |
+| `POST /api/annotations/intervals/delete` | Delete one elicitation interval | Removes the selected concept-tier interval plus matching IPA/ortho/ortho_words/speaker rows at the same time range; creates a `.bak-<UTC>-pre-interval-delete` backup; does not delete the canonical concept row |
 | `POST /api/onboard/speaker` | Upload raw audio and optional CSV for one speaker | Multipart upload; Audition marker CSV/TSV fallback can seed `concept` and `ortho_words` intervals from `Name`/`Start` rows; optional `commentsCsv` imports companion notes by row index |
 | `POST /api/onboard/speaker/status` | Poll onboarding job status | Background-job status endpoint |
 | `POST /api/concepts/import` | Import concepts CSV | Multipart form upload |
@@ -155,7 +155,7 @@ Successful ORTH result entries may include the confidence triplet defined in Ope
 
 `POST /api/concepts/by-tag` is a pure read: it walks each requested speaker's annotation file once, applies the requested tag-match semantics, and returns `{ totalConcepts, perSpeaker, unknownTags, ambiguousTags }` without acquiring speaker locks or mutating state. `match='all'` rejects any unknown or ambiguous label with HTTP 400 (an AND query against partially-resolved tags would silently degrade to an intersection over the resolved subset). `match='any'` returns the unresolved labels in `unknownTags` / `ambiguousTags` so the caller can surface them.
 
-`POST /api/annotations/intervals/delete` is the Path-2 elicitation-delete endpoint. Clients send a speaker, `concept_id`, `start`, and `end`; PARSE removes exactly that realization and mirror-tier rows at the same time range, writes a pre-delete backup, then returns the refreshed annotation payload. Use canonical concept deletion only when the whole concept row should disappear.
+`POST /api/annotations/intervals/delete` deletes one elicitation interval. Clients send a speaker, `concept_id`, `start`, and `end`; PARSE removes exactly that realization plus matching IPA/orthography/word-boundary rows at the same time range, writes a pre-delete backup, then returns the refreshed annotation payload. Use canonical concept deletion only when the whole concept row should disappear.
 
 `POST /api/lexemes/rerun-by-tag` reuses the same tag-resolution logic, then by default starts compute type `lexemes_rerun_by_tag` and returns `202` with a non-null `jobId` for frontend/API polling. When that job runs, it loops the matched concept windows through the same per-interval ORTH/IPA machinery as `/api/lexeme/run_*`, persists successful tier writes back to the active annotation record, and rebuilds affected `tiers.ortho_words` after ORTH output. Each per-concept call respects the same speaker lock and 60-second window cap as the per-interval endpoints. Per-concept errors are collected into `results[*]` (with `status: "error"`, the original HTTP `statusCode`, and a message) without aborting the batch. Ambiguous labels return HTTP 409 before any job or rerun starts so the endpoint never spends GPU on a concept set the caller did not explicitly approve. `async=false` preserves the old immediate `resolved` / `total` / `results` response with `jobId: null`; do not use that mode for new UI or agent workflows.
 
@@ -220,13 +220,13 @@ Offset-apply responses include both `shiftedIntervals` (tier-interval count) and
   "version": 1,
   "color_coding_enabled": true,
   "surveys": {
-    "jbil": { "display_label": "JBIL", "display_color": "indigo" }
+    "surveyA": { "display_label": "Survey A", "display_color": "indigo" }
   },
   "concept_survey_links": {
-    "322": { "jbil": "102", "klq": "3.14" }
+    "322": { "surveyA": "102", "surveyB": "3.14" }
   },
   "speaker_choices": {
-    "Khan01": { "322": "jbil" }
+    "SpeakerA": { "322": "surveyA" }
   }
 }
 ```
@@ -307,9 +307,8 @@ POST /api/stt
 Content-Type: application/json
 
 {
-  "speaker": "Fail02",
-  "source_wav": "audio/working/Fail02/Fail02.wav",
-  "language": "ku"
+  "speaker": "SpeakerA",
+  "source_wav": "audio/working/SpeakerA/SpeakerA.wav"
 }
 ```
 
@@ -352,20 +351,20 @@ Example shape:
 ### Read pipeline state
 
 ```http
-GET /api/pipeline/state/Fail02
+GET /api/pipeline/state/SpeakerA
 ```
 
 Example shape:
 
 ```json
 {
-  "speaker": "Fail02",
+  "speaker": "SpeakerA",
   "duration_sec": 10432.11,
   "normalize": {
     "done": true,
     "can_run": true,
     "reason": null,
-    "path": "audio/working/Fail02/Fail02.wav"
+    "path": "audio/working/SpeakerA/SpeakerA.wav"
   },
   "stt": {
     "done": true,
@@ -381,24 +380,24 @@ Example shape:
 ### Search for lexeme candidates
 
 ```http
-GET /api/lexeme/search?speaker=Fail02&variants=yek,yak,jek&concept_id=1&tiers=ortho_words,ortho,stt,ipa&limit=10
+GET /api/lexeme/search?speaker=SpeakerA&variants=water,watr&concept_id=1&tiers=ortho_words,ortho,stt,ipa&limit=10
 ```
 
 Example shape:
 
 ```json
 {
-  "speaker": "Fail02",
+  "speaker": "SpeakerA",
   "concept_id": "1",
-  "variants": ["yek", "yak", "jek"],
-  "language": "ku",
+  "variants": ["water", "watr"],
+  "language": "en",
   "candidates": [
     {
       "start": 312.41,
       "end": 313.87,
       "tier": "ortho_words",
-      "matched_text": "yek",
-      "matched_variant": "yek",
+      "matched_text": "water",
+      "matched_variant": "water",
       "score": 0.92,
       "phonetic_score": 0.88,
       "cross_speaker_score": 0.12,
@@ -409,7 +408,7 @@ Example shape:
   "signals_available": {
     "phonemizer": true,
     "cross_speaker_anchors": 6,
-    "contact_variants": ["yak"]
+    "contact_variants": ["watr"]
   }
 }
 ```
@@ -421,7 +420,7 @@ POST /api/compute/full_pipeline
 Content-Type: application/json
 
 {
-  "speaker": "Fail02",
+  "speaker": "SpeakerA",
   "run_mode": "concept-windows",
   "concept_ids": ["1", "2"]
 }
@@ -455,7 +454,7 @@ Example shape:
   "progress": 100,
   "message": "Pipeline finished",
   "result": {
-    "speaker": "Fail02",
+    "speaker": "SpeakerA",
     "steps_run": ["normalize", "stt", "ortho", "ipa"],
     "summary": {
       "ok": 4,
