@@ -141,6 +141,8 @@ export interface AnnotationRecord {
   created_at?: string;
   modified_at?: string;
   source_wav?: string;
+  /** True for lexical/wordlist speakers that intentionally have annotation tiers but no playable source audio. */
+  audio_less?: boolean;
   /**
    * Project-relative path to the source audio, e.g. "audio/working/Fail02/foo.wav".
    * The Python server normalizer emits this key; `source_wav` is the historical

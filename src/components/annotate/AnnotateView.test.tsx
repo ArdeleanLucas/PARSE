@@ -393,6 +393,24 @@ describe('AnnotateView', () => {
     expect((screen.getByTestId('lexeme-start') as HTMLInputElement).value).toBe('727.487');
   });
 
+  it('renders audio-less speakers as no-audio read-only annotate state without waveform chrome', () => {
+    mockRecord = makeRecord([{ conceptText: 'water', conceptId: 'water', ipa: 'av', ortho: 'ئاو', start: 1, end: 2 }]);
+
+    renderWaterAnnotateView({ audioUrl: '' });
+
+    expect(screen.getByTestId('annotate-no-audio-state').textContent).toContain('No audio — lexical/wordlist speaker');
+    expect(screen.queryByLabelText('Waveform playhead time')).toBeNull();
+    expect(screen.queryByTestId('transcription-lanes')).toBeNull();
+    expect(screen.queryByTestId('annotate-play')).toBeNull();
+    expect(screen.queryByTestId('annotate-volume')).toBeNull();
+    expect(getIpaInput().value).toBe('av');
+    expect(getOrthographicInput().value).toBe('ئاو');
+    expect(getIpaInput().readOnly).toBe(true);
+    expect(getOrthographicInput().readOnly).toBe(true);
+    expect((screen.getByTestId('lexeme-start') as HTMLInputElement).readOnly).toBe(true);
+    expect((screen.getByTestId('lexeme-end') as HTMLInputElement).readOnly).toBe(true);
+  });
+
   it('renders a destructive Delete concept button and calls its handler', () => {
     const onDeleteConcept = vi.fn();
     mockRecord = makeRecord([{ conceptText: 'water', start: 1, end: 2 }]);
