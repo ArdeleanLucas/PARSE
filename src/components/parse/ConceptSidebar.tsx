@@ -592,7 +592,15 @@ export function ConceptSidebar({
           const rowRealizationKey = rowConceptKey ? buildRealizationKey(rowConceptKey, 0) : undefined;
           const activeRealization = parseRealizationKey(activeRealizationKey);
           const activeConceptKey = activeRealization?.conceptId ?? null;
-          const parentActive = !!(concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey)));
+          // When the active realization is one of this concept's variants but its
+          // pill is not rendered (speaker scope collapsed the strip to <=1 visible
+          // variant, or pills are hidden entirely), the parent row is the only
+          // affordance, so it must carry the highlight. If the variant's pill IS
+          // rendered, childActive lights the pill and the parent stays unlit.
+          const activeIsHiddenVariant = !!activeConceptKey
+            && (concept.variants?.some((variant) => variant.conceptKey === activeConceptKey) ?? false)
+            && !(hasVariants && visibleVariants.some((variant) => variant.conceptKey === activeConceptKey));
+          const parentActive = !!(concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey) || activeIsHiddenVariant));
           const parentName = concept.name;
           const noDataSuffix = !isElicited && !scopedToSpeaker && hasElicitedScope ? ' no data' : '';
           const mergeCountSuffix = concept.mergedKeys && concept.mergedKeys.length > 1 ? ` +${concept.mergedKeys.length - 1}` : '';

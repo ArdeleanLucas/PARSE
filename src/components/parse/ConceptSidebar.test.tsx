@@ -1606,6 +1606,43 @@ describe('ConceptSidebar', () => {
       expect(rowB.className).not.toContain('bg-indigo-50');
     });
 
+    it('lights up the parent when the active variant has no rendered pill (single visible variant)', () => {
+      // Qasr01 JBIL pronoun regression: a grouped concept (key=source_item "154")
+      // is speaker-scoped down to one visible variant, so the >1 pill strip is
+      // suppressed, yet selectedRealizationKey still points at the variant key
+      // "365:0". parentActive must fall back to highlighting the parent row.
+      render(
+        <ConceptSidebar
+          query=""
+          onQueryChange={vi.fn()}
+          sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+          onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+          sourceDisabled={false}
+          filteredConcepts={concepts}
+          statusFilter="all"
+          onStatusFilterChange={vi.fn()}
+          selectedTagIds={new Set()}
+          onTagSelectionChange={vi.fn()}
+          tags={[]}
+          activeConceptId={3}
+          activeRealizationKey="365:0"
+          onConceptSelect={vi.fn()}
+          isConceptVariantVisibleInSidebar={(_concept, variant) => variant.conceptKey === '365'}
+        />,
+      );
+
+      // No variant pill strip renders because only one variant is visible.
+      expect(screen.queryByTestId('concept-variant-pill-365')).toBeNull();
+      expect(screen.queryByTestId('concept-variant-pill-618')).toBeNull();
+
+      // The parent row is the only affordance, so it must carry the highlight.
+      expect(screen.getByTestId('concept-parent-button-3').className).toContain('bg-indigo-50');
+    });
+
     it('auto-expands a grouped parent when activeRealizationKey selects one of its variants', () => {
       render(
         <ConceptSidebar
