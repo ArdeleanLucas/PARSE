@@ -1038,3 +1038,69 @@ def test_source_index_validate_dry_run_does_not_write_output(tmp_path) -> None:
     assert payload["previewOnly"] is True
     assert payload["dryRun"] is True
     assert output_path.exists() is False
+
+
+def _seed_delete_speaker_workspace(root, speaker: str = "Saha01") -> None:
+    import json
+
+    def _wj(path, obj) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(obj), encoding="utf-8")
+
+    _wj(root / "annotations" / "{0}.parse.json".format(speaker), {"speaker": speaker})
+    (root / "audio" / "original" / speaker).mkdir(parents=True, exist_ok=True)
+    (root / "audio" / "original" / speaker / "source.wav").write_bytes(b"RIFF")
+    _wj(root / "project.json", {"speakers": {speaker: {}, "Other01": {}}})
+    _wj(root / "source_index.json", {"speakers": {speaker: {"source_wavs": []}}})
+
+
+@pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
+def test_create_mcp_server_delete_speaker_dry_run_then_real(tmp_path, monkeypatch) -> None:
+    import asyncio
+    import json
+
+    from adapters.mcp_adapter import create_mcp_server
+
+    _seed_delete_speaker_workspace(tmp_path)
+    monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
+    monkeypatch.setenv("PARSE_LOCKS_DIR", str(tmp_path / ".parse-locks"))
+    server = create_mcp_server(str(tmp_path))
+
+    # Dry-run over the real MCP wire: returns the plan, mutates nothing.
+    _, meta = asyncio.run(server.call_tool("delete_speaker", {"speaker": "Saha01", "dryRun": True}))
+    result = json.loads(meta["result"])["result"]
+    assert result["dryRun"] is True
+    assert "annotations/Saha01.parse.json" in result["plannedFiles"]
+    assert (tmp_path / "annotations" / "Saha01.parse.json").exists()
+
+    # Real delete over the wire: moves artifacts to .trash and prunes registries.
+    _, meta = asyncio.run(server.call_tool("delete_speaker", {"speaker": "Saha01", "dryRun": False}))
+    result = json.loads(meta["result"])["result"]
+    assert result["dryRun"] is False
+    assert result["trashDir"].startswith(".trash/Saha01-")
+    assert not (tmp_path / "annotations" / "Saha01.parse.json").exists()
+    project = json.loads((tmp_path / "project.json").read_text(encoding="utf-8"))
+    assert "Saha01" not in project["speakers"]
+    assert "Other01" in project["speakers"]
+
+
+@pytest.mark.skipif(not _has_mcp(), reason="mcp package not installed")
+def test_create_mcp_server_delete_speaker_blocked_by_on_disk_lock(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    from adapters.mcp_adapter import create_mcp_server
+
+    _seed_delete_speaker_workspace(tmp_path)
+    monkeypatch.delenv("PARSE_PROJECT_ROOT", raising=False)
+    locks_dir = tmp_path / ".parse-locks"
+    locks_dir.mkdir(parents=True, exist_ok=True)
+    (locks_dir / "Saha01.lock").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("PARSE_LOCKS_DIR", str(locks_dir))
+    server = create_mcp_server(str(tmp_path))
+
+    # An on-disk speaker lock (e.g. a lexeme/tag rerun) must block the delete.
+    with pytest.raises(Exception) as excinfo:
+        asyncio.run(server.call_tool("delete_speaker", {"speaker": "Saha01", "dryRun": False}))
+    assert "active job" in str(excinfo.value)
+    # Nothing deleted while blocked.
+    assert (tmp_path / "annotations" / "Saha01.parse.json").exists()

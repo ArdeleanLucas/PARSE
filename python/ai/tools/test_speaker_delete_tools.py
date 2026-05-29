@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from ai.chat_tools import ChatToolValidationError, ParseChatTools
+from ai.chat_tools import ChatToolExecutionError, ChatToolValidationError, ParseChatTools
 from ai.tools.speaker_delete_tools import tool_delete_speaker
 
 
@@ -56,3 +56,18 @@ def test_delete_unknown_speaker_raises_validation(tmp_path: pathlib.Path) -> Non
         tool_delete_speaker(
             ParseChatTools(project_root=tmp_path), {"speaker": "Ghost42", "dryRun": False}
         )
+
+
+def test_delete_blocked_by_on_disk_lock(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _make_workspace(tmp_path)
+    locks_dir = tmp_path / ".parse-locks"
+    locks_dir.mkdir(parents=True, exist_ok=True)
+    (locks_dir / "Saha01.lock").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("PARSE_LOCKS_DIR", str(locks_dir))
+
+    with pytest.raises(ChatToolExecutionError):
+        tool_delete_speaker(
+            ParseChatTools(project_root=tmp_path), {"speaker": "Saha01", "dryRun": False}
+        )
+    # Nothing deleted while the lock is held.
+    assert (tmp_path / "annotations" / "Saha01.parse.json").exists()
