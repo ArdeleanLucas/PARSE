@@ -1754,6 +1754,18 @@ describe('ConceptSidebar', () => {
       expect(onDeleteInterval).toHaveBeenCalledWith('Fail01', '247', 1);
       confirmSpy.mockRestore();
     });
+
+    it('hides Delete variant on elicitation chips but keeps it on true variant pills', () => {
+      renderIntervalChips();
+
+      fireEvent.contextMenu(screen.getByRole('button', { name: 'head (C)' }));
+      expect(screen.queryByRole('menuitem', { name: /Delete variant/i })).toBeNull();
+      expect(screen.getByRole('menuitem', { name: /Delete this interval/i })).toBeTruthy();
+
+      fireEvent.mouseDown(document.body);
+      fireEvent.contextMenu(screen.getByTestId('concept-variant-pill-511'));
+      expect(screen.getByRole('menuitem', { name: /Delete variant/i })).toBeTruthy();
+    });
   });
 
 });
