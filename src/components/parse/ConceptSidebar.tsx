@@ -9,6 +9,7 @@ import { resolveSurveyLinksForSpeaker, surveyRowIdsForConcept, type SpeakerSurve
 import { SurveyBadge } from '../shared/SurveyBadge';
 import { VariantChip } from '../shared/VariantChip';
 import { buildRealizationKey, parseRealizationKey } from '../../lib/conceptGrouping';
+import type { ElicitationDetail } from '../../lib/elicitationDetails';
 import { defaultSurveySettings, normalizeSurveyId, resolveConceptSurvey, surveyLabelFor } from '../../lib/surveyOverlap';
 
 type ConceptTag = 'untagged' | 'review' | 'confirmed' | 'problematic';
@@ -16,6 +17,17 @@ export type ConceptSortParent = 'concept' | 'source';
 export type ConceptSortConceptSub = 'az' | '1n';
 export type ConceptSortSourceSub = 'time' | 'row';
 export type ConceptStatusFilter = 'all' | 'unreviewed' | 'flagged' | 'borrowings';
+
+/** Compact one-line suffix (source item · IPA · ortho) for an elicitation chip
+ * tooltip, e.g. " — item 126 · waran / waːraːn · واران". Empty when no detail. */
+function formatElicitationDetailSuffix(detail: ElicitationDetail | undefined): string {
+  if (!detail) return '';
+  const parts: string[] = [];
+  if (detail.sourceItem) parts.push(`item ${detail.sourceItem}`);
+  if (detail.ipa) parts.push(detail.ipa);
+  if (detail.ortho) parts.push(detail.ortho);
+  return parts.length ? ` — ${parts.join(' · ')}` : '';
+}
 
 export interface SidebarConcept {
   id: number;
@@ -102,6 +114,10 @@ interface ConceptSidebarProps {
   onScopedToSpeakerChange?: (next: boolean) => void;
   elicitedConceptKeys?: ReadonlySet<string>;
   elicitationVariantLabelsByConceptKey?: Record<string, string[]>;
+  /** Per-concept elicitation detail (label + source item + IPA/ortho), ordered
+   * to match elicitationVariantLabelsByConceptKey, so the chip tooltip and the
+   * delete-interval confirmation can disambiguate which recording is which. */
+  elicitationDetailsByConceptKey?: Record<string, ElicitationDetail[]>;
   actionFeedback?: { message: string; variant: 'error' | 'warning' } | null;
   onDismissActionFeedback?: () => void;
 }
@@ -209,10 +225,11 @@ export function ConceptSidebar({
   onScopedToSpeakerChange,
   elicitedConceptKeys = new Set<string>(),
   elicitationVariantLabelsByConceptKey = {},
+  elicitationDetailsByConceptKey = {},
   actionFeedback = null,
   onDismissActionFeedback,
 }: ConceptSidebarProps) {
-  const [contextMenu, setContextMenu] = useState<{ concept: SidebarConcept; x: number; y: number; intervalIndex?: number; intervalLabel?: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ concept: SidebarConcept; x: number; y: number; intervalIndex?: number; intervalLabel?: string; intervalDetail?: ElicitationDetail } | null>(null);
   const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
   const [surveyLinkEditor, setSurveyLinkEditor] = useState<SurveyLinkEditorState | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -683,6 +700,8 @@ export function ConceptSidebar({
                     {elicitationLabels.map((letter, intervalIndex) => {
                       const realizationKey = buildRealizationKey(concept.key ?? String(concept.id), intervalIndex);
                       const childActive = concept.id === activeConceptId && activeRealizationKey === realizationKey;
+                      const detail = (elicitationDetailsByConceptKey[concept.key ?? String(concept.id)] ?? [])[intervalIndex];
+                      const chipTitle = `${parentName} (${letter})${formatElicitationDetailSuffix(detail)}`;
                       return (
                         <VariantChip
                           as="button"
@@ -691,7 +710,7 @@ export function ConceptSidebar({
                           dotClassName={tagDot[concept.tag]}
                           conceptEn={parentName}
                           aria-label={`${parentName} (${letter})`}
-                          title={`${parentName} (${letter})`}
+                          title={chipTitle}
                           active={childActive}
                           data-realization-key={realizationKey}
                           data-testid={`concept-elicitation-pill-${concept.key ?? concept.id}-${intervalIndex}`}
@@ -699,7 +718,7 @@ export function ConceptSidebar({
                           onContextMenu={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            setContextMenu({ concept, x: event.clientX, y: event.clientY, intervalIndex, intervalLabel: letter });
+                            setContextMenu({ concept, x: event.clientX, y: event.clientY, intervalIndex, intervalLabel: letter, intervalDetail: detail });
                           }}
                         />
                       );
@@ -766,7 +785,12 @@ export function ConceptSidebar({
               className="block w-full rounded px-2 py-1 text-left text-rose-700 hover:bg-rose-50"
               onClick={() => {
                 const label = contextMenu.intervalLabel ? ` (${contextMenu.intervalLabel})` : '';
-                if (window.confirm(`Delete this interval${label} for "${contextMenu.concept.name}"? A backup file will be created.`)) {
+                const detail = contextMenu.intervalDetail;
+                const sourceLine = detail?.sourceItem ? `\nsource item: ${detail.sourceItem}` : '';
+                const ipaLine = detail?.ipa ? `\nipa: ${detail.ipa}` : '';
+                const orthoLine = detail?.ortho ? `\northo: ${detail.ortho}` : '';
+                const message = `Delete this interval${label} for "${contextMenu.concept.name}"?${sourceLine}${ipaLine}${orthoLine}\n\nThis removes only this recording; other recordings of the concept stay. A backup file will be created.`;
+                if (window.confirm(message)) {
                   void onDeleteInterval(activeSpeaker, contextMenu.concept.key as string, contextMenu.intervalIndex as number);
                 }
                 setContextMenu(null);

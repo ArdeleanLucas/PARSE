@@ -43,7 +43,8 @@ import { buildSpeakerForm } from './lib/speakerForm';
 import { findBundleForConcept, normalizeBundles } from './lib/compareBundles';
 import { conceptMatchesElicitedKeys, conceptUnderlyingKeys, speakerElicitedConceptKeys } from './lib/speakerElicitedConcepts';
 import { buildSpeakerSortKeys } from './lib/speakerSortKeys';
-import { assignVariantLetters, buildRealizationKey, findConceptByUnderlyingKey, groupConceptEntries, parseRealizationKey } from './lib/conceptGrouping';
+import { buildRealizationKey, findConceptByUnderlyingKey, groupConceptEntries, parseRealizationKey } from './lib/conceptGrouping';
+import { buildElicitationDetailsByConceptKey } from './lib/elicitationDetails';
 import { isConceptVariantVisibleInSidebar as evaluateConceptVariantVisibleInSidebar } from './lib/sidebarVisibility';
 import type { Concept, SpeakerForm } from './lib/speakerForm';
 import {
@@ -1350,19 +1351,23 @@ export function ParseUI() {
   ), [scopedToSpeaker, activeSpeakerForSidebar, elicitedConceptKeys, selectedTagIds, getTagsForConcept, activeTagScope]);
 
 
-  const elicitationVariantLabelsByConceptKey = useMemo<Record<string, string[]>>(() => {
-    if (!activeSpeakerForSidebar) return {};
-    const intervals = annotationRecords[activeSpeakerForSidebar]?.tiers?.concept?.intervals ?? [];
-    const byConcept = new Map<string, Array<{ start: number }>>();
-    for (const interval of intervals) {
-      const key = interval.concept_id == null ? '' : String(interval.concept_id).trim();
-      if (!key) continue;
-      const list = byConcept.get(key) ?? [];
-      list.push({ start: typeof interval.start === 'number' ? interval.start : 0 });
-      byConcept.set(key, list);
-    }
-    return Object.fromEntries([...byConcept.entries()].map(([key, list]) => [key, assignVariantLetters(list)]));
-  }, [activeSpeakerForSidebar, annotationRecords]);
+  // Per-concept elicitation chips for the active speaker. See
+  // buildElicitationDetailsByConceptKey: ordered by interval start so each
+  // chip's positional index matches the start-sorted realization index used by
+  // buildSpeakerForm/AnnotateView and handleDeleteInterval, and carrying source
+  // item + IPA/ortho so the chip tooltip and delete-interval confirmation can
+  // disambiguate A vs B.
+  const elicitationDetailsByConceptKey = useMemo(
+    () => (activeSpeakerForSidebar ? buildElicitationDetailsByConceptKey(annotationRecords[activeSpeakerForSidebar]) : {}),
+    [activeSpeakerForSidebar, annotationRecords],
+  );
+
+  const elicitationVariantLabelsByConceptKey = useMemo<Record<string, string[]>>(
+    () => Object.fromEntries(
+      Object.entries(elicitationDetailsByConceptKey).map(([key, list]) => [key, list.map((detail) => detail.label)]),
+    ),
+    [elicitationDetailsByConceptKey],
+  );
 
   const handleAddElicitation = useCallback((sidebarConcept: { id: number; key?: string }) => {
     const speaker = activeSpeakerForSidebar;
@@ -1970,6 +1975,7 @@ export function ParseUI() {
           onScopedToSpeakerChange={setScopedToSpeaker}
           elicitedConceptKeys={elicitedConceptKeys}
           elicitationVariantLabelsByConceptKey={elicitationVariantLabelsByConceptKey}
+          elicitationDetailsByConceptKey={elicitationDetailsByConceptKey}
           actionFeedback={actionFeedback}
           onDismissActionFeedback={dismissActionFeedback}
           isConceptVariantVisibleInSidebar={sidebarVariantVisibilityPredicate}
