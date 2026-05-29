@@ -1814,6 +1814,13 @@ describe('ConceptSidebar', () => {
           activeSpeaker="Fail01"
           onConceptSelect={vi.fn()}
           elicitationVariantLabelsByConceptKey={{ '247': ['A', 'B', 'C'] }}
+          elicitationDetailsByConceptKey={{
+            '247': [
+              { label: 'A', sourceItem: '126', ipa: 'waran / waːraːn', ortho: 'واران' },
+              { label: 'B', sourceItem: '3.1', ipa: 'baran', ortho: 'باران' },
+              { label: 'C', sourceItem: '125', ipa: '', ortho: '' },
+            ],
+          }}
           onDeleteInterval={onDeleteInterval}
         />,
       );
@@ -1853,6 +1860,31 @@ describe('ConceptSidebar', () => {
       fireEvent.mouseDown(document.body);
       fireEvent.contextMenu(screen.getByTestId('concept-variant-pill-511'));
       expect(screen.getByRole('menuitem', { name: /Delete variant/i })).toBeTruthy();
+    });
+
+    it('enriches the delete confirmation with the targeted interval source item + IPA/ortho', () => {
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+      const onDeleteInterval = renderIntervalChips();
+
+      fireEvent.contextMenu(screen.getByRole('button', { name: 'head (A)' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /Delete this interval/i }));
+
+      const message = confirmSpy.mock.calls[0]?.[0] as string;
+      expect(message).toContain('Delete this interval (A)');
+      expect(message).toContain('source item: 126');
+      expect(message).toContain('ipa: waran / waːraːn');
+      expect(message).toContain('ortho: واران');
+      // confirm returned false → no deletion
+      expect(onDeleteInterval).not.toHaveBeenCalled();
+      confirmSpy.mockRestore();
+    });
+
+    it('exposes the source item + IPA/ortho in each elicitation chip tooltip', () => {
+      renderIntervalChips();
+      const chipA = screen.getByRole('button', { name: 'head (A)' });
+      expect(chipA.getAttribute('title')).toContain('item 126');
+      expect(chipA.getAttribute('title')).toContain('waran / waːraːn');
+      expect(chipA.getAttribute('title')).toContain('واران');
     });
   });
 
