@@ -17,17 +17,24 @@ This guide is the narrative overview of PARSE's machine-facing surfaces. For the
 
 These counts were verified against `python/ai/chat_tools.py`, `python/ai/workflow_tools.py`, `python/external_api/catalog.py`, and the MCP adapter tests:
 
-- **60** built-in `ParseChatTools`
-- **60** default MCP task tools from `DEFAULT_MCP_TOOL_NAMES`
+- **63** built-in `ParseChatTools`
+- **63** default MCP task tools from `DEFAULT_MCP_TOOL_NAMES`
 - **3** workflow macros from `DEFAULT_MCP_WORKFLOW_TOOL_NAMES`
-- **64** total default adapter tools including the 3 workflow macros plus `mcp_get_exposure_mode`
-- **64** total adapter tools when `config/mcp_config.json` or `mcp_config.json` sets `{ "expose_all_tools": true }`
-- **40** legacy curated opt-out task tools from `LEGACY_CURATED_MCP_TOOL_NAMES`
-- **44** total adapter tools when `config/mcp_config.json` or `mcp_config.json` explicitly sets `{ "expose_all_tools": false }`
+- **67** total default adapter tools including the 3 workflow macros plus `mcp_get_exposure_mode`
+- **67** total adapter tools when `config/mcp_config.json` or `mcp_config.json` sets `{ "expose_all_tools": true }`
+- **43** legacy curated opt-out task tools from `LEGACY_CURATED_MCP_TOOL_NAMES`
+- **47** total adapter tools when `config/mcp_config.json` or `mcp_config.json` explicitly sets `{ "expose_all_tools": false }`
 
 The shipped default includes the BND-facing tools `compute_boundaries_start`, `compute_boundaries_status`, `retranscribe_with_boundaries_start`, and `retranscribe_with_boundaries_status`. The boundary-constrained STT compute path also accepts the alias `bnd_stt`, but `bnd_stt` is a compute alias rather than a separately registered MCP tool name.
 
-Current default write-capable surface additions include `clef_clear_data`, `csv_only_reimport`, and `revert_csv_reimport`. `clef_clear_data` wraps `POST /api/clef/clear`, preserves `_meta` and language metadata, supports `dryRun=true`, and can optionally remove known provider caches. `csv_only_reimport` re-runs Audition cue/comments CSV import for an already-onboarded speaker using the registered WAV from `source_index.json` and a mandatory backup; `revert_csv_reimport` restores the files captured by that backup.
+Current default write/export-capable additions are easiest to read as a short operator map:
+
+- `clef_clear_data` wraps `POST /api/clef/clear`, preserves `_meta` and language metadata, supports `dryRun=true`, and can optionally remove known provider caches.
+- `populate_cross_survey_links` populates survey sidecar links from a reference CSV.
+- `export_review_data` prepares legacy `review_tool` bundles.
+- `migrate_concept_suffix_pollution` dry-runs or applies the concept-identity cleanup, including same-slot clarifier collapse.
+- `csv_only_reimport` re-runs Audition cue/comments CSV import for an already-onboarded speaker using the registered WAV from `source_index.json` and a mandatory backup.
+- `revert_csv_reimport` restores the files captured by a csv-only reimport backup.
 
 `run_full_annotation_pipeline` now supports concept-scoped reruns through `run_mode` (`full`, `concept-windows`, `edited-only`) and optional `concept_ids`. Non-full responses include `affected_concepts`; empty `edited-only` runs return a no-op instead of starting an empty job. `apply_timestamp_offset` responses include `shiftedConcepts` alongside `shiftedIntervals`.
 
@@ -79,8 +86,8 @@ Core endpoints:
 The `mode` query parameter accepts:
 
 - `active` — obey `config/mcp_config.json` or the legacy root-level `mcp_config.json`
-- `default` — expose the shipped default 65-tool surface
-- `all` — expose the full tool surface (currently also 65 tools unless a future all-only surface diverges)
+- `default` — expose the shipped default 67-tool surface
+- `all` — expose the full tool surface (currently also 67 tools unless a future all-only surface diverges)
 
 Each listed tool includes standard MCP schema fields plus `meta.x-parse` safety metadata such as `mutability`, `supports_dry_run`, `dry_run_parameter`, `preconditions`, and `postconditions`.
 
@@ -117,7 +124,7 @@ The adapter does not add a separate network protocol. It launches as a local pro
 - `PARSE_API_PORT`
 - `PARSE_PORT`
 
-Use the shipped default 65-tool surface for most agent sessions. Set `config/mcp_config.json` → `{ "expose_all_tools": false }` only when you intentionally need the legacy curated opt-out surface.
+Use the shipped default 67-tool surface for most agent sessions. Set `config/mcp_config.json` → `{ "expose_all_tools": false }` only when you intentionally need the legacy curated opt-out surface.
 
 ## Authentication Model
 

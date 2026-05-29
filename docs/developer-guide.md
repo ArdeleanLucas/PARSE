@@ -200,6 +200,7 @@ Relevant knobs and files:
 - `deploy/pm2-ecosystem.config.cjs` for PM2-supervised deployments
 - `POST /api/compute/{jobId}/cancel` for cooperative compute cancellation; STT/ORTH observe it between chunks/windows and can return `cancelled` or `partial_cancelled`
 - `POST /api/lexeme/run_ortho` / `POST /api/lexeme/run_ipa` for reviewer-triggered interval reruns; default behavior starts tracked compute jobs `lexeme_rerun_ortho` / `lexeme_rerun_ipa`, and `async=false` is deprecated synchronous compatibility
+- `POST /api/annotations/intervals/delete` for deleting one selected elicitation interval and same-time mirror rows without deleting the canonical concept row
 - `GET /api/survey-overlap` and `POST /api/survey-overlap` for source/survey labels, color coding, concept links, and per-speaker survey choices
 - `POST /api/concepts/{conceptId}/survey-links` and `DELETE /api/concepts/{conceptId}/survey-links` for cross-survey link CRUD against the `concept_survey_links` sidecar (not `concepts.csv`)
 - `POST /api/concepts/relink-by-gloss` for cross-survey concept consolidation by canonical gloss (dry-run + apply with backups; fuzzy candidates are never auto-applied)
@@ -232,7 +233,7 @@ The current PARSE architecture expects:
 
 - API traffic to go through `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/`)
 - shared typed contracts to live in `src/api/types.ts` plus helper-local contract-family modules
-- single-lexeme reruns, survey-overlap updates, and concept duplication to use the existing typed API helpers; do not add bare `fetch()` from components
+- single-lexeme reruns, survey-overlap updates, add-elicitation / interval-delete flows, and concept-linking changes to use the existing typed API helpers; do not add bare `fetch()` from components
 - data persistence to flow through the established stores and backend routes, especially `AnnotationRecord.concept_tags` for speaker-local tag membership
 - the unified shell model to remain the organizing principle rather than splitting Annotate and Compare into isolated apps again
 - contributors to verify whether a top-level `.tsx`/`.ts` file is now a barrel before adding new logic directly into it
@@ -292,7 +293,7 @@ The top-level docs now serve distinct audiences more cleanly:
 - `docs/architecture.md` plus `docs/architecture/` — system design, data model, compute, and worker topology
 - `docs/release-notes/` — release/change summaries for major shipped series
 - `docs/developer-guide.md` — contributor-facing implementation guide
-- `docs/research-context.md` — thesis and citation framing
+- `docs/research-context.md` — research and citation framing
 
 Existing planning and historical material remains available under the existing `docs/`, `docs/plans/`, and `docs/archive/` structure.
 
@@ -497,4 +498,4 @@ Be careful with any change that assumes the repo itself is the live data root. I
 - User workflow: [User Guide](./user-guide.md)
 - AI providers and tool surface: [AI Integration](./ai-integration.md)
 - System shape and data model: [Architecture](./architecture.md)
-- Thesis/citation framing: [Research Context](./research-context.md)
+- Research/citation framing: [Research Context](./research-context.md)

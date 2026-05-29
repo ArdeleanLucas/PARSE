@@ -13,7 +13,7 @@ Transcribe recordings, keep timestamps trustworthy, compare forms across speaker
   <img src="docs/pr-assets/pr76-compare-table.png" alt="Compare mode concept by speaker matrix" width="32%" />
 </p>
 
-> **Status**: Active research software. Thesis-critical features land frequently and file contracts still evolve.
+> **Status**: Active research software. Fieldwork-facing features land frequently and file contracts still evolve.
 
 ## The Problem
 Fieldwork data often ends up split across audio editors, spreadsheets, scripts, and notes. That makes it easy to lose track of where a form came from, which timestamp was reviewed, and which comparison decisions are final. PARSE keeps the audio, annotations, comparison table, notes, borrowing evidence, and exports in one workspace.
@@ -52,7 +52,7 @@ PARSE does not replace ELAN, Praat, FLEx, or LingPy. It connects them and adds t
 | Cross-speaker comparison | Manual | Scripted | Lexicon-focused | LexStat cognate clustering | Dedicated Compare table over the same workspace; runs LingPy LexStat with a tunable threshold |
 | Borrowing evidence | Manual | Manual | Manual | Programmatic | Manual flag in Compare; CLEF (Contact Lexeme Fetcher) auto-fetches contact-language forms from Wiktionary, ASJP, and Lexibank so you have something to compare against — the borrowing decision is yours, not algorithmic |
 | Phylogenetic export | Custom scripts | Custom scripts | Limited | Native Wordlist | One-click LingPy TSV (ID / CONCEPT / DOCULECT / IPA / COGID / TOKENS / BORROWING) and NEXUS; downstream consumption is not yet covered by integration tests |
-| AI / automation | Basic alignment | Powerful scripting | Low | Library scripting | Current Whisper STT via `faster-whisper`; optional forced alignment; 65-tool MCP agent layer |
+| AI / automation | Basic alignment | Powerful scripting | Low | Library scripting | Current Whisper STT via `faster-whisper`; optional forced alignment; 67-tool MCP agent layer |
 | End-to-end workflow | Annotation only | Acoustics only | Lexicon & glossing | Computation only | Audio → annotation → comparison → export in one workspace; multiple WAVs per speaker currently need manual coordination |
 | Stack | Java desktop | C / Pascal desktop | C# desktop | Python library | React 18 + Vite browser UI; Python HTTP server (FastAPI / Pydantic); Zustand state |
 
@@ -101,7 +101,7 @@ Full details in the [User Guide](docs/user-guide.md).
 ## Compare
 - Side-by-side table for comparing the same word or concept across speakers
 - Review multiple variants for a speaker and choose the form to use for comparison
-- Merge, split, or duplicate concept rows for analysis while preserving the underlying source data
+- Merge or split analytical rows, add/delete per-speaker elicitation intervals, and preserve the underlying source data
 - Survey/source labels and color cues for complex elicitation sets
 - Tools for grouping related forms and revising those groups as evidence changes
 - Borrowing review with contact-language evidence and citation cards
@@ -146,7 +146,7 @@ For setup and the full automation reference, see the [MCP Guide](docs/mcp-guide.
 - [Contributing](CONTRIBUTING.md)
 
 ## Research & Citation
-PARSE was developed for a **Southern Kurdish dialect phylogenetics thesis** at the **University of Bamberg**, but the workstation is general-purpose and applies to any fieldwork-driven comparative linguistics workflow involving long recordings, concept-based wordlists, cognate review, borrowing adjudication, and downstream analysis in **LingPy**, **LexStat**, or **BEAST 2**. If you use PARSE in academic work, cite it as research software via [`CITATION.cff`](CITATION.cff) or GitHub's **Cite this repository** UI.
+PARSE is general-purpose research software for fieldwork-driven comparative linguistics: long recordings, concept-based wordlists, cognate review, borrowing adjudication, and downstream analysis in **LingPy**, **LexStat**, or **BEAST 2**. It originated in University of Bamberg comparative-linguistics research, but it is not tied to one language family or thesis corpus. If you use PARSE in academic work, cite it as research software via [`CITATION.cff`](CITATION.cff) or GitHub's **Cite this repository** UI.
 
 > Ardelean, L. M. (2026). *PARSE: Phonetic Analysis & Review Source Explorer* [Computer software]. University of Bamberg. https://github.com/ArdeleanLucas/PARSE
 
@@ -154,7 +154,7 @@ See [Research Context](docs/research-context.md) for full citation guidance and 
 
 ### Talks & Presentations
 
-- **AI as a scout, not a judge: PARSE & Southern Kurdish dialect phylogenetics** (2026) — 15-minute talk demonstrating PARSE in an active thesis workflow. [Slides](https://ardeleanlucas.github.io/parse-ai-talk/) · [Repository](https://github.com/ArdeleanLucas/parse-ai-talk)
+- **AI as a scout, not a judge: PARSE & Southern Kurdish dialect phylogenetics** (2026) — 15-minute case-study talk showing PARSE applied to one comparative-linguistics project. [Slides](https://ardeleanlucas.github.io/parse-ai-talk/) · [Repository](https://github.com/ArdeleanLucas/parse-ai-talk)
 
 ## License
 [MIT License](LICENSE)

@@ -149,7 +149,11 @@ This layer stores computed comparative structures such as:
 - lexeme notes
 - manual overrides layered onto computed output, including `canonical_realizations` for A/B/C form picks, `concept_merges` for compare-row grouping, cognate-set edits, and speaker flags
 
-The point of the enrichments layer is to preserve comparative structure without collapsing the original annotation record into a purely derived format. Source-item grouping is derived from `concepts.csv` fields (`source_item`, `source_survey`, `custom_order`), while canonical realizations and concept merges live in `parse-enrichments.json` so review choices stay reversible and do not mutate source concepts or annotation tiers. Concept merges are Compare-mode-only: Annotate continues to expose raw concept rows so fieldwork navigation, tagging, and interval editing stay grounded in the source concept ids.
+The point of the enrichments layer is to preserve comparative structure without collapsing the original annotation record into a purely derived format. Source-item grouping is derived from `concepts.csv` fields (`source_item`, `source_survey`, `custom_order`), while canonical realizations and concept merges live in `parse-enrichments.json` so review choices stay reversible and do not mutate source concepts or annotation tiers.
+
+Multiple per-speaker elicitations now stay on the same canonical `concept_id`. Their A/B/C labels are computed from interval order when PARSE renders the UI. Deleting one elicitation removes that realization plus matching tier rows at the same time span, but it does not delete the canonical concept row.
+
+Concept merges are Compare-mode-only: Annotate continues to expose raw concept rows so fieldwork navigation, tagging, and interval editing stay grounded in the source concept ids.
 
 ### 3. Tags and speaker-local concept membership
 
@@ -208,7 +212,7 @@ with Hugging Face Transformers FP32 PyTorch on `razhan/whisper-base-sdh` via
 standard Hugging Face cache at `~/.cache/huggingface/`. The legacy CT2 path
 remains selectable with `ortho.backend = "faster-whisper"` and a local
 CTranslate2 conversion directory, but it is no longer recommended for Razhan SDH
-ORTH: on Lucas's RTX 5090, HF Transformers was 16x faster on Saha01 and
+ORTH: in PARSE's RTX 5090 benchmark, HF Transformers was 16x faster on a representative long recording and
 eliminated the 35.7% Latin / Cyrillic / CJK contamination seen in the CT2 path.
 
 The shipped HF provider uses low-level `WhisperProcessor` +
@@ -383,10 +387,10 @@ The in-app assistant works through `python/ai/chat_tools.py` (registry/orchestra
 
 Current counts:
 
-- **60** built-in PARSE chat tools
-- **60** default MCP task tools via `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`)
-- **64** total default MCP adapter tools including 3 workflow macros + `mcp_get_exposure_mode`
-- **44** total legacy curated opt-out tools when `config/mcp_config.json` sets `{ "expose_all_tools": false }`
+- **63** built-in PARSE chat tools
+- **63** default MCP task tools via `python/adapters/mcp_adapter.py` (thin MCP entrypoint; concrete adapter modules live under `python/adapters/mcp/`)
+- **67** total default MCP adapter tools including 3 workflow macros + `mcp_get_exposure_mode`
+- **47** total legacy curated opt-out tools when `config/mcp_config.json` sets `{ "expose_all_tools": false }`
 
 This separation matters architecturally:
 
