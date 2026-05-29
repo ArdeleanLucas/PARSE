@@ -586,7 +586,10 @@ export function ConceptSidebar({
             : [];
           const hasVariants = !hideVariantPills && visibleVariants.length > 1;
           const hasElicitationVariants = elicitationLabels.length > 1;
+          const hasPills = hasVariants || hasElicitationVariants;
           const firstVariantKey = visibleVariants[0]?.conceptKey ?? variants[0]?.conceptKey ?? null;
+          const rowConceptKey = firstVariantKey ?? concept.key;
+          const rowRealizationKey = rowConceptKey ? buildRealizationKey(rowConceptKey, 0) : undefined;
           const activeRealization = parseRealizationKey(activeRealizationKey);
           const activeConceptKey = activeRealization?.conceptId ?? null;
           const parentActive = !!(concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey)));
@@ -605,9 +608,9 @@ export function ConceptSidebar({
                 <button
                   aria-label={parentButtonLabel}
                   data-testid={`concept-parent-button-${concept.id}`}
+                  data-realization-key={!hasPills ? rowRealizationKey : undefined}
                   onClick={() => {
-                    const firstKey = firstVariantKey ?? concept.key;
-                    if (firstKey) onConceptSelect(concept.id, buildRealizationKey(firstKey, 0));
+                    if (rowRealizationKey) onConceptSelect(concept.id, rowRealizationKey);
                     else onConceptSelect(concept.id);
                   }}
                   onContextMenu={(event) => {

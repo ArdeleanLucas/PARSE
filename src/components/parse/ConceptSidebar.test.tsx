@@ -92,6 +92,57 @@ describe('ConceptSidebar', () => {
     expect(onConceptSelect).toHaveBeenCalledWith(247, '247:1');
   });
 
+  it('adds data-realization-key to only pill-less concept rows in DOM order', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={[
+          { id: 247, key: '247', name: 'head', tag: 'confirmed' as const },
+          {
+            id: 32,
+            key: 'source:JBIL:32',
+            name: 'hair',
+            tag: 'confirmed' as const,
+            variants: [
+              { conceptKey: '249', conceptEn: 'hair (men)', variantLabel: 'A', tag: 'confirmed' as const },
+              { conceptKey: '250', conceptEn: 'hair (women)', variantLabel: 'B', tag: 'review' as const },
+            ],
+          },
+          { id: 11, key: 'single-11', name: 'water', tag: 'untagged' as const },
+        ]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={11}
+        activeRealizationKey="single-11:0"
+        onConceptSelect={vi.fn()}
+        elicitationVariantLabelsByConceptKey={{ '247': ['A', 'B'] }}
+      />,
+    );
+
+    const sidebar = screen.getByTestId('concept-sidebar');
+    expect(Array.from(sidebar.querySelectorAll('[data-realization-key]')).map((el) => el.getAttribute('data-realization-key'))).toEqual([
+      '247:0',
+      '247:1',
+      '249:0',
+      '250:0',
+      'single-11:0',
+    ]);
+    expect(screen.getByTestId('concept-parent-button-247').hasAttribute('data-realization-key')).toBe(false);
+    expect(screen.getByTestId('concept-parent-button-32').hasAttribute('data-realization-key')).toBe(false);
+    expect(screen.getByTestId('concept-parent-button-11').getAttribute('data-realization-key')).toBe('single-11:0');
+  });
+
   it('Path 2: per-chip active state reflects activeRealizationKey', () => {
     render(
       <ConceptSidebar
