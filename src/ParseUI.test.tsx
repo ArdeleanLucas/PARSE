@@ -419,6 +419,7 @@ vi.mock("./api/client", () => ({
   listActiveJobs: vi.fn().mockResolvedValue([]),
   cancelComputeJob: vi.fn().mockResolvedValue({ cancelled: true, job_id: 'compute-job-1' }),
   deleteConcept: vi.fn().mockResolvedValue({ ok: true, deleted_id: '618' }),
+  deleteAnnotationInterval: vi.fn().mockResolvedValue({ ok: true, speaker: 'Fail01', concept_id: '527', start: 10, end: 11, removed: { concept: 1, ipa: 1, ortho: 0, ortho_words: 0, speaker: 0 }, backup_path: 'backup.json', tolerance_sec: 0.001 }),
   promoteConceptSurveyPrimary: vi.fn().mockResolvedValue({ ok: true, concept: { id: '1', label: 'nose', source_survey: 'jbil', source_item: '34' } }),
 }));
 
@@ -788,6 +789,8 @@ beforeEach(() => {
   vi.mocked(apiClient.cancelComputeJob).mockClear();
   vi.mocked(apiClient.deleteConcept).mockReset();
   vi.mocked(apiClient.deleteConcept).mockResolvedValue({ ok: true, deleted_id: '618' });
+  vi.mocked(apiClient.deleteAnnotationInterval).mockReset();
+  vi.mocked(apiClient.deleteAnnotationInterval).mockResolvedValue({ ok: true, speaker: 'Fail01', concept_id: '527', start: 10, end: 11, removed: { concept: 1, ipa: 1, ortho: 0, ortho_words: 0, speaker: 0 }, backup_path: 'backup.json', tolerance_sec: 0.001 });
   vi.mocked(apiClient.promoteConceptSurveyPrimary).mockReset();
   vi.mocked(apiClient.promoteConceptSurveyPrimary).mockResolvedValue({ ok: true, concept: { id: '1', label: 'nose', source_survey: 'jbil', source_item: '34' } });
 
@@ -3495,6 +3498,188 @@ describe("ParseUI", () => {
 
     fireEvent.keyDown(window, { key: "c" });
     expect(await screen.findByRole("button", { name: /Accept concept/i })).toBeTruthy();
+  });
+
+
+  it("Delete key on elicitation pill calls delete-interval handler with confirmation", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "527", label: "head", source_item: "10", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "head", conceptId: "527", ipa: "early", start: 3, end: 4 },
+        { conceptText: "head", conceptId: "527", ipa: "late", start: 10, end: 11 },
+      ]),
+    };
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    fireEvent.click(await within(sidebar).findByTestId("concept-elicitation-pill-527-1"));
+    fireEvent.keyDown(window, { key: "Delete" });
+
+    expect(confirmSpy).toHaveBeenCalledWith('Delete this interval (B) for "head"? A backup file will be created.');
+    await waitFor(() => expect(apiClient.deleteAnnotationInterval).toHaveBeenCalledWith({
+      speaker: "Fail01",
+      concept_id: "527",
+      start: 10,
+      end: 11,
+    }));
+  });
+
+  it("Delete key on variant pill opens delete-variant confirmation and can delete", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "365", label: "new (A)", source_item: "154", source_survey: "JBIL" },
+        { id: "618", label: "new (B)", source_item: "154", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", []) };
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    fireEvent.click(await within(sidebar).findByTestId("concept-variant-pill-618"));
+    fireEvent.keyDown(window, { key: "Delete" });
+
+    expect(screen.getByText("Delete new (B)?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(apiClient.deleteConcept).toHaveBeenCalledWith("618"));
+  });
+
+  it("Delete key on pill-less concept row opens delete-variant confirmation and can delete", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    window.localStorage.setItem("parse.sidebar.scopedToSpeaker.annotate", "false");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "2", label: "hair" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", []) };
+    vi.mocked(apiClient.deleteConcept).mockResolvedValueOnce({ ok: true, deleted_id: "2" });
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    fireEvent.click(sidebar.querySelector<HTMLElement>('[data-realization-key="2:0"]') as HTMLElement);
+    fireEvent.keyDown(window, { key: "Delete" });
+
+    expect(screen.getByText("Delete hair?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(apiClient.deleteConcept).toHaveBeenCalledWith("2"));
+  });
+
+  it("Delete key inside focused IPA input does nothing", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "527", label: "head", source_item: "10", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "head", conceptId: "527", ipa: "early", start: 3, end: 4 },
+        { conceptText: "head", conceptId: "527", ipa: "late", start: 10, end: 11 },
+      ]),
+    };
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    fireEvent.click(await within(sidebar).findByTestId("concept-elicitation-pill-527-1"));
+    const ipaInput = await screen.findByPlaceholderText("Enter IPA…");
+    fireEvent.focus(ipaInput);
+    fireEvent.keyDown(ipaInput, { key: "Delete" });
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(apiClient.deleteAnnotationInterval).not.toHaveBeenCalled();
+    expect(apiClient.deleteConcept).not.toHaveBeenCalled();
+  });
+
+  it("Delete key with no selection does nothing", async () => {
+    window.localStorage.setItem("parse.currentMode", "compare");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "527", label: "head", source_item: "10", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "head", conceptId: "527", ipa: "early", start: 3, end: 4 },
+        { conceptText: "head", conceptId: "527", ipa: "late", start: 10, end: 11 },
+      ]),
+    };
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<ParseUI />);
+    await screen.findByTestId("concept-sidebar");
+    fireEvent.keyDown(window, { key: "Delete" });
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(apiClient.deleteAnnotationInterval).not.toHaveBeenCalled();
+    expect(apiClient.deleteConcept).not.toHaveBeenCalled();
+  });
+
+  it("Delete key with user cancel leaves data intact", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "527", label: "head", source_item: "10", source_survey: "JBIL" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "head", conceptId: "527", ipa: "early", start: 3, end: 4 },
+        { conceptText: "head", conceptId: "527", ipa: "late", start: 10, end: 11 },
+      ]),
+    };
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    fireEvent.click(await within(sidebar).findByTestId("concept-elicitation-pill-527-1"));
+    fireEvent.keyDown(window, { key: "Delete" });
+
+    expect(confirmSpy).toHaveBeenCalledWith('Delete this interval (B) for "head"? A backup file will be created.');
+    expect(apiClient.deleteAnnotationInterval).not.toHaveBeenCalled();
+    expect(apiClient.deleteConcept).not.toHaveBeenCalled();
   });
 
   it("uses all arrow keys to cycle sidebar realization pills in DOM order regardless of focused element", async () => {

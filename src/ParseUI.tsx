@@ -1407,6 +1407,67 @@ export function ParseUI() {
     }
   }, [flashActionFeedback, reloadSpeakerAnnotation]);
 
+
+  const resolveDeleteConceptLabel = useCallback((conceptKey: string): string => {
+    const raw = rawConcepts.find((entry) => String(entry.id) === conceptKey);
+    if (raw?.label) return raw.label;
+    for (const candidate of concepts) {
+      const variant = [...(candidate.variants ?? []), ...(candidate.mergedVariants ?? [])]
+        .find((entry) => entry.conceptKey === conceptKey);
+      if (variant?.conceptEn) return variant.conceptEn;
+      if ((candidate.key ?? String(candidate.id)) === conceptKey) return candidate.name;
+    }
+    return conceptKey;
+  }, [concepts, rawConcepts]);
+
+  const openDeleteConceptConfirmation = useCallback((conceptKey: string) => {
+    setDeleteModalError(null);
+    setDeleteConfirmation({
+      conceptKey,
+      conceptLabel: resolveDeleteConceptLabel(conceptKey),
+      blockingSpeakers: null,
+      navigateAfterDeleteTo: null,
+    });
+  }, [resolveDeleteConceptLabel]);
+
+  const dispatchSelectedSidebarDelete = useCallback(() => {
+    if (!selectedRealizationKey) return false;
+    const selectedElement = Array.from(document.querySelectorAll<HTMLElement>('[data-realization-key]'))
+      .find((element) => element.getAttribute('data-realization-key') === selectedRealizationKey);
+    if (!selectedElement) return false;
+    const testId = selectedElement.getAttribute('data-testid') ?? '';
+    const realization = parseRealizationKey(selectedRealizationKey);
+    if (!realization) return false;
+
+    if (testId.startsWith('concept-elicitation-pill-')) {
+      const speaker = activeSpeakerForSidebar;
+      if (!speaker) return false;
+      const conceptLabel = findConceptByUnderlyingKey(concepts, realization.conceptId)?.name
+        ?? resolveDeleteConceptLabel(realization.conceptId);
+      const intervalLabel = elicitationVariantLabelsByConceptKey[realization.conceptId]?.[realization.intervalIndex];
+      const label = intervalLabel ? ` (${intervalLabel})` : '';
+      if (window.confirm(`Delete this interval${label} for "${conceptLabel}"? A backup file will be created.`)) {
+        void handleDeleteInterval(speaker, realization.conceptId, realization.intervalIndex);
+      }
+      return true;
+    }
+
+    if (testId.startsWith('concept-variant-pill-') || testId.startsWith('concept-parent-button-')) {
+      openDeleteConceptConfirmation(realization.conceptId);
+      return true;
+    }
+
+    return false;
+  }, [
+    activeSpeakerForSidebar,
+    concepts,
+    elicitationVariantLabelsByConceptKey,
+    handleDeleteInterval,
+    openDeleteConceptConfirmation,
+    resolveDeleteConceptLabel,
+    selectedRealizationKey,
+  ]);
+
   const speakerForms = useMemo<SpeakerForm[]>(() => {
     const activeSpeakers = selectedSpeakers.filter((speaker) => speakers.includes(speaker));
     const flagged = getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'problematic');
@@ -1579,6 +1640,15 @@ export function ParseUI() {
       const isVerticalArrow = e.key === 'ArrowUp' || e.key === 'ArrowDown';
       const isHorizontalArrow = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
       const isArrowKey = isVerticalArrow || isHorizontalArrow;
+      const inTextEditingField = e.target instanceof Element
+        && (['input', 'textarea', 'select'].includes(e.target.tagName.toLowerCase()) || (e.target as HTMLElement).isContentEditable);
+      if (e.key === 'Delete' && currentMode !== 'tags' && selectedRealizationKey) {
+        if (inTextEditingField) return;
+        if (dispatchSelectedSidebarDelete()) {
+          e.preventDefault();
+        }
+        return;
+      }
       const inInteractiveField = isInteractiveHotkeyTarget(e.target);
       if (currentMode === 'annotate' && isArrowKey) {
         e.preventDefault();
@@ -1627,7 +1697,7 @@ export function ParseUI() {
 
     window.addEventListener('keydown', onGlobalKeyDown);
     return () => window.removeEventListener('keydown', onGlobalKeyDown);
-  }, [currentMode, navigationTotal, goPrev, goNext, goToConceptOffset, goToRealizationOffset]);
+  }, [currentMode, navigationTotal, goPrev, goNext, goToConceptOffset, goToRealizationOffset, selectedRealizationKey, dispatchSelectedSidebarDelete]);
 
   useEffect(() => {
     if (!selectedRealizationKey) return;
@@ -1980,13 +2050,7 @@ export function ParseUI() {
             if (target) unmergeConcept(target.key);
           }}
           onDeleteConcept={(sidebarConcept) => {
-            setDeleteModalError(null);
-            setDeleteConfirmation({
-              conceptKey: sidebarConcept.key ?? String(sidebarConcept.id),
-              conceptLabel: sidebarConcept.name,
-              blockingSpeakers: null,
-              navigateAfterDeleteTo: null,
-            });
+            openDeleteConceptConfirmation(sidebarConcept.key ?? String(sidebarConcept.id));
           }}
           onAddElicitation={handleAddElicitation}
           onDeleteInterval={handleDeleteInterval}
