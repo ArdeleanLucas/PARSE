@@ -18,6 +18,7 @@ export interface RightPanelProps {
   onToggleSpeaker: (speaker: string) => void;
   onSelectAllSpeakers: () => void;
   onClearSpeakers: () => void;
+  onDeleteSpeaker?: (speaker: string) => void;
   computeMode: CompareComputeMode;
   onComputeModeChange: (mode: CompareComputeMode) => void;
   onComputeRun: () => void;
@@ -68,4 +69,5 @@ export interface SpeakersSectionProps {
   onToggleSpeaker: (speaker: string) => void;
   onSelectAllSpeakers: () => void;
   onClearSpeakers: () => void;
+  onDeleteSpeaker?: (speaker: string) => void;
 }

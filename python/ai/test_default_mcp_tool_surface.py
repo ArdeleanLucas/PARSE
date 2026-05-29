@@ -14,9 +14,10 @@ from ai.chat_tools import (
 
 
 def test_default_mcp_tool_names_lock_full_safe_surface() -> None:
-    assert len(LEGACY_CURATED_MCP_TOOL_NAMES) == 43
-    assert len(DEFAULT_MCP_TOOL_NAMES) == 63
+    assert len(LEGACY_CURATED_MCP_TOOL_NAMES) == 44
+    assert len(DEFAULT_MCP_TOOL_NAMES) == 64
     assert "export_review_data" in LEGACY_CURATED_MCP_TOOL_NAMES
+    assert "delete_speaker" in LEGACY_CURATED_MCP_TOOL_NAMES
     assert set(LEGACY_CURATED_MCP_TOOL_NAMES) < set(DEFAULT_MCP_TOOL_NAMES)
     assert len(set(DEFAULT_MCP_TOOL_NAMES)) == len(DEFAULT_MCP_TOOL_NAMES)
 

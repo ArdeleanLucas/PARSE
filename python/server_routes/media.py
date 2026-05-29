@@ -6,6 +6,7 @@ import logging
 import server as _server
 from concept_source_item import concept_row_from_item, read_concepts_csv_rows, source_item_from_audition_row
 from concept_registry import concept_label_key, load_concept_registry, merge_concepts_into_root_csv, resolve_or_allocate_concept_id
+from speaker_delete import SpeakerDeleteError, delete_speaker
 from survey_overlap import concept_survey_links_for_row, load_survey_overlap_state, normalize_survey_id, update_survey_overlap_state
 
 logger = logging.getLogger(__name__)
@@ -1129,6 +1130,49 @@ def _api_post_onboard_speaker_status(self) -> None:
         raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, 'job_id is not an onboard:speaker job')
     self._send_json(_server.HTTPStatus.OK, _server._job_response_payload(job))
 
+def _speaker_active_job_holder(speaker: str) -> _server.Optional[_server.Dict[str, _server.Any]]:
+    """Describe any queued/running job holding ``speaker``, else None.
+
+    Covers in-memory resource locks (normalize/stt/onboard/compute) and the
+    on-disk speaker lock used by lexeme/tag reruns.
+    """
+    resources = [{'kind': 'speaker', 'id': speaker}]
+    now_ts = _server.time.time()
+    with _server._jobs_lock:
+        conflict = _server._find_job_resource_conflict_locked(resources, now_ts=now_ts)
+    if conflict is not None:
+        job, _resource = conflict
+        return {
+            'jobId': str(job.get('jobId') or job.get('id') or ''),
+            'jobType': str(job.get('type') or ''),
+            'status': str(job.get('status') or ''),
+        }
+    try:
+        from server_routes.locks import _locks_dir as _resolve_locks_dir
+        from ai.speaker_locks import _lock_path_for_speaker
+        lock_file = _lock_path_for_speaker(_resolve_locks_dir(), speaker)
+        if lock_file.exists():
+            return {'lock': lock_file.name, 'status': 'locked'}
+    except Exception:
+        pass
+    return None
+
+def _api_delete_speaker(self, speaker: str) -> None:
+    """Delete an entire speaker: move artifacts to .trash and prune registries."""
+    try:
+        payload = delete_speaker(
+            _server._project_root(),
+            speaker,
+            active_job_check=lambda: _speaker_active_job_holder(speaker),
+        )
+    except SpeakerDeleteError as exc:
+        body: _server.Dict[str, object] = {'error': exc.message}
+        if exc.holder:
+            body['holder'] = exc.holder
+        self._send_json(exc.status, body)
+        return
+    self._send_json(_server.HTTPStatus.OK, payload)
+
 def _api_post_normalize_status(self) -> None:
     """Poll status for a normalize job."""
     body = self._expect_object(self._read_json_body(), 'Request body')
@@ -1179,5 +1223,5 @@ def _api_get_spectrogram(self) -> None:
     except BrokenPipeError:
         pass
 
-__all__ = ['_load_cached_suggestions', '_stt_coverage_end_sec', '_emit_stt_summary_log', '_run_stt_job', '_run_stt_job_subprocess_entry', '_run_stt_job_in_subprocess', '_compute_stt', '_parse_concepts_csv', '_merge_concepts_into_root_csv', '_register_speaker_in_project_json', '_run_onboard_speaker_job', '_refresh_source_audio_duration', '_run_normalize_job', '_compute_training_job', '_api_post_onboard_speaker', '_api_post_normalize', '_api_post_onboard_speaker_status', '_api_post_normalize_status', '_api_post_stt_start', '_api_post_stt_status', '_api_post_suggest', '_api_get_spectrogram']
+__all__ = ['_load_cached_suggestions', '_stt_coverage_end_sec', '_emit_stt_summary_log', '_run_stt_job', '_run_stt_job_subprocess_entry', '_run_stt_job_in_subprocess', '_compute_stt', '_parse_concepts_csv', '_merge_concepts_into_root_csv', '_register_speaker_in_project_json', '_run_onboard_speaker_job', '_refresh_source_audio_duration', '_run_normalize_job', '_compute_training_job', '_api_post_onboard_speaker', '_api_delete_speaker', '_api_post_normalize', '_api_post_onboard_speaker_status', '_api_post_normalize_status', '_api_post_stt_start', '_api_post_stt_status', '_api_post_suggest', '_api_get_spectrogram']
 

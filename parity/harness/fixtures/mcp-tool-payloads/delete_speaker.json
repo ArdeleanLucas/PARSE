@@ -1,0 +1,4 @@
+{
+  "speaker": "${ONBOARD_SPEAKER}",
+  "dryRun": true
+}

@@ -63,7 +63,7 @@ import { useExport } from './hooks/useExport';
 import { useTagImport } from './hooks/useTagImport';
 import { useActiveJobsFeed } from './hooks/useActiveJobsFeed';
 import { listActiveJobs } from './api/client';
-import { deleteAnnotationInterval, deleteConcept, promoteConceptSurveyPrimary } from './api/client';
+import { deleteAnnotationInterval, deleteConcept, deleteSpeaker, promoteConceptSurveyPrimary } from './api/client';
 import { ApiError } from './api/contracts/shared';
 import { useConfigStore } from './stores/configStore';
 import { useEnrichmentStore } from './stores/enrichmentStore';
@@ -877,6 +877,9 @@ export function ParseUI() {
   const [actionFeedback, setActionFeedback] = useState<{ message: string; variant: 'error' | 'warning' } | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationState | null>(null);
   const [deleteModalError, setDeleteModalError] = useState<string | null>(null);
+  const [deleteSpeakerTarget, setDeleteSpeakerTarget] = useState<string | null>(null);
+  const [deleteSpeakerError, setDeleteSpeakerError] = useState<string | null>(null);
+  const [deletingSpeaker, setDeletingSpeaker] = useState(false);
   const actionFeedbackTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
   useEffect(() => () => {
@@ -2430,6 +2433,7 @@ export function ParseUI() {
           onToggleSpeaker={toggleSpeaker}
           onSelectAllSpeakers={selectAllSpeakers}
           onClearSpeakers={clearSpeakers}
+          onDeleteSpeaker={(speaker) => { setDeleteSpeakerError(null); setDeleteSpeakerTarget(speaker); }}
           computeMode={computeMode}
           onComputeModeChange={setComputeMode}
           onComputeRun={handleComputeRun}
@@ -2628,6 +2632,67 @@ export function ParseUI() {
       </Modal>
       <Modal open={modals.commentsImport.isOpen} onClose={modals.commentsImport.close} title="Import Audition Comments">
         <CommentsImport onImportComplete={modals.commentsImport.close} />
+      </Modal>
+      <Modal
+        open={deleteSpeakerTarget !== null}
+        dismissible={!deletingSpeaker}
+        onClose={() => { if (!deletingSpeaker) { setDeleteSpeakerError(null); setDeleteSpeakerTarget(null); } }}
+        title={deleteSpeakerTarget ? `Delete ${deleteSpeakerTarget}?` : 'Delete speaker?'}
+      >
+        {deleteSpeakerTarget && (
+          <div className="space-y-4 text-sm text-slate-700 dark:text-slate-200">
+            {deleteSpeakerError && (
+              <div className="rounded border border-rose-200 bg-rose-50 p-3 text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
+                <p className="font-semibold">Delete failed.</p>
+                <p className="mt-1">{deleteSpeakerError}</p>
+              </div>
+            )}
+            <div className="rounded border border-rose-200 bg-rose-50 p-3 text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
+              <p className="font-semibold">This action cannot be undone.</p>
+              <p className="mt-1">
+                Permanently removes all of <span className="font-mono">{deleteSpeakerTarget}</span>'s audio, annotations,
+                peaks, transcripts, and survey/enrichment links. Deleted data is not recoverable from the app.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={deletingSpeaker}
+                className="rounded border border-slate-200 px-3 py-1.5 text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                onClick={() => { setDeleteSpeakerError(null); setDeleteSpeakerTarget(null); }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                data-testid="confirm-delete-speaker"
+                disabled={deletingSpeaker}
+                className="rounded bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+                onClick={() => {
+                  const target = deleteSpeakerTarget;
+                  void (async () => {
+                    try {
+                      setDeletingSpeaker(true);
+                      setDeleteSpeakerError(null);
+                      await deleteSpeaker(target);
+                      await reloadConfig();
+                      setSelectedSpeakers((sel) => sel.filter((s) => s !== target));
+                      setSpeakerPicker((picker) => (picker === target ? null : picker));
+                      setDeleteSpeakerTarget(null);
+                    } catch (err) {
+                      console.error('[ParseUI] deleteSpeaker failed:', err);
+                      setDeleteSpeakerError(err instanceof Error ? err.message : String(err));
+                    } finally {
+                      setDeletingSpeaker(false);
+                    }
+                  })();
+                }}
+              >
+                {deletingSpeaker ? 'Deleting…' : 'Delete speaker'}
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );
