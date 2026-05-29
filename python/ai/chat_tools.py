@@ -71,6 +71,7 @@ LEGACY_CURATED_MCP_TOOL_NAMES = (
     "rerun_lexemes_by_tag",
     "onboard_speaker_import",
     "import_processed_speaker",
+    "onboard_lexical_speaker",
     "csv_only_reimport",
     "revert_csv_reimport",
     "delete_speaker",
@@ -128,6 +129,7 @@ WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "source_index_validate",
     "transcript_reformat",
     "import_processed_speaker",
+    "onboard_lexical_speaker",
     "csv_only_reimport",
     "revert_csv_reimport",
     "delete_speaker",
@@ -554,6 +556,7 @@ from ai.tools.speaker_import_tools import (
     _write_source_index_for_processed_import,
     tool_csv_only_reimport,
     tool_import_processed_speaker,
+    tool_onboard_lexical_speaker,
     tool_onboard_speaker_import,
     tool_revert_csv_reimport,
 )
@@ -1448,6 +1451,9 @@ class ParseChatTools:
 
     def _tool_import_processed_speaker(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_import_processed_speaker(self, args)
+
+    def _tool_onboard_lexical_speaker(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        return tool_onboard_lexical_speaker(self, args)
 
     def _tool_csv_only_reimport(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_csv_only_reimport(self, args)

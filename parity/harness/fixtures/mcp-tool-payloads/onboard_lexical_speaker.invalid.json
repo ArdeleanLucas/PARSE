@@ -1,0 +1,6 @@
+{
+  "speaker": "${ONBOARD_SPEAKER}",
+  "sourceCsv": "${INPUT_ROOT}/missing-onboard-lexical.csv",
+  "languageCode": "sdh",
+  "dryRun": true
+}

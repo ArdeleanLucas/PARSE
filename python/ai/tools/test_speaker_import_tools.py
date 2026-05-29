@@ -12,7 +12,8 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from ai.chat_tools import ChatToolValidationError, ParseChatTools
+from ai.chat_tools import ChatToolValidationError, DEFAULT_MCP_TOOL_NAMES, REGISTRY, WRITE_ALLOWED_TOOL_NAMES, ParseChatTools
+from compare.cognate_compute import load_annotations
 from concept_source_item import CONCEPT_FIELDNAMES
 import ai.tools.speaker_import_tools as speaker_import_tools
 from ai.tools.speaker_import_tools import (
@@ -137,6 +138,186 @@ def _read_concepts_fixture(path: pathlib.Path) -> tuple[list[str], list[dict[str
     with path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         return list(reader.fieldnames or []), list(reader)
+
+
+def _write_lexical_wordlist(path: pathlib.Path, rows: list[dict[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["concept_id", "gloss", "ipa_form", "order", "source_survey"])
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
+def _lexical_rows() -> list[dict[str, object]]:
+    return [
+        {"concept_id": "1", "gloss": "ash", "ipa_form": "aʃ", "order": 20, "source_survey": ""},
+        {"concept_id": "2", "gloss": "dog", "ipa_form": "sɛg", "order": 10, "source_survey": "Oxford-SK"},
+        {"concept_id": "2", "gloss": "dog", "ipa_form": "kutʃ", "order": 20, "source_survey": "Oxford-SK"},
+    ]
+
+
+def test_tool_onboard_lexical_speaker_reports_dry_run_plan_without_writes(tmp_path) -> None:
+    external_root = tmp_path / "external"
+    source_csv = external_root / "qorv01.csv"
+    _write_lexical_wordlist(source_csv, _lexical_rows())
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    concepts_path = project_root / "concepts.csv"
+    concepts_before = b"id,concept_en,source_item,source_survey,custom_order\n1,ash,1.1,KLQ,10\n"
+    concepts_path.write_bytes(concepts_before)
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+
+    payload = speaker_import_tools.tool_onboard_lexical_speaker(
+        tools,
+        {"speaker": "Qorv01", "sourceCsv": str(source_csv), "languageCode": "sdh", "dryRun": True},
+    )
+
+    assert payload["ok"] is True
+    assert payload["dryRun"] is True
+    assert payload["plan"]["speaker"] == "Qorv01"
+    assert payload["plan"]["rowCount"] == 3
+    assert payload["plan"]["existingConceptCount"] == 1
+    assert payload["plan"]["newConceptCount"] == 1
+    assert payload["plan"]["annotationDest"].endswith("annotations/Qorv01.parse.json")
+    assert payload["plan"]["conceptsCsvDest"].endswith("concepts.csv")
+    assert concepts_path.read_bytes() == concepts_before
+    assert not (project_root / "annotations").exists()
+    assert not (project_root / "source_index.json").exists()
+    assert not (project_root / "imports").exists()
+
+
+def test_tool_onboard_lexical_speaker_writes_ipa_ortho_concepts_and_audio_less_index(tmp_path) -> None:
+    external_root = tmp_path / "external"
+    source_csv = external_root / "qorv01.csv"
+    _write_lexical_wordlist(source_csv, _lexical_rows())
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    _write_concepts_fixture(
+        project_root / "concepts.csv",
+        [{"id": "1", "concept_en": "ash", "source_item": "1.1", "source_survey": "KLQ", "custom_order": "10"}],
+    )
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+
+    payload = speaker_import_tools.tool_onboard_lexical_speaker(
+        tools,
+        {"speaker": "Qorv01", "sourceCsv": str(source_csv), "languageCode": "sdh", "dryRun": False},
+    )
+
+    assert payload["ok"] is True
+    assert payload["dryRun"] is False
+    annotation_path = project_root / "annotations" / "Qorv01.parse.json"
+    legacy_annotation_path = project_root / "annotations" / "Qorv01.json"
+    annotation = json.loads(annotation_path.read_text(encoding="utf-8"))
+    legacy_annotation = json.loads(legacy_annotation_path.read_text(encoding="utf-8"))
+    assert legacy_annotation == annotation
+    assert annotation["speaker"] == "Qorv01"
+    assert annotation["source_audio"] == ""
+    assert annotation["source_audio_duration_sec"] == 3.0
+    assert annotation["metadata"]["language_code"] == "sdh"
+    concept_intervals = annotation["tiers"]["concept"]["intervals"]
+    ipa_intervals = annotation["tiers"]["ipa"]["intervals"]
+    ortho_intervals = annotation["tiers"]["ortho"]["intervals"]
+    assert len(concept_intervals) == 3
+    assert len([item for item in concept_intervals if item["text"].startswith("2:")]) == 2
+    assert [(item["start"], item["end"]) for item in concept_intervals] == [(item["start"], item["end"]) for item in ipa_intervals]
+    assert [(item["start"], item["end"]) for item in concept_intervals] == [(item["start"], item["end"]) for item in ortho_intervals]
+    assert [item["text"] for item in ipa_intervals] == ["aʃ", "sɛg", "kutʃ"]
+    assert [item["text"] for item in ortho_intervals] == ["aʃ", "sɛg", "kutʃ"]
+    assert annotation["tiers"]["speaker"]["intervals"] == []
+
+    _fieldnames, concept_rows = _read_concepts_fixture(project_root / "concepts.csv")
+    rows_by_id = {row["id"]: row for row in concept_rows}
+    assert list(rows_by_id) == ["1", "2"]
+    assert rows_by_id["1"]["concept_en"] == "ash"
+    assert rows_by_id["1"]["source_survey"] == "KLQ"
+    assert rows_by_id["2"]["concept_en"] == "dog"
+    assert rows_by_id["2"]["source_survey"] == "Oxford-SK"
+
+    source_index = json.loads((project_root / "source_index.json").read_text(encoding="utf-8"))
+    speaker_entry = source_index["speakers"]["Qorv01"]
+    assert speaker_entry["source_wavs"] == []
+    assert speaker_entry["audio_less"] is True
+    assert speaker_entry["has_csv"] is False
+    assert speaker_entry["legacy_transcript_csv"] == "imports/lexical/Qorv01/qorv01.csv"
+    assert "lexical/wordlist import, no audio" in speaker_entry["notes"]
+    assert (project_root / "imports" / "lexical" / "Qorv01" / "qorv01.csv").read_text(encoding="utf-8") == source_csv.read_text(encoding="utf-8")
+
+
+def test_tool_onboard_lexical_speaker_feeds_audio_less_forms_to_cognate_compute(tmp_path) -> None:
+    external_root = tmp_path / "external"
+    source_csv = external_root / "qorv01.csv"
+    _write_lexical_wordlist(source_csv, _lexical_rows())
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+
+    speaker_import_tools.tool_onboard_lexical_speaker(
+        tools,
+        {"speaker": "Qorv01", "sourceCsv": str(source_csv), "languageCode": "sdh", "dryRun": False},
+    )
+
+    forms_by_concept, speakers = load_annotations(project_root / "annotations")
+    assert speakers == ["Qorv01"]
+    assert sorted(forms_by_concept) == ["1", "2"]
+    form_records = [record for records in forms_by_concept.values() for record in records]
+    assert len(form_records) == 2
+    assert all(record.ipa for record in form_records)
+    assert forms_by_concept["1"][0].ipa == "aʃ"
+    assert len(forms_by_concept["2"]) == 1
+    assert forms_by_concept["2"][0].ipa == "sɛg"
+
+
+def test_tool_onboard_lexical_speaker_rejects_conflicting_existing_concept_label(tmp_path) -> None:
+    external_root = tmp_path / "external"
+    source_csv = external_root / "qorv01.csv"
+    _write_lexical_wordlist(
+        source_csv,
+        [{"concept_id": "1", "gloss": "ember", "ipa_form": "xol", "order": 1, "source_survey": "Oxford-SK"}],
+    )
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    _write_concepts_fixture(
+        project_root / "concepts.csv",
+        [{"id": "1", "concept_en": "ash", "source_item": "1.1", "source_survey": "KLQ", "custom_order": "10"}],
+    )
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+
+    with pytest.raises(ChatToolValidationError, match="different label"):
+        speaker_import_tools.tool_onboard_lexical_speaker(
+            tools,
+            {"speaker": "Qorv01", "sourceCsv": str(source_csv), "languageCode": "sdh", "dryRun": False},
+        )
+
+
+def test_tool_onboard_lexical_speaker_rejects_duplicate_concept_order_pair(tmp_path) -> None:
+    external_root = tmp_path / "external"
+    source_csv = external_root / "qorv01.csv"
+    _write_lexical_wordlist(
+        source_csv,
+        [
+            {"concept_id": "1", "gloss": "ash", "ipa_form": "aʃ", "order": 1, "source_survey": "Oxford-SK"},
+            {"concept_id": "1", "gloss": "ash", "ipa_form": "xol", "order": 1, "source_survey": "Oxford-SK"},
+        ],
+    )
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+
+    with pytest.raises(ChatToolValidationError, match="Duplicate lexical row"):
+        speaker_import_tools.tool_onboard_lexical_speaker(
+            tools,
+            {"speaker": "Qorv01", "sourceCsv": str(source_csv), "languageCode": "sdh", "dryRun": True},
+        )
+
+
+def test_tool_onboard_lexical_speaker_is_registered_for_chat_and_mcp() -> None:
+    assert "onboard_lexical_speaker" in speaker_import_tools.SPEAKER_IMPORT_TOOL_NAMES
+    assert "onboard_lexical_speaker" in speaker_import_tools.SPEAKER_IMPORT_TOOL_SPECS
+    assert "onboard_lexical_speaker" in speaker_import_tools.SPEAKER_IMPORT_TOOL_HANDLERS
+    assert "onboard_lexical_speaker" in REGISTRY
+    assert "onboard_lexical_speaker" in DEFAULT_MCP_TOOL_NAMES
+    assert "onboard_lexical_speaker" in WRITE_ALLOWED_TOOL_NAMES
 
 
 def test_mcp_write_concepts_csv_preserves_existing_source_item_and_survey(tmp_path) -> None:

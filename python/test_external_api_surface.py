@@ -451,13 +451,14 @@ def test_build_mcp_http_catalog_defaults_to_full_safe_surface_without_config(tmp
 
     tool_names = {tool["name"] for tool in catalog["tools"]}
     assert catalog["mode"] == "default"
-    assert catalog["count"] == 68
-    assert catalog["exposure"]["mcpToolCount"] == 68
-    assert catalog["exposure"]["defaultParseMcpToolCount"] == 64
+    assert catalog["count"] == 69
+    assert catalog["exposure"]["mcpToolCount"] == 69
+    assert catalog["exposure"]["defaultParseMcpToolCount"] == 65
     assert "delete_speaker" in tool_names
     assert "audio_normalize_start" in tool_names
     assert "clef_clear_data" in tool_names
     assert "csv_only_reimport" in tool_names
+    assert "onboard_lexical_speaker" in tool_names
     assert "revert_csv_reimport" in tool_names
     assert "populate_cross_survey_links" in tool_names
     assert "export_annotations_csv" in tool_names
@@ -474,12 +475,13 @@ def test_build_mcp_http_catalog_active_mode_preserves_legacy_surface_for_explici
 
     tool_names = {tool["name"] for tool in catalog["tools"]}
     assert catalog["mode"] == "active"
-    assert catalog["count"] == 48
+    assert catalog["count"] == 49
     assert catalog["exposure"]["configSource"] == str(config_path)
-    assert catalog["exposure"]["mcpToolCount"] == 48
-    assert catalog["exposure"]["defaultParseMcpToolCount"] == 64
+    assert catalog["exposure"]["mcpToolCount"] == 49
+    assert catalog["exposure"]["defaultParseMcpToolCount"] == 65
     assert "annotation_read" in tool_names
     assert "csv_only_reimport" in tool_names
+    assert "onboard_lexical_speaker" in tool_names
     assert "revert_csv_reimport" in tool_names
     assert "populate_cross_survey_links" in tool_names
     assert "audio_normalize_start" not in tool_names

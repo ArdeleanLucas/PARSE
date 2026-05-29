@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 SPEAKER_IMPORT_TOOL_NAMES = (
     "onboard_speaker_import",
     "import_processed_speaker",
+    "onboard_lexical_speaker",
     "csv_only_reimport",
     "revert_csv_reimport",
 )
@@ -169,6 +170,61 @@ SPEAKER_IMPORT_TOOL_SPECS: Dict[str, ChatToolSpec] = {
             _tool_condition(
                 "processed_speaker_imported",
                 "When dryRun=false, the processed speaker artifacts are copied into the workspace and project/source-index metadata are updated.",
+                kind="filesystem_write",
+            ),
+        ),
+    ),
+    "onboard_lexical_speaker": ChatToolSpec(
+        name="onboard_lexical_speaker",
+        description=(
+            "Import a pure lexical wordlist as an audio-less PARSE speaker. "
+            "sourceCsv must be a pre-exploded CSV with concept_id, gloss, ipa_form, order, and source_survey columns. "
+            "The import writes synthetic one-second concept/IPA/ortho windows, registers source_index.json with source_wavs=[], "
+            "and stores the input CSV under imports/lexical/<speaker>/. Call dryRun=true first."
+        ),
+        parameters={
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["speaker", "sourceCsv", "dryRun"],
+            "properties": {
+                "speaker": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "Speaker ID to create or refresh as an audio-less lexical speaker.",
+                },
+                "sourceCsv": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024,
+                    "description": "Path to a pre-exploded lexical CSV: concept_id,gloss,ipa_form,order,source_survey.",
+                },
+                "languageCode": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "Optional BCP-47/ISO-style language code stored in annotation metadata. Defaults to und.",
+                },
+                "dryRun": {
+                    "type": "boolean",
+                    "description": "If true, validate and preview the import without writing files.",
+                },
+            },
+        },
+        mutability="mutating",
+        supports_dry_run=True,
+        dry_run_parameter="dryRun",
+        preconditions=(
+            _project_loaded_condition(),
+            _tool_condition(
+                "lexical_csv_readable",
+                "sourceCsv must resolve to a readable .csv file within the allowed import roots.",
+                kind="file_presence",
+            ),
+        ),
+        postconditions=(
+            _tool_condition(
+                "lexical_speaker_imported",
+                "When dryRun=false, annotations, concepts.csv, project.json, source_index.json, and imports/lexical are updated.",
                 kind="filesystem_write",
             ),
         ),
@@ -506,6 +562,184 @@ def _write_project_json_for_processed_import(
 
     tools.project_json_path.parent.mkdir(parents=True, exist_ok=True)
     tools.project_json_path.write_text(json.dumps(project, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+
+def _parse_lexical_order(raw_order: Any, row_number: int) -> int:
+    order_text = _normalize_space(raw_order)
+    if not order_text:
+        raise ChatToolValidationError("Lexical CSV row {0} is missing order".format(row_number))
+    try:
+        return int(order_text)
+    except (TypeError, ValueError) as exc:
+        raise ChatToolValidationError("Lexical CSV row {0} order must be an integer".format(row_number)) from exc
+
+
+def _read_lexical_wordlist_rows(source_csv: Path) -> List[Dict[str, Any]]:
+    required_fields = {"concept_id", "gloss", "ipa_form", "order", "source_survey"}
+    rows: List[Dict[str, Any]] = []
+    seen_pairs: set[tuple[str, int]] = set()
+    gloss_by_id: Dict[str, str] = {}
+    try:
+        with source_csv.open(newline="", encoding="utf-8-sig") as handle:
+            reader = csv.DictReader(handle)
+            fields = {str(field or "").strip() for field in (reader.fieldnames or [])}
+            missing = sorted(required_fields - fields)
+            if missing:
+                raise ChatToolValidationError("Lexical CSV is missing required column(s): {0}".format(", ".join(missing)))
+            for row_number, raw_row in enumerate(reader, start=2):
+                concept_id = _normalize_space(raw_row.get("concept_id"))
+                gloss = _normalize_space(raw_row.get("gloss"))
+                ipa_form = _normalize_space(raw_row.get("ipa_form"))
+                if not concept_id:
+                    raise ChatToolValidationError("Lexical CSV row {0} is missing concept_id".format(row_number))
+                if not gloss:
+                    raise ChatToolValidationError("Lexical CSV row {0} is missing gloss".format(row_number))
+                if not ipa_form:
+                    raise ChatToolValidationError("Lexical CSV row {0} is missing ipa_form".format(row_number))
+                order = _parse_lexical_order(raw_row.get("order"), row_number)
+                pair = (concept_id, order)
+                if pair in seen_pairs:
+                    raise ChatToolValidationError("Duplicate lexical row for concept_id={0!r}, order={1}".format(concept_id, order))
+                seen_pairs.add(pair)
+                existing_gloss = gloss_by_id.get(concept_id)
+                if existing_gloss is not None and existing_gloss.casefold() != gloss.casefold():
+                    raise ChatToolValidationError(
+                        "Lexical CSV concept_id {0!r} has multiple gloss labels: {1!r} and {2!r}".format(
+                            concept_id, existing_gloss, gloss
+                        )
+                    )
+                gloss_by_id.setdefault(concept_id, gloss)
+                rows.append(
+                    {
+                        "concept_id": concept_id,
+                        "gloss": gloss,
+                        "ipa_form": ipa_form,
+                        "order": order,
+                        "source_survey": _normalize_space(raw_row.get("source_survey")),
+                    }
+                )
+    except ChatToolValidationError:
+        raise
+    except (OSError, csv.Error, UnicodeDecodeError) as exc:
+        raise ChatToolValidationError("Could not read lexical CSV: {0}".format(exc)) from exc
+    if not rows:
+        raise ChatToolValidationError("Lexical CSV contains no importable rows")
+    rows.sort(key=lambda item: (_concept_sort_key(item["concept_id"]), item["order"]))
+    return rows
+
+
+def _lexical_concepts_from_rows(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, str]]:
+    concepts: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    for row in rows:
+        concept_id = _normalize_space(row.get("concept_id"))
+        if concept_id in seen:
+            continue
+        seen.add(concept_id)
+        concepts.append(
+            {
+                "id": concept_id,
+                "label": _normalize_space(row.get("gloss")),
+                "source_survey": _normalize_space(row.get("source_survey")),
+            }
+        )
+    return concepts
+
+
+def _lexical_existing_concepts_by_id(tools: "ParseChatTools") -> Dict[str, str]:
+    from concept_source_item import read_concepts_csv_rows, row_value
+
+    try:
+        rows = read_concepts_csv_rows(tools.project_root / "concepts.csv")
+    except (OSError, csv.Error, UnicodeDecodeError):
+        rows = []
+    return {
+        _normalize_space(row.get("id")): row_value(row, "concept_en")
+        for row in rows
+        if _normalize_space(row.get("id")) and row_value(row, "concept_en")
+    }
+
+
+def _validate_lexical_concept_labels(tools: "ParseChatTools", concepts: Sequence[Dict[str, str]]) -> tuple[int, int]:
+    existing_by_id = _lexical_existing_concepts_by_id(tools)
+    existing_count = 0
+    new_count = 0
+    for concept in concepts:
+        concept_id = _normalize_space(concept.get("id"))
+        label = _normalize_space(concept.get("label"))
+        existing_label = existing_by_id.get(concept_id)
+        if existing_label is None:
+            new_count += 1
+            continue
+        if existing_label.casefold() != label.casefold():
+            raise ChatToolValidationError(
+                "concept_id {0!r} already exists with different label {1!r}; incoming lexical label is {2!r}".format(
+                    concept_id, existing_label, label
+                )
+            )
+        existing_count += 1
+    return existing_count, new_count
+
+
+def _build_lexical_annotation(speaker: str, rows: Sequence[Dict[str, Any]], language_code: str) -> Dict[str, Any]:
+    created_at = _utc_now_iso()
+    concept_intervals: List[Dict[str, Any]] = []
+    ipa_intervals: List[Dict[str, Any]] = []
+    ortho_intervals: List[Dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        start = float(index)
+        end = start + 1.0
+        concept_id = _normalize_space(row.get("concept_id"))
+        gloss = _normalize_space(row.get("gloss"))
+        ipa_form = _normalize_space(row.get("ipa_form"))
+        concept_intervals.append({"start": start, "end": end, "text": "{0}: {1}".format(concept_id, gloss)})
+        ipa_intervals.append({"start": start, "end": end, "text": ipa_form})
+        ortho_intervals.append({"start": start, "end": end, "text": ipa_form})
+    return {
+        "version": 1,
+        "speaker": speaker,
+        "source_audio": "",
+        "source_audio_duration_sec": float(len(rows)),
+        "created_at": created_at,
+        "modified_at": created_at,
+        "metadata": {
+            "language_code": language_code or "und",
+            "timestamps_source": "lexical-wordlist",
+            "audio_less": True,
+        },
+        "tiers": {
+            "ipa": {"display_order": 1, "intervals": ipa_intervals},
+            "ortho": {"display_order": 2, "intervals": ortho_intervals},
+            "concept": {"display_order": 3, "intervals": concept_intervals},
+            "speaker": {"display_order": 4, "intervals": []},
+        },
+    }
+
+
+def _write_source_index_for_lexical_import(
+    tools: "ParseChatTools",
+    speaker: str,
+    transcript_csv_rel: str,
+) -> None:
+    source_index = _read_json_file(tools.source_index_path, {})
+    if not isinstance(source_index, dict):
+        source_index = {}
+    speakers_block = source_index.get("speakers")
+    if not isinstance(speakers_block, dict):
+        speakers_block = {}
+        source_index["speakers"] = speakers_block
+    speaker_entry = speakers_block.get(speaker)
+    if not isinstance(speaker_entry, dict):
+        speaker_entry = {}
+    speaker_entry["source_wavs"] = []
+    speaker_entry["audio_less"] = True
+    speaker_entry["has_csv"] = False
+    speaker_entry["legacy_transcript_csv"] = transcript_csv_rel
+    speaker_entry["notes"] = "lexical/wordlist import, no audio"
+    speakers_block[speaker] = speaker_entry
+    tools.source_index_path.parent.mkdir(parents=True, exist_ok=True)
+    tools.source_index_path.write_text(json.dumps(source_index, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _write_source_index_for_processed_import(
@@ -901,6 +1135,69 @@ def tool_revert_csv_reimport(tools: "ParseChatTools", args: Dict[str, Any]) -> D
     }
 
 
+def tool_onboard_lexical_speaker(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
+    speaker = tools._normalize_speaker(args.get("speaker"))
+    source_csv_raw = str(args.get("sourceCsv") or "").strip()
+    if not source_csv_raw:
+        raise ChatToolValidationError("sourceCsv is required")
+    source_csv = _resolve_onboard_source(tools, source_csv_raw, must_be_audio=False)
+    language_code = _normalize_space(args.get("languageCode")) or "und"
+    dry_run = bool(args.get("dryRun"))
+
+    rows = _read_lexical_wordlist_rows(source_csv)
+    concepts = _lexical_concepts_from_rows(rows)
+    existing_concept_count, new_concept_count = _validate_lexical_concept_labels(tools, concepts)
+    annotation_dest = tools.annotations_dir / (speaker + ".parse.json")
+    legacy_annotation_dest = tools.annotations_dir / (speaker + ".json")
+    transcript_dest = tools.project_root / "imports" / "lexical" / speaker / source_csv.name
+    concepts_dest = tools.project_root / "concepts.csv"
+    plan: Dict[str, Any] = {
+        "speaker": speaker,
+        "sourceCsv": str(source_csv),
+        "rowCount": len(rows),
+        "existingConceptCount": existing_concept_count,
+        "newConceptCount": new_concept_count,
+        "annotationDest": tools._display_readable_path(annotation_dest),
+        "legacyAnnotationDest": tools._display_readable_path(legacy_annotation_dest),
+        "conceptsCsvDest": tools._display_readable_path(concepts_dest),
+        "transcriptDest": tools._display_readable_path(transcript_dest),
+        "languageCode": language_code,
+    }
+    if dry_run:
+        return {
+            "ok": True,
+            "dryRun": True,
+            "plan": plan,
+            "message": "Preview only. Run again with dryRun=false to import the audio-less lexical speaker.",
+        }
+
+    annotation_payload = _build_lexical_annotation(speaker, rows, language_code)
+    annotation_dest.parent.mkdir(parents=True, exist_ok=True)
+    legacy_annotation_dest.parent.mkdir(parents=True, exist_ok=True)
+    annotation_text = json.dumps(annotation_payload, indent=2, ensure_ascii=False)
+    legacy_annotation_dest.write_text(annotation_text, encoding="utf-8")
+    annotation_dest.write_text(annotation_text, encoding="utf-8")
+
+    concept_total = _write_concepts_csv(tools, concepts)
+    _write_project_json_for_processed_import(tools, speaker, "parse-project", language_code, concept_total)
+
+    transcript_dest.parent.mkdir(parents=True, exist_ok=True)
+    _copy2_unless_samefile(source_csv, transcript_dest)
+    transcript_rel = transcript_dest.relative_to(tools.project_root).as_posix()
+    _write_source_index_for_lexical_import(tools, speaker, transcript_rel)
+
+    return {
+        "ok": True,
+        "dryRun": False,
+        "plan": plan,
+        "rowCount": len(rows),
+        "conceptCount": concept_total,
+        "annotationPath": tools._display_readable_path(annotation_dest),
+        "sourceIndexPath": tools._display_readable_path(tools.source_index_path),
+        "message": "Speaker {0!r} imported from lexical wordlist without audio.".format(speaker),
+    }
+
+
 def tool_import_processed_speaker(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
     import shutil
 
@@ -1147,6 +1444,7 @@ def tool_onboard_speaker_import(tools: "ParseChatTools", args: Dict[str, Any]) -
 SPEAKER_IMPORT_TOOL_HANDLERS = {
     "onboard_speaker_import": tool_onboard_speaker_import,
     "import_processed_speaker": tool_import_processed_speaker,
+    "onboard_lexical_speaker": tool_onboard_lexical_speaker,
     "csv_only_reimport": tool_csv_only_reimport,
     "revert_csv_reimport": tool_revert_csv_reimport,
 }

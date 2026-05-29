@@ -168,6 +168,7 @@ def test_prepare_fixture_bundle_seeds_multispeaker_workspace_and_inputs(tmp_path
     assert (fixture.workspace_root / "audio" / "original" / "Base01" / "source.wav").exists()
     assert (fixture.workspace_root / "audio" / "original" / "Base02" / "source.wav").exists()
     assert (fixture.input_root / "onboard" / "Parity01.wav").exists()
+    assert (fixture.input_root / "onboard-lexical.csv").read_text(encoding="utf-8").startswith("concept_id,gloss,ipa_form")
     assert (fixture.input_root / "concepts-import.csv").read_text(encoding="utf-8").startswith("id,concept_en")
     assert (fixture.input_root / "tags-import.csv").read_text(encoding="utf-8").startswith("concept_en")
 
