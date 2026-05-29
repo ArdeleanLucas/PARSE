@@ -1888,4 +1888,114 @@ describe('ConceptSidebar', () => {
     });
   });
 
+  describe('grouped variant elicitation sub-pills', () => {
+    const groupedHair = {
+      id: 7,
+      key: 'source:JBIL:32',
+      name: 'hair',
+      tag: 'untagged' as const,
+      sourceItem: '32',
+      variants: [
+        { conceptKey: '100', conceptEn: 'hair (men)', variantLabel: 'A' },
+        { conceptKey: '101', conceptEn: 'hair (women)', variantLabel: 'B' },
+      ],
+    };
+
+    function renderGrouped(overrides: Record<string, unknown> = {}) {
+      return render(
+        <ConceptSidebar
+          query=""
+          onQueryChange={vi.fn()}
+          sortParent="concept"
+          conceptSub="az"
+          sourceSub="time"
+          onSortParentChange={vi.fn()}
+          onConceptSubChange={vi.fn()}
+          onSourceSubChange={vi.fn()}
+          sourceDisabled={false}
+          filteredConcepts={[groupedHair]}
+          statusFilter="all"
+          onStatusFilterChange={vi.fn()}
+          selectedTagIds={new Set()}
+          onTagSelectionChange={vi.fn()}
+          tags={[]}
+          activeConceptId={7}
+          activeSpeaker="Fail01"
+          onConceptSelect={vi.fn()}
+          elicitationVariantLabelsByConceptKey={{ '100': ['A', 'B'], '101': [''] }}
+          {...overrides}
+        />,
+      );
+    }
+
+    it('expands a multi-interval variant into per-interval sub-pills while a single-interval sibling stays one pill', () => {
+      renderGrouped();
+
+      const second = screen.getByTestId('concept-variant-elicitation-pill-100-1');
+      expect(screen.getByTestId('concept-variant-elicitation-pill-100-0')).toBeTruthy();
+      expect(second).toBeTruthy();
+      expect(second.getAttribute('data-realization-key')).toBe('100:1');
+      expect(second.textContent ?? '').toContain('A·B');
+      // The men variant is now represented by sub-pills, not a single index-0 pill.
+      expect(screen.queryByTestId('concept-variant-pill-100')).toBeNull();
+      // The single-interval women variant keeps its plain pill.
+      expect(screen.getByTestId('concept-variant-pill-101')).toBeTruthy();
+    });
+
+    it('selects the correct interval realization when a sub-pill is clicked', () => {
+      const onConceptSelect = vi.fn();
+      renderGrouped({ onConceptSelect });
+
+      fireEvent.click(screen.getByTestId('concept-variant-elicitation-pill-100-1'));
+      expect(onConceptSelect).toHaveBeenCalledWith(7, '100:1');
+    });
+
+    it("fires onAddElicitation with the variant's conceptKey from a sub-pill context menu", () => {
+      const onAddElicitation = vi.fn();
+      renderGrouped({ onAddElicitation, onDeleteInterval: vi.fn() });
+
+      fireEvent.contextMenu(screen.getByTestId('concept-variant-elicitation-pill-100-1'));
+      fireEvent.click(screen.getByRole('menuitem', { name: /\+ Add elicitation/ }));
+      expect(onAddElicitation).toHaveBeenCalledWith(expect.objectContaining({ key: '100' }));
+    });
+
+    it('offers Delete this interval (not Delete variant) on a sub-pill context menu', () => {
+      renderGrouped({ onDeleteInterval: vi.fn(), onDeleteConcept: vi.fn() });
+
+      fireEvent.contextMenu(screen.getByTestId('concept-variant-elicitation-pill-100-1'));
+      expect(screen.getByRole('menuitem', { name: /Delete this interval/i })).toBeTruthy();
+      expect(screen.queryByRole('menuitem', { name: /Delete variant/i })).toBeNull();
+    });
+
+    it('confirms and calls onDeleteInterval with the variant key and interval index', () => {
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+      const onDeleteInterval = vi.fn();
+      renderGrouped({ onDeleteInterval });
+
+      fireEvent.contextMenu(screen.getByTestId('concept-variant-elicitation-pill-100-1'));
+      fireEvent.click(screen.getByRole('menuitem', { name: /Delete this interval/i }));
+      expect(onDeleteInterval).toHaveBeenCalledWith('Fail01', '100', 1);
+      confirmSpy.mockRestore();
+    });
+
+    it('shows sub-pills even when speaker scope leaves only one visible variant', () => {
+      renderGrouped({
+        isConceptVariantVisibleInSidebar: (_concept: unknown, variant: { conceptKey: string }) => variant.conceptKey === '100',
+        elicitationVariantLabelsByConceptKey: { '100': ['A', 'B'] },
+      });
+
+      expect(screen.getByTestId('concept-variant-elicitation-pill-100-0')).toBeTruthy();
+      expect(screen.getByTestId('concept-variant-elicitation-pill-100-1')).toBeTruthy();
+      expect(screen.queryByTestId('concept-variant-pill-101')).toBeNull();
+    });
+
+    it('keeps plain variant pills when no variant has multiple intervals', () => {
+      renderGrouped({ elicitationVariantLabelsByConceptKey: { '100': [''], '101': [''] } });
+
+      expect(screen.getByTestId('concept-variant-pill-100')).toBeTruthy();
+      expect(screen.getByTestId('concept-variant-pill-101')).toBeTruthy();
+      expect(screen.queryByTestId('concept-variant-elicitation-pill-100-0')).toBeNull();
+    });
+  });
+
 });
