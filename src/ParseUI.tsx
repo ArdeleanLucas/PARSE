@@ -1517,33 +1517,6 @@ export function ParseUI() {
     : (filtered.length > 0 ? filtered : concepts);
   const navigationTotal = navigationConcepts.length;
 
-  const intervalsForRealizationKey = useCallback((conceptKey: string) => {
-    if (!activeSpeakerForSidebar) return [];
-    return [...(annotationRecords[activeSpeakerForSidebar]?.tiers?.concept?.intervals ?? [])]
-      .filter((interval) => String(interval.concept_id ?? '') === conceptKey)
-      .sort((left, right) => (left.start - right.start) || (left.end - right.end));
-  }, [activeSpeakerForSidebar, annotationRecords]);
-
-  const firstUnderlyingKeyForNavigation = useCallback((candidate: Concept): string | null => {
-    return conceptUnderlyingKeys(candidate)[0] ?? candidate.key ?? null;
-  }, []);
-
-  const findNavigationConceptIndex = useCallback((realizationConceptId: string | null): number => {
-    const list = navigationConcepts.length > 0 ? navigationConcepts : concepts;
-    if (realizationConceptId) {
-      const byRawKey = list.findIndex((candidate) => conceptUnderlyingKeys(candidate).includes(realizationConceptId));
-      if (byRawKey >= 0) return byRawKey;
-    }
-    const byConceptId = list.findIndex((candidate) => candidate.id === conceptId);
-    return byConceptId >= 0 ? byConceptId : 0;
-  }, [conceptId, concepts, navigationConcepts]);
-
-  const selectNavigationConcept = useCallback((target: Concept, intervalIndex = 0) => {
-    const targetKey = firstUnderlyingKeyForNavigation(target);
-    setConceptId(target.id);
-    setSelectedRealizationKey(targetKey ? buildRealizationKey(targetKey, intervalIndex) : null);
-  }, [firstUnderlyingKeyForNavigation]);
-
   const resolveConceptOffsetTarget = useCallback((offset: number): { conceptId: number; conceptKey: string | null } | null => {
     const list = navigationConcepts.length > 0 ? navigationConcepts : concepts;
     if (list.length === 0) return null;
@@ -1555,39 +1528,16 @@ export function ParseUI() {
   }, [conceptId, concepts, navigationConcepts]);
 
   const goToConceptOffset = useCallback((offset: number) => {
-    const list = navigationConcepts.length > 0 ? navigationConcepts : concepts;
-    if (list.length === 0) return;
-    const current = selectedRealization?.conceptId ?? activeRawKey;
-    const baseIndex = findNavigationConceptIndex(current);
-    const nextIndex = Math.min(list.length - 1, Math.max(0, baseIndex + offset));
-    const target = list[nextIndex];
-    if (target) selectNavigationConcept(target, 0);
-  }, [activeRawKey, concepts, findNavigationConceptIndex, navigationConcepts, selectNavigationConcept, selectedRealization]);
-
-  const goToRealizationOffset = useCallback((offset: 1 | -1) => {
-    const list = navigationConcepts.length > 0 ? navigationConcepts : concepts;
-    if (list.length === 0) return;
-    const currentConceptId = selectedRealization?.conceptId ?? activeRawKey ?? firstUnderlyingKeyForNavigation(list[0]);
-    if (!currentConceptId) return;
-    const currentIntervalIndex = selectedRealization?.conceptId === currentConceptId ? selectedRealization.intervalIndex : 0;
-    const currentIntervals = intervalsForRealizationKey(currentConceptId);
-    const currentCount = Math.max(1, currentIntervals.length);
-    const nextIntervalIndex = currentIntervalIndex + offset;
-    if (nextIntervalIndex >= 0 && nextIntervalIndex < currentCount) {
-      const currentConceptIndex = findNavigationConceptIndex(currentConceptId);
-      const currentConcept = list[currentConceptIndex];
-      if (currentConcept) setConceptId(currentConcept.id);
-      setSelectedRealizationKey(buildRealizationKey(currentConceptId, nextIntervalIndex));
-      return;
-    }
-    const currentConceptIndex = findNavigationConceptIndex(currentConceptId);
-    const nextConcept = list[currentConceptIndex + offset];
-    if (!nextConcept) return;
-    const nextKey = firstUnderlyingKeyForNavigation(nextConcept);
-    if (!nextKey) return;
-    const nextCount = Math.max(1, intervalsForRealizationKey(nextKey).length);
-    selectNavigationConcept(nextConcept, offset > 0 ? 0 : nextCount - 1);
-  }, [activeRawKey, concepts, findNavigationConceptIndex, firstUnderlyingKeyForNavigation, intervalsForRealizationKey, navigationConcepts, selectNavigationConcept, selectedRealization]);
+    setSelectedRealizationKey(null);
+    setConceptId((id) => {
+      const list = navigationConcepts.length > 0 ? navigationConcepts : concepts;
+      if (list.length === 0) return id;
+      const currentIndex = list.findIndex((candidate) => candidate.id === id);
+      const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+      const nextIndex = Math.min(list.length - 1, Math.max(0, baseIndex + offset));
+      return list[nextIndex]?.id ?? id;
+    });
+  }, [concepts, navigationConcepts]);
   const goPrev = useCallback(() => goToConceptOffset(-1), [goToConceptOffset]);
   const goNext = useCallback(() => goToConceptOffset(1), [goToConceptOffset]);
 
@@ -1602,32 +1552,22 @@ export function ParseUI() {
 
       const isVerticalArrow = e.key === 'ArrowUp' || e.key === 'ArrowDown';
       const isHorizontalArrow = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
-      const isPageConceptKey = e.key === 'PageUp' || e.key === 'PageDown';
       const inInteractiveField = isInteractiveHotkeyTarget(e.target);
-      if (inInteractiveField) return;
-      if (currentMode !== 'tags' && navigationTotal > 1 && isVerticalArrow) {
-        e.preventDefault();
-        goToRealizationOffset(e.key === 'ArrowDown' ? 1 : -1);
-        return;
-      }
-      if (currentMode !== 'tags' && navigationTotal > 1 && isPageConceptKey) {
-        e.preventDefault();
-        goToConceptOffset(e.key === 'PageDown' ? 1 : -1);
-        return;
-      }
       if (
         currentMode === 'annotate'
         && navigationTotal > 1
-        && isHorizontalArrow
+        && (isVerticalArrow || (isHorizontalArrow && !inInteractiveField))
       ) {
         e.preventDefault();
-        if (e.key === 'ArrowLeft') {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
           goPrev();
         } else {
           goNext();
         }
         return;
       }
+
+      if (inInteractiveField) return;
 
       const key = e.key.toLowerCase();
       if (key === 'a') {
@@ -1665,7 +1605,7 @@ export function ParseUI() {
 
     window.addEventListener('keydown', onGlobalKeyDown);
     return () => window.removeEventListener('keydown', onGlobalKeyDown);
-  }, [currentMode, navigationTotal, goPrev, goNext, goToConceptOffset, goToRealizationOffset]);
+  }, [currentMode, navigationTotal, goPrev, goNext]);
 
   useEffect(() => {
     if (!selectedRealizationKey) return;
