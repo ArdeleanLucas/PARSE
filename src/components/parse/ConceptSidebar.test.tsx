@@ -1935,7 +1935,10 @@ describe('ConceptSidebar', () => {
       expect(screen.getByTestId('concept-variant-elicitation-pill-100-0')).toBeTruthy();
       expect(second).toBeTruthy();
       expect(second.getAttribute('data-realization-key')).toBe('100:1');
-      expect(second.textContent ?? '').toContain('A·B');
+      // Sub-pills show only the elicitation letter (A/B/C), not a combined variant·letter label.
+      expect(screen.getByTestId('concept-variant-elicitation-pill-100-0').textContent ?? '').toContain('A');
+      expect(second.textContent ?? '').toContain('B');
+      expect(second.textContent ?? '').not.toContain('·');
       // The men variant is now represented by sub-pills, not a single index-0 pill.
       expect(screen.queryByTestId('concept-variant-pill-100')).toBeNull();
       // The single-interval women variant keeps its plain pill.
