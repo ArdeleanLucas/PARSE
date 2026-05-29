@@ -601,7 +601,12 @@ export function ConceptSidebar({
           const elicitationLabels = !hideVariantPills && !visibleVariants.length
             ? (elicitationVariantLabelsByConceptKey[concept.key ?? String(concept.id)] ?? [])
             : [];
-          const hasVariants = !hideVariantPills && visibleVariants.length > 1;
+          const variantElicitationLabelsFor = (conceptKey: string): string[] => elicitationVariantLabelsByConceptKey[conceptKey] ?? [];
+          // A grouped variant can hold more than one elicitation interval. When it does,
+          // surface each interval as its own sub-pill so the extra intervals are reachable
+          // (a single visible variant with multiple intervals must still show the strip).
+          const anyVariantHasMultipleElicitations = visibleVariants.some((variant) => variantElicitationLabelsFor(variant.conceptKey).length > 1);
+          const hasVariants = !hideVariantPills && (visibleVariants.length > 1 || (visibleVariants.length === 1 && anyVariantHasMultipleElicitations));
           const hasElicitationVariants = elicitationLabels.length > 1;
           const hasPills = hasVariants || hasElicitationVariants;
           const firstVariantKey = visibleVariants[0]?.conceptKey ?? variants[0]?.conceptKey ?? null;
@@ -660,8 +665,6 @@ export function ConceptSidebar({
                 {hasVariants && (
                   <div className="ml-1 flex shrink-0 items-center gap-0.5" aria-label={`${parentName} variants`}>
                     {visibleVariants.map((variant) => {
-                      const realizationKey = buildRealizationKey(variant.conceptKey, 0);
-                      const childActive = concept.id === activeConceptId && activeRealizationKey === realizationKey;
                       const childConcept: SidebarConcept = {
                         ...concept,
                         key: variant.conceptKey,
@@ -671,6 +674,38 @@ export function ConceptSidebar({
                         mergedVariants: undefined,
                         mergeAbsorbedNames: undefined,
                       };
+                      const variantLabels = variantElicitationLabelsFor(variant.conceptKey);
+                      const variantDetails = elicitationDetailsByConceptKey[variant.conceptKey] ?? [];
+                      if (variantLabels.length > 1) {
+                        return variantLabels.map((letter, intervalIndex) => {
+                          const realizationKey = buildRealizationKey(variant.conceptKey, intervalIndex);
+                          const childActive = concept.id === activeConceptId && activeRealizationKey === realizationKey;
+                          const detail = variantDetails[intervalIndex];
+                          return (
+                            <VariantChip
+                              as="button"
+                              key={realizationKey}
+                              letter={`${variant.variantLabel}·${letter}`}
+                              dotClassName={tagDot[variant.tag ?? concept.tag]}
+                              dotTestId={`concept-variant-pill-dot-${variant.conceptKey}`}
+                              conceptEn={variant.conceptEn}
+                              active={childActive}
+                              aria-label={`${parentName} variant ${variant.variantLabel} ${variant.conceptEn} (${letter})`}
+                              title={`${variant.conceptEn} (${letter})${formatElicitationDetailSuffix(detail)}`}
+                              data-realization-key={realizationKey}
+                              data-testid={`concept-variant-elicitation-pill-${variant.conceptKey}-${intervalIndex}`}
+                              onClick={() => onConceptSelect(concept.id, realizationKey)}
+                              onContextMenu={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setContextMenu({ concept: childConcept, x: event.clientX, y: event.clientY, intervalIndex, intervalLabel: letter, intervalDetail: detail });
+                              }}
+                            />
+                          );
+                        });
+                      }
+                      const realizationKey = buildRealizationKey(variant.conceptKey, 0);
+                      const childActive = concept.id === activeConceptId && activeRealizationKey === realizationKey;
                       return (
                         <VariantChip
                           as="button"
