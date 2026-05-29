@@ -772,7 +772,7 @@ export function ConceptSidebar({
           >
             Change survey ID…
           </button>
-          {!contextMenu.concept.variants?.length && (
+          {contextMenu.intervalIndex === undefined && !contextMenu.concept.variants?.length && (
             <button
               type="button"
               role="menuitem"
