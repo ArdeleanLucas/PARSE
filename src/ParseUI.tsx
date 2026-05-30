@@ -80,6 +80,7 @@ import { CommentsImport } from './components/compare/CommentsImport';
 import { SpeakerImport } from './components/compare/SpeakerImport';
 import { ManageTagsView } from './components/compare/ManageTagsView';
 import { SpeakerFormsTable } from './components/compare/SpeakerFormsTable';
+import { nextCognateGroup } from './components/compare/CognateCell';
 import { Pill, SectionCard } from './components/compare/UIPrimitives';
 import { AnnotateView } from './components/annotate/AnnotateView';
 import { JobLogsModal } from './components/annotate/JobLogsModal';
@@ -401,16 +402,7 @@ export function ParseUI() {
   };
 
   const cycleSpeakerCognate = (conceptKey: string, speaker: string, current: string) => {
-    // A → B → C → … → Z → — → A.
-    let next: string | null;
-    if (current === '\u2014' || !/^[A-Z]$/.test(current)) {
-      next = 'A';
-    } else if (current === 'Z') {
-      next = null;
-    } else {
-      next = String.fromCharCode(current.charCodeAt(0) + 1);
-    }
-    writeSpeakerCognate(conceptKey, speaker, next);
+    writeSpeakerCognate(conceptKey, speaker, nextCognateGroup(current));
   };
 
   const resetSpeakerCognate = (conceptKey: string, speaker: string) => {

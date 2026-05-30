@@ -30,9 +30,19 @@ export const SimBar: React.FC<{ value: number | null }> = ({ value }) => {
   );
 };
 
-// Per-speaker cognate cell. Click cycles A → B → … → Z → — → A. A long press
+// Per-speaker cognate cell. Click cycles A → B → … → J → — → A. A long press
 // (≥500 ms) resets to —. The button swallows the subsequent click after a
 // long-press fires so cycle doesn't also run.
+export const MAX_COGNATE_GROUP = 'J';
+
+// Returns the next manual group, or null to clear ("—"). Auto-computed sets
+// may emit letters past J; clicking any out-of-range value funnels to A.
+export const nextCognateGroup = (current: string): string | null => {
+  if (!/^[A-J]$/.test(current)) return 'A';
+  if (current === MAX_COGNATE_GROUP) return null;
+  return String.fromCharCode(current.charCodeAt(0) + 1);
+};
+
 export const COGNATE_COLORS: Record<string, string> = {
   A: 'bg-indigo-100 text-indigo-700',
   B: 'bg-violet-100 text-violet-700',
@@ -104,9 +114,7 @@ export const CognateCell: React.FC<{
     ? COGNATE_COLORS[group] ?? 'bg-slate-200 text-slate-800'
     : 'bg-slate-100 text-slate-400';
 
-  const next = group === '—' || !/^[A-Z]$/.test(group) ? 'A'
-    : group === 'Z' ? '—'
-    : String.fromCharCode(group.charCodeAt(0) + 1);
+  const next = nextCognateGroup(group) ?? '—';
 
   return (
     <button

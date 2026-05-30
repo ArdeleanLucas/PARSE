@@ -357,6 +357,7 @@ The current Compare interface provides:
   - A/B/C labels come from the speaker's interval order
   - **Delete this interval** removes only the selected realization plus its matching IPA/orthography/word-boundary rows without deleting the concept row
 - **cognate controls** for accept, split, merge, and cycle
+- Cognate classes A–J (10 states). Click the pill to cycle; long-press to clear.
 - per-row cognate-group editing
 - speaker flags and secondary-action controls
 - borrowing adjudication aided by contact-language similarity signals
