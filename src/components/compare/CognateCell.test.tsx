@@ -2,7 +2,7 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { COGNATE_COLORS, CognateCell, SimBar } from './CognateCell';
+import { COGNATE_COLORS, CognateCell, nextCognateGroup, SimBar } from './CognateCell';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -31,6 +31,22 @@ describe('SimBar', () => {
   });
 });
 
+describe('nextCognateGroup', () => {
+  it('cycles through the manual A-J domain and clears after J', () => {
+    expect(nextCognateGroup('—')).toBe('A');
+    expect(nextCognateGroup('A')).toBe('B');
+    expect(nextCognateGroup('I')).toBe('J');
+    expect(nextCognateGroup('J')).toBeNull();
+  });
+
+  it('funnels invalid or auto-computed groups past J back to A', () => {
+    expect(nextCognateGroup('K')).toBe('A');
+    expect(nextCognateGroup('M')).toBe('A');
+    expect(nextCognateGroup('Z')).toBe('A');
+    expect(nextCognateGroup('')).toBe('A');
+  });
+});
+
 describe('CognateCell', () => {
   it('uses configured cognate color mapping for letter groups', () => {
     const { getByTestId } = render(
@@ -50,6 +66,38 @@ describe('CognateCell', () => {
 
     expect(onCycle).toHaveBeenCalledTimes(1);
     expect(onReset).not.toHaveBeenCalled();
+  });
+
+  it('shows the full manual A-J loop in the next-cycle title', () => {
+    const expectedNextByGroup: Array<[string, string]> = [
+      ['—', 'A'],
+      ['A', 'B'],
+      ['B', 'C'],
+      ['C', 'D'],
+      ['D', 'E'],
+      ['E', 'F'],
+      ['F', 'G'],
+      ['G', 'H'],
+      ['H', 'I'],
+      ['I', 'J'],
+      ['J', '—'],
+    ];
+
+    const { rerender } = render(<CognateCell speaker="s4" group="—" onCycle={() => {}} onReset={() => {}} />);
+
+    for (const [group, next] of expectedNextByGroup) {
+      rerender(<CognateCell speaker="s4" group={group} onCycle={() => {}} onReset={() => {}} />);
+      expect(screen.getByTestId('cognate-cycle-s4').getAttribute('title')).toContain(`Click cycles → ${next}`);
+    }
+  });
+
+  it('shows auto-computed groups past J but funnels their next click back to A', () => {
+    render(<CognateCell speaker="s5" group="M" onCycle={() => {}} onReset={() => {}} />);
+
+    const button = screen.getByTestId('cognate-cycle-s5');
+    expect(button.textContent).toBe('M');
+    expect(button.className).toContain('bg-indigo-200');
+    expect(button.getAttribute('title')).toContain('Click cycles → A');
   });
 
   it('dispatches reset on long press and suppresses the follow-up cycle', () => {
