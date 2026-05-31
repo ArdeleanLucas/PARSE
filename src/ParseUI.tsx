@@ -2358,9 +2358,9 @@ export function ParseUI() {
                     conceptKey={concept.key}
                     initialExpandedSpeaker={compareReturn.initialExpandedSpeaker ?? undefined}
                     onBundleUpdated={handleCompareBundleUpdated}
-                    onCycleCognate={(speaker, current) => cycleSpeakerCognate(concept.key, speaker, current)}
-                    onResetCognate={(speaker) => resetSpeakerCognate(concept.key, speaker)}
-                    onToggleSpeakerFlag={(speaker, current) => toggleSpeakerFlag(concept.key, speaker, current)}
+                    onCycleCognate={(speaker, current, cognateKey) => cycleSpeakerCognate(cognateKey, speaker, current)}
+                    onResetCognate={(speaker, cognateKey) => resetSpeakerCognate(cognateKey, speaker)}
+                    onToggleSpeakerFlag={(speaker, current, cognateKey) => toggleSpeakerFlag(cognateKey, speaker, current)}
                     onOpenInAnnotate={handleOpenInAnnotate}
                   />
                 ) : compareBundlesError ? null : compareBundles.length === 0 ? (
