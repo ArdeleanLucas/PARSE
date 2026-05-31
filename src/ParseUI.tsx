@@ -80,6 +80,7 @@ import { CommentsImport } from './components/compare/CommentsImport';
 import { SpeakerImport } from './components/compare/SpeakerImport';
 import { ManageTagsView } from './components/compare/ManageTagsView';
 import { SpeakerFormsTable } from './components/compare/SpeakerFormsTable';
+import { ConceptNotesBox } from './components/compare/ConceptNotesBox';
 import { nextCognateGroup } from './components/compare/CognateCell';
 import { Pill, SectionCard } from './components/compare/UIPrimitives';
 import { AnnotateView } from './components/annotate/AnnotateView';
@@ -147,19 +148,7 @@ function readStoredConceptSortState(): StoredConceptSortState {
 
 // No fallback data — workspace must supply real speakers and concepts via /api/config.
 
-const COMPARE_NOTES_STORAGE_KEY = 'parseui-compare-notes-v1';
 const SIDEBAR_SCOPE_STORAGE_PREFIX = 'parse.sidebar.scopedToSpeaker';
-
-function persistCompareNotes(conceptId: number, value: string) {
-  try {
-    const raw = window.localStorage.getItem(COMPARE_NOTES_STORAGE_KEY);
-    const stored = raw ? JSON.parse(raw) as Record<string, string> : {};
-    stored[conceptId.toString()] = value;
-    window.localStorage.setItem(COMPARE_NOTES_STORAGE_KEY, JSON.stringify(stored));
-  } catch {
-    // non-fatal localStorage failure
-  }
-}
 
 export { pickOrthoIntervalForConcept } from './lib/parseUIUtils';
 export {
@@ -372,7 +361,6 @@ export function ParseUI() {
   // ``handleComputeRun`` is defined further down (after ``crossSpeakerJob``
   // is in scope) so it can dispatch the contact-lexemes path through the
   // header-chip job hook instead of the drawer-tied ``startComputeJob``.
-  const [notes, setNotes] = useState('');
   const [borrowingsOpen, setBorrowingsOpen] = useState(true);
   const [panelOpen, setPanelOpen] = useState(true);
   const [compareBundles, setCompareBundles] = useState<CompareBundle[]>([]);
@@ -909,16 +897,6 @@ export function ParseUI() {
       flashActionFeedback(`Could not promote survey primary: ${message}`, 'error');
     }
   }, [flashActionFeedback, reloadConfig]);
-
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(COMPARE_NOTES_STORAGE_KEY);
-      const stored = raw ? JSON.parse(raw) as Record<string, string> : {};
-      setNotes(stored[conceptId.toString()] ?? '');
-    } catch {
-      setNotes('');
-    }
-  }, [conceptId]);
 
   // — Derived: real speakers (no fallback — empty until workspace provides them) —
   const speakers = rawSpeakers;
@@ -2437,14 +2415,7 @@ export function ParseUI() {
               </SectionCard>
 
               <SectionCard title="Notes">
-                <textarea value={notes} onChange={e => {
-                  const nextValue = e.target.value;
-                  setNotes(nextValue);
-                  persistCompareNotes(conceptId, nextValue);
-                }}
-                  onBlur={() => persistCompareNotes(conceptId, notes)}
-                  placeholder="Add observations, etymological notes, or questions for review…"
-                  className="min-h-[90px] w-full resize-none rounded-lg border border-slate-200 bg-slate-50/40 p-3 text-xs text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"/>
+                <ConceptNotesBox conceptId={conceptId} />
               </SectionCard>
 
               <div className="flex items-center justify-between border-t border-slate-200 pt-5">
