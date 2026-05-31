@@ -65,9 +65,9 @@ export interface SpeakerFormsTableProps {
   conceptKey: string;
   initialExpandedSpeaker?: string;
   onBundleUpdated?: (bundle: CompareBundle) => void;
-  onCycleCognate?: (speaker: string, current: string) => void;
-  onResetCognate?: (speaker: string) => void;
-  onToggleSpeakerFlag?: (speaker: string, current: boolean) => void;
+  onCycleCognate?: (speaker: string, current: string, cognateKey: string) => void;
+  onResetCognate?: (speaker: string, cognateKey: string) => void;
+  onToggleSpeakerFlag?: (speaker: string, current: boolean, cognateKey: string) => void;
   onOpenInAnnotate?: (speaker: string, variant: SpeakerFormsTableVariant) => void;
 }
 
@@ -1087,8 +1087,8 @@ export function SpeakerFormsTable({
                       <CognateCell
                         speaker={speaker}
                         group={form?.cognate ?? '—'}
-                        onCycle={() => onCycleCognate?.(speaker, form?.cognate ?? '—')}
-                        onReset={() => onResetCognate?.(speaker)}
+                        onCycle={() => onCycleCognate?.(speaker, form?.cognate ?? '—', form?.cognateKey ?? conceptKey)}
+                        onReset={() => onResetCognate?.(speaker, form?.cognateKey ?? conceptKey)}
                       />
                     </td>
                     <td className="px-3 py-2.5 text-right">
@@ -1098,7 +1098,7 @@ export function SpeakerFormsTable({
                         title={`Toggle flag for ${speaker}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onToggleSpeakerFlag?.(speaker, Boolean(form?.flagged));
+                          onToggleSpeakerFlag?.(speaker, Boolean(form?.flagged), form?.cognateKey ?? conceptKey);
                         }}
                         className={`inline-grid h-6 w-6 place-items-center rounded-md ${
                           form?.flagged

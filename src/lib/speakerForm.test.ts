@@ -55,6 +55,7 @@ describe('buildSpeakerForm', () => {
       variantCount: 1,
       similarityByLang: { ar: 0.9, fa: null },
       cognate: '—',
+      cognateKey: 'hair',
       flagged: false,
       startSec: 10.1,
       endSec: 10.4,
@@ -198,6 +199,107 @@ describe('buildSpeakerForm', () => {
 
     const form = buildSpeakerForm(record, concept, 'Fail02', enrichments, false, ['ar']);
     expect(form.cognate).toBe('A');
+    expect(form.flagged).toBe(true);
+  });
+
+
+  it('reads grouped source-item cognate, flag, and similarity from the selected variant numeric key', () => {
+    const groupedConcept: Concept = {
+      id: 32,
+      key: '1.1',
+      name: 'hair',
+      tag: 'untagged',
+      sourceItem: '1.1',
+      variants: [
+        { conceptKey: '1', conceptEn: 'hair (A)', variantLabel: 'A' },
+        { conceptKey: '599', conceptEn: 'hair (B)', variantLabel: 'B' },
+      ],
+    };
+    const record = makeRecord({
+      concept: [
+        { start: 1, end: 2, text: 'hair (A)', concept_id: '1' },
+        { start: 3, end: 4, text: 'hair (B)', concept_id: '599' },
+      ],
+      ipa: [
+        { start: 1.1, end: 1.4, text: 'mu-a' },
+        { start: 3.1, end: 3.4, text: 'mu-b' },
+      ],
+    });
+
+    const form = buildSpeakerForm(record, groupedConcept, 'Fail02', {
+      cognate_sets: {
+        '1.1': { Z: ['Fail02'] },
+        '599': { A: ['Fail02'] },
+      },
+      similarity: {
+        '1.1': { Fail02: { ar: { score: 0.01, has_reference_data: true } } },
+        '599': { Fail02: { ar: { score: 0.88, has_reference_data: true } } },
+      },
+      manual_overrides: {
+        canonical_realizations: { '1.1': { Fail02: 1 } },
+        speaker_flags: {
+          '1.1': { Fail02: false },
+          '599': { Fail02: true },
+        },
+      },
+    }, false, ['ar']);
+
+    expect(form.selectedIdx).toBe(1);
+    expect(form.cognateKey).toBe('599');
+    expect(form.cognate).toBe('A');
+    expect(form.flagged).toBe(true);
+    expect(form.similarityByLang.ar).toBe(0.88);
+  });
+
+  it('reads merged cognate and flag from the selected merged numeric key', () => {
+    const mergedConcept: Concept = { id: 1, key: '527', name: 'head', tag: 'untagged', mergedKeys: ['527', '247', '248'] };
+    const record = makeRecord({
+      concept: [
+        { start: 1, end: 2, text: 'head', concept_id: '527' },
+        { start: 3, end: 4, text: 'head A', concept_id: '247' },
+        { start: 5, end: 6, text: 'head B', concept_id: '248' },
+      ],
+      ipa: [
+        { start: 1.1, end: 1.4, text: 'sar' },
+        { start: 3.1, end: 3.4, text: 'sar-a' },
+        { start: 5.1, end: 5.4, text: 'sar-b' },
+      ],
+    });
+
+    const form = buildSpeakerForm(record, mergedConcept, 'Fail02', {
+      cognate_sets: {
+        '527': { C: ['Fail02'] },
+        '248': { B: ['Fail02'] },
+      },
+      manual_overrides: {
+        canonical_realizations: { '527': { Fail02: 2 } },
+        speaker_flags: {
+          '527': { Fail02: false },
+          '248': { Fail02: true },
+        },
+      },
+    }, false, []);
+
+    expect(form.selectedIdx).toBe(2);
+    expect(form.cognateKey).toBe('248');
+    expect(form.cognate).toBe('B');
+    expect(form.flagged).toBe(true);
+  });
+
+  it('keeps singleton cognate and flag keying unchanged', () => {
+    const singletonConcept: Concept = { id: 527, key: '527', name: 'head', tag: 'untagged' };
+    const record = makeRecord({
+      concept: [{ start: 1, end: 2, text: 'head', concept_id: '527' }],
+      ipa: [{ start: 1.1, end: 1.4, text: 'sar' }],
+    });
+
+    const form = buildSpeakerForm(record, singletonConcept, 'Fail02', {
+      cognate_sets: { '527': { D: ['Fail02'] } },
+      manual_overrides: { speaker_flags: { '527': { Fail02: true } } },
+    }, false, []);
+
+    expect(form.cognateKey).toBe('527');
+    expect(form.cognate).toBe('D');
     expect(form.flagged).toBe(true);
   });
 

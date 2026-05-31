@@ -123,6 +123,7 @@ function makeForm(overrides: Partial<SpeakerForm> = {}): SpeakerForm {
     variantCount: 2,
     similarityByLang: { ar: 0.4, fa: 0.3 },
     cognate: '—',
+    cognateKey: 'big',
     flagged: false,
     startSec: 1,
     endSec: 2,
@@ -195,6 +196,46 @@ describe('SpeakerFormsTable header & layout', () => {
     expect(screen.getByText('PERSIAN SIM.')).toBeTruthy();
     expect(screen.getByText('Cognate')).toBeTruthy();
     expect(screen.getByText('Flag')).toBeTruthy();
+  });
+});
+
+
+describe('SpeakerFormsTable cognate/flag callback keys', () => {
+  it('passes each row resolved cognateKey to cognate and flag handlers', () => {
+    const onCycleCognate = vi.fn();
+    const onResetCognate = vi.fn();
+    const onToggleSpeakerFlag = vi.fn();
+    render(
+      <SpeakerFormsTable
+        bundle={makeBundle()}
+        speakers={['Fail01']}
+        speakerForms={[makeForm({ speaker: 'Fail01', cognate: 'A', flagged: true, cognateKey: '599' } as Partial<SpeakerForm>)]}
+        primaryContactCodes={PRIMARY_CODES}
+        contactLanguageNames={CONTACT_NAMES}
+        conceptKey="1.1"
+        initialExpandedSpeaker="__none__"
+        onCycleCognate={onCycleCognate}
+        onResetCognate={onResetCognate}
+        onToggleSpeakerFlag={onToggleSpeakerFlag}
+      />,
+    );
+
+    const cognateButton = screen.getByTestId('cognate-cycle-Fail01');
+    fireEvent.click(cognateButton);
+    expect(onCycleCognate).toHaveBeenCalledWith('Fail01', 'A', '599');
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerDown(cognateButton);
+      vi.advanceTimersByTime(500);
+      fireEvent.pointerUp(cognateButton);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(onResetCognate).toHaveBeenCalledWith('Fail01', '599');
+
+    fireEvent.click(screen.getByTestId('speaker-flag-Fail01'));
+    expect(onToggleSpeakerFlag).toHaveBeenCalledWith('Fail01', true, '599');
   });
 });
 

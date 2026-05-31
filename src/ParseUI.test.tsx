@@ -3033,6 +3033,81 @@ describe("ParseUI", () => {
     });
   });
 
+
+
+  it("compare grouped cognate and flag round-trip use the selected variant numeric key", async () => {
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "1", label: "hair (A)", source_item: "1.1", source_survey: "klq" },
+        { id: "599", label: "hair (B)", source_item: "1.1", source_survey: "klq" },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "hair (A)", conceptId: "1", ipa: "mu-a", ortho: "مو ئا", start: 1, end: 2 },
+        { conceptText: "hair (B)", conceptId: "599", ipa: "mu-b", ortho: "مو ب", start: 3, end: 4 },
+      ]),
+    };
+    mockGetCompareBundles.mockResolvedValue({
+      bundles: [{
+        bundle_id: "bundle:hair",
+        label: "hair",
+        row_ids: ["1", "599"],
+        buckets: [{
+          bucket_key: "klq\u00001.1",
+          survey_id: "klq",
+          source_item: "1.1",
+          variants: [
+            { csv_row_id: "1", concept_en: "hair (A)", variant_label: "A" },
+            { csv_row_id: "599", concept_en: "hair (B)", variant_label: "B" },
+          ],
+        }],
+        candidates: {
+          Fail01: {
+            "1": { csv_row_id: "1", ipa: "mu-a", ortho: "مو ئا", start_sec: 1, end_sec: 2, realization_index: 0 },
+            "599": { csv_row_id: "599", ipa: "mu-b", ortho: "مو ب", start_sec: 3, end_sec: 4, realization_index: 1 },
+          },
+        },
+        canonical: { Fail01: null },
+      }],
+    });
+    mockEnrichmentData = {
+      cognate_sets: {
+        "1.1": { Z: ["Fail01"] },
+        "1": { A: ["Fail01"] },
+      },
+      manual_overrides: {
+        speaker_flags: {
+          "1.1": { Fail01: false },
+          "1": { Fail01: true },
+        },
+      },
+    };
+
+    render(<ParseUI />);
+
+    const cognateButton = await screen.findByTestId("cognate-cycle-Fail01");
+    expect(cognateButton.textContent).toBe("A");
+
+    fireEvent.click(cognateButton);
+    expect(mockSaveEnrichments).toHaveBeenLastCalledWith({
+      manual_overrides: { cognate_sets: { "1": { A: [], B: ["Fail01"] } } },
+    });
+    const lastSaveCall = mockSaveEnrichments.mock.calls[mockSaveEnrichments.mock.calls.length - 1];
+    expect(JSON.stringify(lastSaveCall?.[0] ?? {})).not.toContain('"1.1"');
+
+    mockSaveEnrichments.mockClear();
+    fireEvent.click(screen.getByTestId("speaker-flag-Fail01"));
+    expect(mockSaveEnrichments).toHaveBeenCalledWith({
+      manual_overrides: { speaker_flags: { "1": { Fail01: false } } },
+    });
+  });
+
   it("uses one shared decisions import input for the right rail and Actions menu", () => {
     render(<ParseUI />);
 
