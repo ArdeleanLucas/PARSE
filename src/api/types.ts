@@ -383,6 +383,13 @@ export interface LexemeNoteEntry {
 
 export type LexemeNotesBySpeaker = Record<string, Record<string, LexemeNoteEntry>>;
 
+export interface ConceptNoteEntry {
+  note?: string;
+  updated_at?: string;
+}
+
+export type ConceptNotesById = Record<string, ConceptNoteEntry>;
+
 export interface AuthStatus {
   authenticated: boolean;
   provider?: string;
