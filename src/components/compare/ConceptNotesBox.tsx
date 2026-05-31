@@ -67,15 +67,27 @@ export function ConceptNotesBox({ conceptId }: ConceptNotesBoxProps) {
   const focusedRef = useRef(false);
   const initialRef = useRef(resolved);
   const latestRef = useRef(note);
+  const inFlightRef = useRef(false);
 
   useEffect(() => {
     latestRef.current = note;
   }, [note]);
 
-  // Resync from the store (or legacy cache) when the concept or the server
-  // value changes — but never while the user is mid-edit.
+  // Reset the transient save indicator when switching concepts so a "Saved" /
+  // error pill from the previous concept doesn't linger on the next one.
   useEffect(() => {
-    if (focusedRef.current) return;
+    setStatus('idle');
+    setError(null);
+  }, [conceptKey]);
+
+  // Resync from the store (or legacy cache) when the concept or the server
+  // value changes — but never while the user is mid-edit, while a save is in
+  // flight, or while there is an unsaved/errored local edit (the enrichment
+  // store updates ``data`` optimistically before the POST resolves, so without
+  // this guard a failed save would be silently marked clean).
+  useEffect(() => {
+    if (focusedRef.current || inFlightRef.current) return;
+    if (latestRef.current !== initialRef.current) return;
     setNote(resolved);
     initialRef.current = resolved;
   }, [resolved]);
@@ -83,20 +95,28 @@ export function ConceptNotesBox({ conceptId }: ConceptNotesBoxProps) {
   const save = useCallback(async () => {
     const value = latestRef.current;
     if (value === initialRef.current) return;
+    // Guard against a concurrent in-flight save (e.g. blur then immediate
+    // unmount) double-POSTing the same edit.
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     // Write-through cache first so the note survives offline / unsaved navigation
     // regardless of whether the server round-trip succeeds.
     writeLocalCache(conceptKey, value);
-    initialRef.current = value;
     setStatus('saving');
     setError(null);
     try {
       await useEnrichmentStore.getState().save({
         concept_notes: { [conceptKey]: { note: value, updated_at: new Date().toISOString() } },
       });
+      // Only mark the edit clean once the server round-trip succeeds, so a
+      // failed save stays dirty and is retried on the next blur/unmount.
+      initialRef.current = value;
       setStatus('saved');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
       setStatus('error');
+    } finally {
+      inFlightRef.current = false;
     }
   }, [conceptKey]);
 

@@ -78,4 +78,38 @@ describe('ConceptNotesBox', () => {
     fireEvent.blur(textarea);
     expect(mocks.save).not.toHaveBeenCalled();
   });
+
+  it('stays dirty and retries on the next blur when the server save fails', async () => {
+    mocks.save.mockRejectedValueOnce(new Error('network down'));
+    render(<ConceptNotesBox conceptId={356} />);
+    const textarea = screen.getByTestId('concept-note-356');
+
+    fireEvent.focus(textarea);
+    fireEvent.change(textarea, { target: { value: 'etymon *masya-' } });
+    fireEvent.blur(textarea);
+
+    // First attempt failed — surfaced as an error, not "saved".
+    await waitFor(() => expect(screen.getByText('network down')).toBeTruthy());
+    expect(screen.queryByText('Saved')).toBeNull();
+
+    // The edit is still considered unsaved, so a second blur retries it.
+    mocks.save.mockResolvedValueOnce(undefined);
+    fireEvent.focus(textarea);
+    fireEvent.blur(textarea);
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(2));
+    const retry = mocks.save.mock.calls[1][0] as { concept_notes: Record<string, { note: string }> };
+    expect(retry.concept_notes['356'].note).toBe('etymon *masya-');
+  });
+
+  it('clears a stale status pill when switching concepts', async () => {
+    const { rerender } = render(<ConceptNotesBox conceptId={356} />);
+    const textarea = screen.getByTestId('concept-note-356');
+    fireEvent.focus(textarea);
+    fireEvent.change(textarea, { target: { value: 'note A' } });
+    fireEvent.blur(textarea);
+    await waitFor(() => expect(screen.getByText('Saved')).toBeTruthy());
+
+    rerender(<ConceptNotesBox conceptId={357} />);
+    expect(screen.queryByText('Saved')).toBeNull();
+  });
 });
