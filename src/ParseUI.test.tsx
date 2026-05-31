@@ -3777,6 +3777,46 @@ describe("ParseUI", () => {
     await waitFor(() => expect(activeKey()).toBe("concept-a:0"));
   });
 
+
+  it("uses ArrowDown to cycle Annotate realization pills even when only one concept is navigable", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    window.localStorage.setItem("parse.sidebar.scopedToSpeaker.annotate", "false");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [
+        { id: "527", label: "head", source_item: "10", source_survey: "JBIL", custom_order: 1 },
+      ],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "head", conceptId: "527", ipa: "early", start: 5, end: 6 },
+        { conceptText: "head", conceptId: "527", ipa: "late", start: 10, end: 11 },
+      ]),
+    };
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    const chips = Array.from(sidebar.querySelectorAll<HTMLElement>("[data-realization-key]"));
+    expect(chips.map((chip) => chip.getAttribute("data-realization-key"))).toEqual(["527:0", "527:1"]);
+    const activeKey = () => Array.from(sidebar.querySelectorAll<HTMLElement>("[data-realization-key]"))
+      .find((chip) => chip.className.includes("bg-indigo-50"))
+      ?.getAttribute("data-realization-key");
+
+    fireEvent.click(screen.getByTestId("concept-elicitation-pill-527-0"));
+    expect(activeKey()).toBe("527:0");
+
+    const ipaInput = await screen.findByPlaceholderText("Enter IPA…");
+    fireEvent.focus(ipaInput);
+    fireEvent.keyDown(ipaInput, { key: "ArrowDown" });
+
+    await waitFor(() => expect(activeKey()).toBe("527:1"));
+  });
+
   it("horizontal arrows preserve caret in IPA/ORTH inputs but still navigate from button focus", async () => {
     window.localStorage.setItem("parse.currentMode", "annotate");
     window.localStorage.setItem("parse.sidebar.scopedToSpeaker.annotate", "false");
@@ -3883,7 +3923,7 @@ describe("ParseUI", () => {
     expect(await screen.findByRole("heading", { name: "apple" })).toBeTruthy();
   });
 
-  it("uses ArrowUp and ArrowDown to navigate Compare concepts even when notes have focus", async () => {
+  it("preserves vertical caret arrows in the Compare Notes textarea", async () => {
     window.localStorage.setItem("parse.currentMode", "compare");
     mockConfig = {
       ...mockConfig!,
@@ -3905,14 +3945,14 @@ describe("ParseUI", () => {
     expect(document.activeElement).toBe(notesField);
     mockSetActiveConcept.mockClear();
 
-    fireEvent.keyDown(notesField, { key: "ArrowDown" });
-    await waitFor(() => expect(screen.getByPlaceholderText(/Ask PARSE AI about fire/i)).toBeTruthy());
-    await waitFor(() => expect(mockSetActiveConcept).toHaveBeenCalledWith("3"));
+    expect(fireEvent.keyDown(notesField, { key: "ArrowDown" })).toBe(true);
+    expect(screen.getByPlaceholderText(/Ask PARSE AI about hair/i)).toBeTruthy();
+    expect(mockSetActiveConcept).not.toHaveBeenCalled();
 
     fireEvent.focus(screen.getByPlaceholderText(/Add observations, etymological notes, or questions for review/i));
-    fireEvent.keyDown(screen.getByPlaceholderText(/Add observations, etymological notes, or questions for review/i), { key: "ArrowUp" });
+    expect(fireEvent.keyDown(screen.getByPlaceholderText(/Add observations, etymological notes, or questions for review/i), { key: "ArrowUp" })).toBe(true);
     await waitFor(() => expect(screen.getByPlaceholderText(/Ask PARSE AI about hair/i)).toBeTruthy());
-    await waitFor(() => expect(mockSetActiveConcept).toHaveBeenCalledWith("2"));
+    expect(mockSetActiveConcept).not.toHaveBeenCalled();
   });
 
   it("preserves horizontal caret arrows in Compare text fields", async () => {

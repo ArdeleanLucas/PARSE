@@ -1576,7 +1576,6 @@ export function ParseUI() {
   const navigationConcepts = speakerScopedConcepts.length > 0
     ? speakerScopedConcepts
     : (filtered.length > 0 ? filtered : concepts);
-  const navigationTotal = navigationConcepts.length;
 
   const resolveConceptOffsetTarget = useCallback((offset: number): { conceptId: number; conceptKey: string | null } | null => {
     const list = navigationConcepts.length > 0 ? navigationConcepts : concepts;
@@ -1641,10 +1640,12 @@ export function ParseUI() {
       const isHorizontalArrow = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
       const targetElement = e.target instanceof Element ? e.target : null;
       const targetTag = targetElement?.tagName.toLowerCase();
+      const isContentEditableTarget = Boolean((targetElement as HTMLElement | null)?.isContentEditable);
       const inTextEditingField = targetTag === 'input'
         || targetTag === 'textarea'
         || targetTag === 'select'
-        || Boolean((targetElement as HTMLElement | null)?.isContentEditable);
+        || isContentEditableTarget;
+      const isMultilineTextField = targetTag === 'textarea' || isContentEditableTarget;
       if (e.key === 'Delete' && currentMode !== 'tags' && selectedRealizationKey) {
         if (inTextEditingField) return;
         if (dispatchSelectedSidebarDelete()) {
@@ -1655,8 +1656,7 @@ export function ParseUI() {
       const inInteractiveField = isInteractiveHotkeyTarget(e.target);
       if (
         currentMode !== 'tags'
-        && navigationTotal > 1
-        && (isVerticalArrow || (isHorizontalArrow && !inTextEditingField))
+        && ((isVerticalArrow && !isMultilineTextField) || (isHorizontalArrow && !inTextEditingField))
       ) {
         e.preventDefault();
         const offset = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1;
@@ -1691,21 +1691,11 @@ export function ParseUI() {
         setActionsMenuOpen(false);
         return;
       }
-
-      if (currentMode === 'tags' || navigationTotal <= 1) return;
-
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        goPrev();
-      } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-        e.preventDefault();
-        goNext();
-      }
     }
 
     window.addEventListener('keydown', onGlobalKeyDown);
     return () => window.removeEventListener('keydown', onGlobalKeyDown);
-  }, [currentMode, navigationTotal, goPrev, goNext, goToConceptOffset, goToRealizationOffset, selectedRealizationKey, dispatchSelectedSidebarDelete]);
+  }, [currentMode, goToConceptOffset, goToRealizationOffset, selectedRealizationKey, dispatchSelectedSidebarDelete]);
 
   useEffect(() => {
     if (!selectedRealizationKey) return;
