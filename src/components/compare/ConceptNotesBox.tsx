@@ -21,6 +21,15 @@ export function conceptNoteFromEnrichments(
   return typeof entry.note === 'string' ? entry.note : '';
 }
 
+/** First non-empty server note across the concept's underlying csv-id keys. */
+function resolveServerNote(data: Record<string, unknown> | null | undefined, keys: readonly string[]): string {
+  for (const key of keys) {
+    const note = conceptNoteFromEnrichments(data, key);
+    if (note) return note;
+  }
+  return '';
+}
+
 function readLocalCache(conceptKey: string): string {
   try {
     const raw = window.localStorage.getItem(COMPARE_NOTES_STORAGE_KEY);
@@ -44,7 +53,14 @@ function writeLocalCache(conceptKey: string, value: string): void {
 }
 
 interface ConceptNotesBoxProps {
-  conceptId: number | string;
+  /**
+   * The concept's **stable** csv-id key(s) — NOT the volatile sequential
+   * `Concept.id`. For a singleton this is `[concept.key]`; for a merged concept
+   * it is the underlying member ids (`concept.variants[].conceptKey`). The note
+   * is read from the first member that has one and saved to every member so
+   * merged members stay in sync. `concept_notes` is keyed by these csv ids.
+   */
+  conceptKeys: readonly string[];
 }
 
 /**
@@ -54,12 +70,14 @@ interface ConceptNotesBoxProps {
  * speaker files and survive a browser clear. localStorage is kept only as a
  * legacy read fallback + write-through cache.
  */
-export function ConceptNotesBox({ conceptId }: ConceptNotesBoxProps) {
-  const conceptKey = conceptId.toString();
+export function ConceptNotesBox({ conceptKeys }: ConceptNotesBoxProps) {
+  // Stable identity for effect deps (the array prop is rebuilt each render).
+  const keysId = conceptKeys.join('|');
+  const primaryKey = conceptKeys[0] ?? '';
   const data = useEnrichmentStore((s) => s.data) as Record<string, unknown> | null;
 
-  const serverNote = useMemo(() => conceptNoteFromEnrichments(data, conceptKey), [data, conceptKey]);
-  const resolved = useMemo(() => serverNote || readLocalCache(conceptKey), [serverNote, conceptKey]);
+  const serverNote = useMemo(() => resolveServerNote(data, conceptKeys), [data, keysId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const resolved = useMemo(() => serverNote || readLocalCache(primaryKey), [serverNote, primaryKey]);
 
   const [note, setNote] = useState(resolved);
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -78,7 +96,7 @@ export function ConceptNotesBox({ conceptId }: ConceptNotesBoxProps) {
   useEffect(() => {
     setStatus('idle');
     setError(null);
-  }, [conceptKey]);
+  }, [keysId]);
 
   // Resync from the store (or legacy cache) when the concept or the server
   // value changes — but never while the user is mid-edit, while a save is in
@@ -101,13 +119,15 @@ export function ConceptNotesBox({ conceptId }: ConceptNotesBoxProps) {
     inFlightRef.current = true;
     // Write-through cache first so the note survives offline / unsaved navigation
     // regardless of whether the server round-trip succeeds.
-    writeLocalCache(conceptKey, value);
+    writeLocalCache(primaryKey, value);
     setStatus('saving');
     setError(null);
+    const updatedAt = new Date().toISOString();
+    // Write to every underlying member id so merged-concept members stay in sync.
+    const conceptNotesPatch: Record<string, ConceptNoteEntry> = {};
+    for (const key of conceptKeys) conceptNotesPatch[key] = { note: value, updated_at: updatedAt };
     try {
-      await useEnrichmentStore.getState().save({
-        concept_notes: { [conceptKey]: { note: value, updated_at: new Date().toISOString() } },
-      });
+      await useEnrichmentStore.getState().save({ concept_notes: conceptNotesPatch });
       // Only mark the edit clean once the server round-trip succeeds, so a
       // failed save stays dirty and is retried on the next blur/unmount.
       initialRef.current = value;
@@ -118,7 +138,7 @@ export function ConceptNotesBox({ conceptId }: ConceptNotesBoxProps) {
     } finally {
       inFlightRef.current = false;
     }
-  }, [conceptKey]);
+  }, [keysId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Save on unmount when there are unsaved edits (e.g. Prev/Next before blur).
   useEffect(() => {
@@ -130,7 +150,7 @@ export function ConceptNotesBox({ conceptId }: ConceptNotesBoxProps) {
   return (
     <div>
       <textarea
-        data-testid={`concept-note-${conceptKey}`}
+        data-testid={`concept-note-${primaryKey}`}
         value={note}
         onChange={(e) => {
           const next = e.target.value;
@@ -138,7 +158,7 @@ export function ConceptNotesBox({ conceptId }: ConceptNotesBoxProps) {
           setStatus('idle');
           // Immediate write-through cache: persists per-concept without a blur
           // and keeps notes available offline (server save still runs on blur).
-          writeLocalCache(conceptKey, next);
+          writeLocalCache(primaryKey, next);
         }}
         onFocus={() => {
           focusedRef.current = true;

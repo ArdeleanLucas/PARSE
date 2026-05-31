@@ -1237,6 +1237,12 @@ export function ParseUI() {
     }
     return baseConcept;
   }, [baseConcept, activeRawKey, currentMode]);
+  // Stable csv-id key(s) for concept notes — NOT the volatile sequential
+  // `Concept.id`. Singleton → [concept.key]; merged → underlying member ids.
+  const conceptNoteKeys = useMemo<string[]>(() => {
+    const variantKeys = concept.variants?.map((v) => v.conceptKey).filter((k): k is string => Boolean(k)) ?? [];
+    return variantKeys.length > 0 ? variantKeys : [concept.key];
+  }, [concept]);
   const activeResolvedSurvey = useMemo(() => {
     if (currentMode !== 'annotate') {
       return resolveConceptSurvey(concept, selectedSpeakers[0] ?? null, speakerSurveyChoices, surveySettings);
@@ -2415,7 +2421,7 @@ export function ParseUI() {
               </SectionCard>
 
               <SectionCard title="Notes">
-                <ConceptNotesBox conceptId={conceptId} />
+                <ConceptNotesBox conceptKeys={conceptNoteKeys} />
               </SectionCard>
 
               <div className="flex items-center justify-between border-t border-slate-200 pt-5">
