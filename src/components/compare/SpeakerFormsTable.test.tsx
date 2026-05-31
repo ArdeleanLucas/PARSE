@@ -410,7 +410,7 @@ describe('SpeakerFormsTable row expansion', () => {
     expect(header.querySelector('[dir="rtl"]')).toBeNull();
   });
 
-  it('dedupes Saha01 drawer variants across repeated active-bucket rows', () => {
+  it('dedupes Saha01 drawer variants when the same rows repeat across buckets', () => {
     const hairBundle = makeBundle({
       bundle_id: 'hair',
       label: 'hair',
@@ -476,6 +476,77 @@ describe('SpeakerFormsTable row expansion', () => {
     expect(screen.queryAllByTestId(/^variant-card-Saha01-/)).toHaveLength(2);
     expect(screen.queryAllByTestId('variant-card-Saha01-1')).toHaveLength(1);
     expect(screen.queryAllByTestId('variant-card-Saha01-624')).toHaveLength(1);
+    expect(screen.getByTestId('variant-count-Saha01').textContent).toMatch(/\+1 variant/);
+  });
+
+  // Regression (MC-446-A): when a speaker's variants live in DIFFERENT buckets,
+  // the drawer must surface every recorded variant — not just the active
+  // bucket's — so the non-active option ("B" here) stays selectable. #516
+  // narrowed the list to the active bucket, which hid B entirely.
+  it('shows cross-bucket variants so the non-active-bucket option is selectable', () => {
+    const hairBundle = makeBundle({
+      bundle_id: 'hair',
+      label: 'hair',
+      row_ids: ['1', '624'],
+      buckets: [
+        {
+          bucket_key: 'jbil 32',
+          survey_id: 'jbil',
+          source_item: '32',
+          // Active bucket — holds only variant A.
+          variants: [{ csv_row_id: '1', variant_label: 'A', concept_en: 'hair (A)', label: 'hair (A)' }],
+        },
+        {
+          bucket_key: 'klq 1.1',
+          survey_id: 'klq',
+          source_item: '1.1',
+          // Non-active bucket — holds variant B, previously unreachable.
+          variants: [{ csv_row_id: '624', variant_label: 'B', concept_en: 'hair (B)', label: 'hair (B)' }],
+        },
+      ],
+      candidates: {
+        Saha01: {
+          '1': {
+            csv_row_id: '1',
+            ipa: 'muːsɛr',
+            ortho: 'میسەر',
+            start_sec: 1,
+            end_sec: 2,
+            source_wav: 'audio/working/Saha01.wav',
+            realization_index: 0,
+          },
+          '624': {
+            csv_row_id: '624',
+            ipa: 'ʁɛʒ',
+            ortho: 'گەیش',
+            start_sec: 3,
+            end_sec: 4,
+            source_wav: 'audio/working/Saha01.wav',
+            realization_index: 1,
+          },
+        },
+      },
+      canonical: { Saha01: null },
+      // Active bucket resolves to jbil/32 (which lacks B).
+      speaker_concept_survey_links: { Saha01: { '1': { jbil: '32' } } },
+    });
+
+    render(
+      <SpeakerFormsTable
+        bundle={hairBundle}
+        speakers={['Saha01']}
+        speakerForms={[makeForm({ speaker: 'Saha01', ipa: 'muːsɛr', ortho: 'میسەر' })]}
+        primaryContactCodes={PRIMARY_CODES}
+        contactLanguageNames={CONTACT_NAMES}
+        conceptKey="hair"
+        initialExpandedSpeaker="Saha01"
+      />,
+    );
+
+    expect(screen.queryAllByTestId(/^variant-card-Saha01-/)).toHaveLength(2);
+    // Variant B (row 624, non-active klq bucket) is present and selectable.
+    expect(screen.queryAllByTestId('variant-card-Saha01-624')).toHaveLength(1);
+    expect(screen.queryAllByTestId('canonical-option-Saha01-624')).toHaveLength(1);
     expect(screen.getByTestId('variant-count-Saha01').textContent).toMatch(/\+1 variant/);
   });
 

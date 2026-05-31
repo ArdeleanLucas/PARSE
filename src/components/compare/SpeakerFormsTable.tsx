@@ -25,10 +25,12 @@ import type {
   CanonicalLexemeSelection,
   CompareBundle,
   CompareCandidate,
+  CompareVariant,
 } from '../../api/types';
 import {
   canonicalFor,
   collapsedIpaForSpeaker,
+  enumerateVariants,
   resolveActiveBucketForSpeaker,
 } from '../../lib/compareBundles';
 import type { SpeakerForm } from '../../lib/speakerForm';
@@ -86,10 +88,31 @@ const EMPTY_FILTERS: FilterState = {
   multiVariantOnly: false,
 };
 
+/**
+ * Every distinct variant a speaker actually recorded for this bundle,
+ * enumerated across ALL buckets and deduped by csv_row_id.
+ *
+ * Restores the pre-#516 cross-survey behaviour so a variant in one bucket and
+ * a variant in another are both selectable in the expand drawer (otherwise the
+ * non-active bucket's option — e.g. "B" — is unreachable). Keeps the #516
+ * dedupe: the same csv_row_id repeated across buckets collapses to one card.
+ * The candidate filter bounds this to forms the speaker actually has, so it
+ * does not reintroduce the cross-concept flooding #516 was guarding against.
+ */
+function speakerVariants(bundle: CompareBundle, speaker: string): CompareVariant[] {
+  const seen = new Set<string>();
+  const out: CompareVariant[] = [];
+  for (const { variant } of enumerateVariants(bundle)) {
+    const id = variant.csv_row_id;
+    if (!bundle.candidates?.[speaker]?.[id] || seen.has(id)) continue;
+    seen.add(id);
+    out.push(variant);
+  }
+  return out;
+}
+
 function buildVariantList(bundle: CompareBundle, speaker: string): SpeakerFormsTableVariant[] {
-  const variants = resolveActiveBucketForSpeaker(bundle, speaker)?.variants ?? [];
-  return variants
-    .filter((variant) => bundle.candidates?.[speaker]?.[variant.csv_row_id])
+  return speakerVariants(bundle, speaker)
     .map((variant) => {
       const candidate = bundle.candidates?.[speaker]?.[variant.csv_row_id] ?? null;
       const label = variant.variant_label ?? variant.concept_en ?? variant.label ?? variant.csv_row_id;
@@ -818,10 +841,7 @@ export function SpeakerFormsTable({
 
   // Build the filtered + sorted speaker list.
   const orderedSpeakers = useMemo(() => {
-    const variantCountFor = (speaker: string): number => {
-      const variants = resolveActiveBucketForSpeaker(bundle, speaker)?.variants ?? [];
-      return variants.filter((variant) => bundle.candidates?.[speaker]?.[variant.csv_row_id]).length;
-    };
+    const variantCountFor = (speaker: string): number => speakerVariants(bundle, speaker).length;
     const filtered = speakers.filter((speaker) => {
       const form = formsBySpeaker.get(speaker);
       if (filters.flaggedOnly && !form?.flagged) return false;
@@ -988,10 +1008,7 @@ export function SpeakerFormsTable({
               const isExpanded = expanded === speaker;
               const activeBucket = resolveActiveBucketForSpeaker(bundle, speaker);
               const surveyId = activeBucket?.survey_id ?? null;
-              const candidates = (activeBucket?.variants ?? []).filter(
-                (variant) => bundle.candidates?.[speaker]?.[variant.csv_row_id],
-              );
-              const variantCount = candidates.length;
+              const variantCount = speakerVariants(bundle, speaker).length;
               const current = canonicalFor(bundle, speaker);
               const canonicalChosen = !!current;
               const collapsedIpa = collapsedIpaForSpeaker(bundle, speaker, form?.ipa);
