@@ -43,20 +43,30 @@ describe('conceptNoteFromEnrichments', () => {
 });
 
 describe('ConceptNotesBox', () => {
+  it('keys by the stable csv-id key — not the volatile sequential Concept.id', () => {
+    // Regression for the off-by-N bug: concept_notes is keyed by csv id (heart=281),
+    // so a heart box must look up '281', never the grouped-list position.
+    mocks.storeData = {
+      concept_notes: { '281': { note: 'HEART note' }, '259': { note: 'NECK note' } },
+    };
+    render(<ConceptNotesBox conceptKeys={['281']} />);
+    expect((screen.getByTestId('concept-note-281') as HTMLTextAreaElement).value).toBe('HEART note');
+  });
+
   it('shows the server-backed note from the enrichment store', () => {
     mocks.storeData = { concept_notes: { '356': { note: 'HONEY — rep=B' } } };
-    render(<ConceptNotesBox conceptId={356} />);
+    render(<ConceptNotesBox conceptKeys={['356']} />);
     expect((screen.getByTestId('concept-note-356') as HTMLTextAreaElement).value).toBe('HONEY — rep=B');
   });
 
   it('falls back to the legacy localStorage cache when the server has no note', () => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ '356': 'legacy local note' }));
-    render(<ConceptNotesBox conceptId={356} />);
+    render(<ConceptNotesBox conceptKeys={['356']} />);
     expect((screen.getByTestId('concept-note-356') as HTMLTextAreaElement).value).toBe('legacy local note');
   });
 
   it('persists edits to parse-enrichments.json via the merge-safe store.save and caches locally', async () => {
-    render(<ConceptNotesBox conceptId={356} />);
+    render(<ConceptNotesBox conceptKeys={['356']} />);
     const textarea = screen.getByTestId('concept-note-356');
     fireEvent.focus(textarea);
     fireEvent.change(textarea, { target: { value: 'etymon *masya-' } });
@@ -70,9 +80,27 @@ describe('ConceptNotesBox', () => {
     expect(cached['356']).toBe('etymon *masya-');
   });
 
+  it('reads from any member and saves to every member for a merged concept', async () => {
+    // Note seeded under one member id; box should surface it and, on save,
+    // write the new text to all member ids so they stay in sync.
+    mocks.storeData = { concept_notes: { '599': { note: 'HAIR note' } } };
+    render(<ConceptNotesBox conceptKeys={['1', '249', '250', '599']} />);
+    const textarea = screen.getByTestId('concept-note-1');
+    expect((textarea as HTMLTextAreaElement).value).toBe('HAIR note');
+
+    fireEvent.focus(textarea);
+    fireEvent.change(textarea, { target: { value: 'HAIR edited' } });
+    fireEvent.blur(textarea);
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
+    const patch = mocks.save.mock.calls[0][0] as { concept_notes: Record<string, { note: string }> };
+    expect(Object.keys(patch.concept_notes).sort()).toEqual(['1', '249', '250', '599']);
+    expect(patch.concept_notes['1'].note).toBe('HAIR edited');
+    expect(patch.concept_notes['599'].note).toBe('HAIR edited');
+  });
+
   it('does not save when the value is unchanged', () => {
     mocks.storeData = { concept_notes: { '356': { note: 'unchanged' } } };
-    render(<ConceptNotesBox conceptId={356} />);
+    render(<ConceptNotesBox conceptKeys={['356']} />);
     const textarea = screen.getByTestId('concept-note-356');
     fireEvent.focus(textarea);
     fireEvent.blur(textarea);
@@ -81,7 +109,7 @@ describe('ConceptNotesBox', () => {
 
   it('stays dirty and retries on the next blur when the server save fails', async () => {
     mocks.save.mockRejectedValueOnce(new Error('network down'));
-    render(<ConceptNotesBox conceptId={356} />);
+    render(<ConceptNotesBox conceptKeys={['356']} />);
     const textarea = screen.getByTestId('concept-note-356');
 
     fireEvent.focus(textarea);
@@ -102,14 +130,14 @@ describe('ConceptNotesBox', () => {
   });
 
   it('clears a stale status pill when switching concepts', async () => {
-    const { rerender } = render(<ConceptNotesBox conceptId={356} />);
+    const { rerender } = render(<ConceptNotesBox conceptKeys={['356']} />);
     const textarea = screen.getByTestId('concept-note-356');
     fireEvent.focus(textarea);
     fireEvent.change(textarea, { target: { value: 'note A' } });
     fireEvent.blur(textarea);
     await waitFor(() => expect(screen.getByText('Saved')).toBeTruthy());
 
-    rerender(<ConceptNotesBox conceptId={357} />);
+    rerender(<ConceptNotesBox conceptKeys={['357']} />);
     expect(screen.queryByText('Saved')).toBeNull();
   });
 });
