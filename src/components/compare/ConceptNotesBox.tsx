@@ -148,7 +148,7 @@ export function ConceptNotesBox({ conceptId }: ConceptNotesBoxProps) {
           void save();
         }}
         placeholder="Add observations, etymological notes, or questions for review…"
-        className="min-h-[90px] w-full resize-none rounded-lg border border-slate-200 bg-slate-50/40 p-3 text-xs text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"
+        className="min-h-[220px] w-full resize-y rounded-lg border border-slate-200 bg-slate-50/40 p-3 text-xs leading-relaxed text-slate-700 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"
       />
       {status === 'saving' && <p className="mt-1 text-[10px] text-slate-400">Saving…</p>}
       {status === 'saved' && <p className="mt-1 text-[10px] text-emerald-500">Saved</p>}

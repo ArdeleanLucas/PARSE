@@ -2115,7 +2115,7 @@ export function ParseUI() {
           </>
           ) : (
           <>
-          <main className="flex-1 overflow-y-auto px-8 py-6">
+          <main className="flex-1 overflow-y-auto px-8 pt-6 pb-28">
             <div className="mx-auto max-w-5xl space-y-5">
 
               <div className="flex items-center justify-between">
