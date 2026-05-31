@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   saveLexemeNote: vi.fn(),
   saveEnrichments: vi.fn(),
   patchCanonicalLexeme: vi.fn(),
+  setState: vi.fn(),
   storeData: {} as Record<string, unknown>,
 }));
 
@@ -33,6 +34,7 @@ vi.mock('../../stores/enrichmentStore', () => ({
         data: mocks.storeData,
         patchCanonicalLexeme: mocks.patchCanonicalLexeme,
       }),
+      setState: (...args: unknown[]) => mocks.setState(...args),
     },
   ),
 }));
@@ -144,6 +146,7 @@ beforeEach(() => {
   mocks.saveLexemeNote.mockReset();
   mocks.saveEnrichments.mockReset();
   mocks.patchCanonicalLexeme.mockReset();
+  mocks.setState.mockReset();
   mocks.storeData = {};
 });
 
@@ -616,9 +619,9 @@ describe('SpeakerFormsTable canonical radio', () => {
 });
 
 describe('SpeakerFormsTable compare notes textarea', () => {
-  it('typing and blurring calls saveLexemeNote with the expected payload', async () => {
-    mocks.saveLexemeNote.mockResolvedValue({ success: true });
-    mocks.saveEnrichments.mockResolvedValue(undefined);
+  it('typing and blurring saves via the merge endpoint and never partial-overwrites enrichments', async () => {
+    const merged = { Fail01: { big: { user_note: 'sounds emphatic', updated_at: 'x' } } };
+    mocks.saveLexemeNote.mockResolvedValue({ success: true, lexeme_notes: merged });
     render(
       <SpeakerFormsTable
         bundle={makeBundle()}
@@ -639,6 +642,18 @@ describe('SpeakerFormsTable compare notes textarea', () => {
         concept_id: 'big',
         user_note: 'sounds emphatic',
       });
+    });
+    // Regression guard: the buggy partial POST /api/enrichments (which overwrites
+    // the whole file) must NOT be called; the store is synced from the merge
+    // endpoint's authoritative response instead.
+    expect(mocks.saveEnrichments).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(mocks.setState).toHaveBeenCalledTimes(1);
+    });
+    const updater = mocks.setState.mock.calls[0][0] as (s: { data: Record<string, unknown> }) => { data: Record<string, unknown> };
+    expect(updater({ data: { cognate_sets: { '53': {} } } }).data).toEqual({
+      cognate_sets: { '53': {} },
+      lexeme_notes: merged,
     });
   });
 });
