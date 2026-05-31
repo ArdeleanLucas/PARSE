@@ -3883,6 +3883,67 @@ describe("ParseUI", () => {
     expect(await screen.findByRole("heading", { name: "apple" })).toBeTruthy();
   });
 
+  it("uses ArrowUp and ArrowDown to navigate Compare concepts even when notes have focus", async () => {
+    window.localStorage.setItem("parse.currentMode", "compare");
+    mockConfig = {
+      ...mockConfig!,
+      concepts: [
+        { id: "1", label: "water" },
+        { id: "2", label: "hair" },
+        { id: "3", label: "fire" },
+      ],
+    };
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    fireEvent.click(within(sidebar).getByRole("button", { name: /hair/i }));
+    expect(screen.getByPlaceholderText(/Ask PARSE AI about hair/i)).toBeTruthy();
+
+    const notesField = screen.getByPlaceholderText(/Add observations, etymological notes, or questions for review/i);
+    notesField.focus();
+    expect(document.activeElement).toBe(notesField);
+    mockSetActiveConcept.mockClear();
+
+    fireEvent.keyDown(notesField, { key: "ArrowDown" });
+    await waitFor(() => expect(screen.getByPlaceholderText(/Ask PARSE AI about fire/i)).toBeTruthy());
+    await waitFor(() => expect(mockSetActiveConcept).toHaveBeenCalledWith("3"));
+
+    fireEvent.focus(screen.getByPlaceholderText(/Add observations, etymological notes, or questions for review/i));
+    fireEvent.keyDown(screen.getByPlaceholderText(/Add observations, etymological notes, or questions for review/i), { key: "ArrowUp" });
+    await waitFor(() => expect(screen.getByPlaceholderText(/Ask PARSE AI about hair/i)).toBeTruthy());
+    await waitFor(() => expect(mockSetActiveConcept).toHaveBeenCalledWith("2"));
+  });
+
+  it("preserves horizontal caret arrows in Compare text fields", async () => {
+    window.localStorage.setItem("parse.currentMode", "compare");
+    mockConfig = {
+      ...mockConfig!,
+      concepts: [
+        { id: "1", label: "water" },
+        { id: "2", label: "hair" },
+        { id: "3", label: "fire" },
+      ],
+    };
+
+    render(<ParseUI />);
+
+    const sidebar = await screen.findByTestId("concept-sidebar");
+    fireEvent.click(within(sidebar).getByRole("button", { name: /hair/i }));
+    expect(screen.getByPlaceholderText(/Ask PARSE AI about hair/i)).toBeTruthy();
+
+    const notesField = screen.getByPlaceholderText(/Add observations, etymological notes, or questions for review/i);
+    notesField.focus();
+    expect(document.activeElement).toBe(notesField);
+    mockSetActiveConcept.mockClear();
+
+    fireEvent.keyDown(notesField, { key: "ArrowRight" });
+    expect(screen.getByPlaceholderText(/Ask PARSE AI about hair/i)).toBeTruthy();
+    fireEvent.keyDown(notesField, { key: "ArrowLeft" });
+    expect(screen.getByPlaceholderText(/Ask PARSE AI about hair/i)).toBeTruthy();
+    expect(mockSetActiveConcept).not.toHaveBeenCalled();
+  });
+
   it("persists compare notes per concept via localStorage without requiring a blur", () => {
     const { unmount } = render(<ParseUI />);
     const notesField = screen.getByPlaceholderText(/Add observations, etymological notes, or questions for review/i);

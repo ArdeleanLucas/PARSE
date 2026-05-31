@@ -1654,14 +1654,16 @@ export function ParseUI() {
       }
       const inInteractiveField = isInteractiveHotkeyTarget(e.target);
       if (
-        currentMode === 'annotate'
+        currentMode !== 'tags'
+        && navigationTotal > 1
         && (isVerticalArrow || (isHorizontalArrow && !inTextEditingField))
       ) {
         e.preventDefault();
         const offset = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1;
-        if (goToRealizationOffset(offset) === 'no-pills') {
-          goToConceptOffset(offset);
+        if (currentMode === 'annotate' && goToRealizationOffset(offset) !== 'no-pills') {
+          return;
         }
+        goToConceptOffset(offset);
         return;
       }
 
