@@ -19,7 +19,7 @@ import {
   type MouseEvent,
 } from 'react';
 import { deleteCanonicalLexeme, putCanonicalLexeme } from '../../api/client';
-import { saveEnrichments, saveLexemeNote } from '../../api/contracts/enrichments-tags-notes-imports';
+import { saveLexemeNote } from '../../api/contracts/enrichments-tags-notes-imports';
 import { mediaUrlFromSourceWav, spectrogramUrl } from '../../api/contracts/export-and-media';
 import type {
   CanonicalLexemeSelection,
@@ -123,19 +123,6 @@ function readLexemeUserNote(
   return typeof note === 'string' ? note : '';
 }
 
-function readLexemeNoteBlock(
-  data: Record<string, unknown> | null | undefined,
-  speaker: string,
-  conceptKey: string,
-): Record<string, unknown> {
-  const block = data?.lexeme_notes;
-  if (!block || typeof block !== 'object') return {};
-  const speakerBlock = (block as Record<string, unknown>)[speaker];
-  if (!speakerBlock || typeof speakerBlock !== 'object') return {};
-  const entry = (speakerBlock as Record<string, unknown>)[conceptKey];
-  return entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : {};
-}
-
 interface CompareNotesTextareaProps {
   speaker: string;
   conceptKey: string;
@@ -171,23 +158,19 @@ function CompareNotesTextarea({ speaker, conceptKey }: CompareNotesTextareaProps
     setNoteStatus('saving');
     setNoteError(null);
     try {
-      await saveLexemeNote({ speaker, concept_id: conceptKey, user_note: noteToSave });
-      const existingBlock = readLexemeNoteBlock(
-        useEnrichmentStore.getState().data as Record<string, unknown> | null,
-        speaker,
-        conceptKey,
-      );
-      await saveEnrichments({
-        lexeme_notes: {
-          [speaker]: {
-            [conceptKey]: {
-              ...existingBlock,
-              user_note: noteToSave,
-              updated_at: new Date().toISOString(),
-            },
-          },
-        },
-      });
+      // POST /api/lexeme-notes reads → sets lexeme_notes[speaker][concept_id] →
+      // writes back (a server-side MERGE) and returns the full updated map.
+      const resp = await saveLexemeNote({ speaker, concept_id: conceptKey, user_note: noteToSave });
+      // Reflect the authoritative result in the store so Compare + Annotate stay
+      // in sync. (Previously this also POSTed a partial /api/enrichments, but that
+      // endpoint OVERWRITES the whole file — dropping cognate_sets and every other
+      // speaker/concept note. The merge endpoint already persisted the note, so we
+      // only refresh local state here.)
+      if (resp && typeof resp === 'object' && resp.lexeme_notes) {
+        useEnrichmentStore.setState((s) => ({
+          data: { ...(s.data as Record<string, unknown>), lexeme_notes: resp.lexeme_notes },
+        }));
+      }
       initialNoteRef.current = noteToSave;
       setNoteStatus('saved');
     } catch (err) {
