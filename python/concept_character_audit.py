@@ -32,7 +32,14 @@ class CanonicalCharacterGroup:
     canonical_key: str
     members: list[ConceptCharacterMember]
     current_character_count: int
-    projected_character_count: int
+    # Projection stays in the export's BINARY encoding (one character per
+    # retained (concept, group) pair). For safe_union groups the post-collapse
+    # count is deterministic (min == max). For needs_recluster groups it depends
+    # on a re-clustering pass this report cannot run, so it is reported as a
+    # range: min = best case (all pooled forms cognate -> 1), max = worst case
+    # (re-clustering reproduces the current classes -> no reduction).
+    projected_character_count_min: int
+    projected_character_count_max: int
     class_label: str
     collapse_action: str
     byte_identical_pairs: list[tuple[str, str]] = field(default_factory=list)
@@ -41,8 +48,17 @@ class CanonicalCharacterGroup:
 @dataclass(frozen=True)
 class AuditTotals:
     current_nchar: int
-    projected_nchar_after_canonical_collapse: int
-    nchar_inflation: int
+    # Post-collapse NCHAR in the same binary encoding as current_nchar, as a
+    # range. min/max coincide for fully-deterministic (safe_union) workspaces.
+    projected_nchar_min: int
+    projected_nchar_max: int
+    # Characters guaranteed removable by byte-identical de-duplication alone
+    # (safe_union groups). Fully deterministic; the trustworthy headline figure.
+    firm_dedup_savings: int
+    # Best-case additional removal IF re-clustering maximally merges Class 2/3
+    # pooled forms. An upper bound, not a promise: equals current_nchar -
+    # projected_nchar_min.
+    removable_duplication_max: int
     affected_canonical_concepts: int
     class_counts: dict[str, int]
     safe_union_groups: int
@@ -144,7 +160,10 @@ def _classify_group(members: Sequence[ConceptCharacterMember]) -> str:
 def _byte_identical_pairs(members: Sequence[ConceptCharacterMember]) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
     for left, right in combinations(members, 2):
-        if _column_signature(left.columns) == _column_signature(right.columns):
+        left_sig = _column_signature(left.columns)
+        # Two concepts with no cognate data both have an empty signature; that
+        # is not a meaningful "byte-identical column" match, so skip empties.
+        if left_sig and left_sig == _column_signature(right.columns):
             pairs.append((left.concept_id, right.concept_id))
     return pairs
 
@@ -184,17 +203,33 @@ def audit_canonical_characters(
             )
 
         current_count = sum(member.current_character_count for member in members)
-        projected_count = 1 if current_count else 0
         identical_pairs = _byte_identical_pairs(members)
         all_identical_pairs.extend(identical_pairs)
         signatures = {_column_signature(member.columns) for member in members}
         collapse_action = "safe_union" if len(signatures) == 1 else "needs_recluster"
+        # Projection in the export's binary encoding. Collapsing duplicate
+        # concepts removes duplicate COLUMNS; it never folds a concept's
+        # legitimate multiple cognate classes into one character.
+        if collapse_action == "safe_union":
+            # All member columns are byte-identical (this includes singletons,
+            # which trivially have one signature). De-duplication keeps exactly
+            # one copy of those classes -> deterministic count.
+            dedup_class_count = len(members[0].columns)
+            projected_min = dedup_class_count
+            projected_max = dedup_class_count
+        else:
+            # needs_recluster: group letters are per-id and not cross-comparable,
+            # so the real count requires re-clustering pooled forms (not run
+            # here). Bound it instead of inventing a single number.
+            projected_min = 1 if current_count else 0
+            projected_max = current_count
         groups.append(
             CanonicalCharacterGroup(
                 canonical_key=canonical_key,
                 members=members,
                 current_character_count=current_count,
-                projected_character_count=projected_count,
+                projected_character_count_min=projected_min,
+                projected_character_count_max=projected_max,
                 class_label=_classify_group(members),
                 collapse_action=collapse_action,
                 byte_identical_pairs=identical_pairs,
@@ -202,12 +237,20 @@ def audit_canonical_characters(
         )
 
     current_nchar = export_style_current_nchar(enrichments)
-    projected_nchar = sum(group.projected_character_count for group in groups)
+    projected_nchar_min = sum(group.projected_character_count_min for group in groups)
+    projected_nchar_max = sum(group.projected_character_count_max for group in groups)
+    # A multi-id group is "affected" when any reduction is achievable.
     affected_groups = [
         group
         for group in groups
-        if len(group.members) > 1 and group.current_character_count > group.projected_character_count
+        if len(group.members) > 1 and group.current_character_count > group.projected_character_count_min
     ]
+    # Guaranteed removal: byte-identical de-duplication of safe_union groups only.
+    firm_dedup_savings = sum(
+        group.current_character_count - group.projected_character_count_min
+        for group in groups
+        if len(group.members) > 1 and group.collapse_action == "safe_union"
+    )
     class_counts = {"Class 1": 0, "Class 2": 0, "Class 3": 0}
     for group in affected_groups:
         if group.class_label in class_counts:
@@ -215,8 +258,10 @@ def audit_canonical_characters(
 
     totals = AuditTotals(
         current_nchar=current_nchar,
-        projected_nchar_after_canonical_collapse=projected_nchar,
-        nchar_inflation=current_nchar - projected_nchar,
+        projected_nchar_min=projected_nchar_min,
+        projected_nchar_max=projected_nchar_max,
+        firm_dedup_savings=firm_dedup_savings,
+        removable_duplication_max=current_nchar - projected_nchar_min,
         affected_canonical_concepts=len(affected_groups),
         class_counts=class_counts,
         safe_union_groups=sum(1 for group in affected_groups if group.collapse_action == "safe_union"),
@@ -257,8 +302,9 @@ def _format_summary(report: AuditReport) -> str:
         "Canonical character audit",
         f"Workspace: {report.workspace or '(in-memory)'}",
         f"Current NCHAR: {totals.current_nchar}",
-        f"Projected NCHAR after canonical collapse: {totals.projected_nchar_after_canonical_collapse}",
-        f"NCHAR inflation: {totals.nchar_inflation}",
+        f"Projected NCHAR (binary encoding): {totals.projected_nchar_min}-{totals.projected_nchar_max}",
+        f"Firm de-dup savings (byte-identical duplicates): {totals.firm_dedup_savings}",
+        f"Removable duplication, best case w/ recluster: {totals.removable_duplication_max}",
         f"Affected canonical concepts: {totals.affected_canonical_concepts}",
         "Classes: "
         + ", ".join(f"{label}={count}" for label, count in sorted(totals.class_counts.items())),
@@ -271,7 +317,8 @@ def _format_summary(report: AuditReport) -> str:
         ids = ", ".join(member.concept_id for member in group.members)
         lines.append(
             f"- {group.canonical_key}: ids [{ids}], current={group.current_character_count}, "
-            f"projected={group.projected_character_count}, {group.class_label}, {group.collapse_action}"
+            f"projected={group.projected_character_count_min}-{group.projected_character_count_max}, "
+            f"{group.class_label}, {group.collapse_action}"
         )
     return "\n".join(lines)
 

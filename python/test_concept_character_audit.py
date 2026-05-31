@@ -48,25 +48,40 @@ def test_audit_classifies_canonical_groups_and_collapse_actions() -> None:
     assert hair.collapse_action == "safe_union"
     assert [member.concept_id for member in hair.members] == ["1", "2"]
     assert [member.current_character_count for member in hair.members] == [2, 2]
+    # Byte-identical {A,B}+{A,B} de-duplicates to one copy = 2 binary chars
+    # (hair_A, hair_B), NOT 1. Deterministic, so min == max.
+    assert hair.current_character_count == 4
+    assert hair.projected_character_count_min == 2
+    assert hair.projected_character_count_max == 2
 
     leaf = groups["leaf"]
     assert leaf.class_label == "Class 2"
     assert leaf.collapse_action == "needs_recluster"
     assert [member.concept_id for member in leaf.members] == ["3", "4"]
     assert [member.current_character_count for member in leaf.members] == [2, 1]
+    # Re-cluster outcome unknown: best case 1, worst case no reduction (current).
+    assert leaf.projected_character_count_min == 1
+    assert leaf.projected_character_count_max == 3
 
     stone = groups["stone"]
     assert stone.class_label == "Class 3"
     assert stone.collapse_action == "needs_recluster"
     assert [member.concept_id for member in stone.members] == ["5", "6"]
+    assert stone.projected_character_count_min == 1
+    assert stone.projected_character_count_max == 2
 
 
 def test_audit_quantifies_current_and_projected_nchar_inflation() -> None:
     report = audit_canonical_characters(_concept_rows(), _enrichments())
 
     assert report.totals.current_nchar == 9
-    assert report.totals.projected_nchar_after_canonical_collapse == 3
-    assert report.totals.nchar_inflation == 6
+    # Binary-encoding projection range: hair 2 + leaf [1..3] + stone [1..2].
+    assert report.totals.projected_nchar_min == 4
+    assert report.totals.projected_nchar_max == 7
+    # Guaranteed removal from byte-identical de-dup alone (hair: 4 -> 2).
+    assert report.totals.firm_dedup_savings == 2
+    # Best case if recluster maximally merges Class 2/3: 9 - 4 = 5.
+    assert report.totals.removable_duplication_max == 5
     assert report.totals.affected_canonical_concepts == 3
     assert report.totals.class_counts == {"Class 1": 1, "Class 2": 1, "Class 3": 1}
     assert report.totals.safe_union_groups == 1
@@ -90,7 +105,8 @@ def test_audit_workspace_loads_fixture_without_live_workspace() -> None:
 
     assert report.workspace == str(FIXTURE)
     assert report.totals.current_nchar == 9
-    assert report.totals.projected_nchar_after_canonical_collapse == 3
+    assert report.totals.projected_nchar_min == 4
+    assert report.totals.projected_nchar_max == 7
 
 
 def test_cli_prints_summary_and_machine_readable_json() -> None:
@@ -109,5 +125,6 @@ def test_cli_prints_summary_and_machine_readable_json() -> None:
     marker = "JSON_REPORT:\n"
     assert marker in completed.stdout
     payload = json.loads(completed.stdout.split(marker, 1)[1])
-    assert payload["totals"]["nchar_inflation"] == 6
+    assert payload["totals"]["firm_dedup_savings"] == 2
+    assert payload["totals"]["removable_duplication_max"] == 5
     assert payload["totals"]["needs_recluster_groups"] == 2

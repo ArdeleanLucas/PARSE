@@ -23,6 +23,17 @@ Current NEXUS generation in `python/ai/tools/export_tools.py::build_nexus_text` 
 
 That is correct for id-keyed interactive state, but it over-weights duplicated real-world concepts in phylogenetic export. If `hair` exists under four ids, the matrix can currently receive characters for each id.
 
+## How the projection is counted (binary encoding)
+
+The audit measures `current` and `projected` in the **same** binary encoding the exporter uses: one character per retained `(concept, group)` pair. This matters because **collapsing duplicate concepts removes duplicate columns — it does NOT fold a concept's legitimate multiple cognate classes into a single character.** A concept with three cognate classes `{A,B,C}` correctly contributes three binary characters; that is phylogenetic signal, not inflation.
+
+Therefore the projection is **not** "one character per canonical concept" (that would only hold under a separate multistate re-encoding, which MC-439-C does not propose). Instead:
+
+- **safe_union** groups (byte-identical columns, incl. singletons): post-collapse count is deterministic — de-duplication keeps exactly one copy of the shared classes (e.g. `hair` `{A,B}`+`{A,B}` → `{A,B}` = **2** characters, down from 4).
+- **needs_recluster** groups: the post-collapse count depends on re-clustering pooled forms, which this report cannot run. It is reported as a **range** — best case 1 (all pooled forms cognate), worst case the current count (no reduction).
+
+The trustworthy headline is **`firm_dedup_savings`** (characters guaranteed removable by byte-identical de-duplication alone). `removable_duplication_max` is the additional upper bound *if* re-clustering maximally merges Class 2/3 — an estimate, confirmable only when MC-439-C runs the pooled clustering.
+
 ## Integrity classes
 
 The MC-439-B audit classifies every multi-id canonical-gloss group into these implementation classes:
@@ -84,14 +95,20 @@ Recommended handling:
 
 ## MC-439-B fixture headline
 
-The in-repo audit fixture at `python/tests/fixtures/canonical_character_audit/` has three affected canonical concepts:
+The in-repo audit fixture at `python/tests/fixtures/canonical_character_audit/` has three affected canonical concepts (`hair`, `leaf`, `stone`):
 
 - Current NCHAR: 9
-- Projected NCHAR after canonical collapse: 3
-- NCHAR inflation: 6
+- Projected NCHAR (binary encoding): 4–7
+  - `hair` (safe_union): 4 → 2 (deterministic)
+  - `leaf` (needs_recluster): 3 → 1–3
+  - `stone` (needs_recluster): 2 → 1–2
+- Firm de-dup savings (guaranteed removable): **2** — from `hair`'s byte-identical ids alone
+- Removable duplication, best case with recluster: 5
 - Class counts: Class 1 = 1, Class 2 = 1, Class 3 = 1
 - `safe_union` groups: 1
 - `needs_recluster` groups: 2
+
+Note: the "firm" figure (2) is the only guaranteed number; the rest of the gap to 5 depends on what re-clustering the pooled Class 2/3 forms actually yields, which MC-439-C must run.
 
 The live workspace is intentionally not read by this PR. Lucas can generate live numbers with:
 
