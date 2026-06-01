@@ -1122,4 +1122,30 @@ describe('SpeakerFormsTable per-realization cards', () => {
       }),
     );
   });
+
+  it('keys play state per realization so playing one does not light another', () => {
+    render(
+      <SpeakerFormsTable
+        bundle={hairBundle()}
+        speakers={['Saha01']}
+        speakerForms={[makeForm({ speaker: 'Saha01', ipa: 'A', ortho: 'oA' })]}
+        primaryContactCodes={PRIMARY_CODES}
+        contactLanguageNames={CONTACT_NAMES}
+        conceptKey="hair"
+        initialExpandedSpeaker="Saha01"
+      />,
+    );
+
+    const playA = screen.getByTestId('variant-play-Saha01-1-r0');
+    const playB = screen.getByTestId('variant-play-Saha01-1-r1');
+    expect(playA.getAttribute('title')).toBe('Play');
+    expect(playB.getAttribute('title')).toBe('Play');
+
+    fireEvent.click(playB);
+
+    // Only B's control reflects playback; pre-fix both cards shared the row id
+    // and would both flip to Pause.
+    expect(playB.getAttribute('title')).toBe('Pause');
+    expect(playA.getAttribute('title')).toBe('Play');
+  });
 });

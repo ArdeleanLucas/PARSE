@@ -1515,6 +1515,7 @@ export function ParseUI() {
     conceptId,
     conceptKey: concept.key,
     setCurrentMode,
+    setSelectedRealizationKey,
   });
   const handleCompareBundleUpdated = useCallback((nextBundle: CompareBundle) => {
     setCompareBundles((current) => current.map((bundle) => bundle.bundle_id === nextBundle.bundle_id ? nextBundle : bundle));

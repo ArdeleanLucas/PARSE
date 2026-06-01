@@ -121,11 +121,12 @@ function realizationLetter(index: number): string {
 }
 
 /** Stable per-card identity: the row id, plus the realization index when a row
- * is expanded into multiple cards. Used to key play/error state and React keys
- * so each realization's controls are independent. */
+ * is expanded into multiple cards. The single source of truth for React keys,
+ * play/error state, and test-id suffixes, so each realization's controls are
+ * independent and addressable. */
 function variantCardKey(variant: SpeakerFormsTableVariant): string {
   return variant.realizationIndex != null
-    ? `${variant.csv_row_id}#${variant.realizationIndex}`
+    ? `${variant.csv_row_id}-r${variant.realizationIndex}`
     : variant.csv_row_id;
 }
 
@@ -317,9 +318,7 @@ function VariantCard({
   const [specErrored, setSpecErrored] = useState(false);
   // Audio/spectrogram come from the variant itself (per realization), not the
   // row's primary candidate — so realization B's card plays B, not A.
-  const cardId = variant.realizationIndex != null
-    ? `${variant.csv_row_id}-r${variant.realizationIndex}`
-    : variant.csv_row_id;
+  const cardId = variantCardKey(variant);
   const hasAudio = !!variant.source_wav
     && typeof variant.start_sec === 'number'
     && typeof variant.end_sec === 'number';
