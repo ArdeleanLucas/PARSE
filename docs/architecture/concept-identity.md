@@ -142,11 +142,19 @@ For a workspace, PARSE produces a list of concepts plus two lookups:
 
  uid_by_row:  { "91": "c-91", "385": "c-91", ... }   row  → concept
  rows_by_uid: { "c-91": ["91", "385"], ... }          concept → rows
+ warnings:    ["…"]                                   non-fatal problems (see below)
 ```
 
 `uid` is the anchor for the **whole comparative workflow**: a concept's cognate
 state, canonical pick, flags and notes all key off `uid`, which is exactly what
 makes **"one cognate state per concept"** well-defined.
+
+**Nothing fails silently.** Because the override file holds *your* authoritative
+decisions, any problem applying it is surfaced in `warnings` rather than quietly
+reverting to the auto grouping: an unreadable/malformed override file, member
+ids that no longer exist in the inventory (dropped), or a uid that collides with
+another concept (renamed). The grouping stays usable; the warning tells you what
+to fix.
 
 ### Live numbers (current workspace, pure closure, no overrides yet)
 

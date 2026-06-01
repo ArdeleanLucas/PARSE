@@ -222,3 +222,62 @@ def test_identity_payload_round_trips(tmp_path):
     _seed_identity_overrides(tmp_path, payload["concepts"])
     reloaded = load_concept_identity(tmp_path)
     assert reloaded.uid_for_row("91") == reloaded.uid_for_row("385")
+
+
+def test_malformed_override_file_warns_and_falls_back_to_auto(tmp_path):
+    """An unreadable override file must warn (not silently revert) and still
+    apply the auto grouping so the workspace stays usable."""
+    _seed_concepts(
+        tmp_path,
+        [
+            {"id": "91", "concept_en": "a", "source_item": "5.4", "source_survey": "KLQ"},
+            {"id": "385", "concept_en": "a", "source_item": "177", "source_survey": "JBIL"},
+        ],
+    )
+    _seed_overlap(tmp_path, {"91": {"jbil": "177"}, "385": {"klq": "5.4"}})
+    (tmp_path / CONCEPT_IDENTITY_FILENAME).write_text("{ not valid json", encoding="utf-8")
+
+    identity = load_concept_identity(tmp_path)
+
+    assert identity.uid_for_row("91") == identity.uid_for_row("385")  # auto grouping applied
+    assert any("could not be read" in warning for warning in identity.warnings)
+
+
+def test_manual_uid_collision_is_renamed_with_warning(tmp_path):
+    """A manual uid equal to an auto-derived uid must not clobber it."""
+    _seed_concepts(
+        tmp_path,
+        [
+            {"id": "10", "concept_en": "a", "source_item": "1", "source_survey": "KLQ"},
+            {"id": "20", "concept_en": "b", "source_item": "2", "source_survey": "JBIL"},
+        ],
+    )
+    _seed_overlap(tmp_path, {})
+    # Manual concept claims row 10 but uses "c-20" — the auto uid row 20 would take.
+    _seed_identity_overrides(
+        tmp_path,
+        [{"uid": "c-20", "label": "a", "members": ["10"], "origin": "manual:merge"}],
+    )
+
+    identity = load_concept_identity(tmp_path)
+
+    uids = [concept.uid for concept in identity.concepts]
+    assert len(uids) == len(set(uids))  # no concept overwritten
+    assert identity.uid_for_row("10") == "c-20"
+    assert any("collided" in warning for warning in identity.warnings)
+
+
+def test_orphan_member_ids_warn(tmp_path):
+    _seed_concepts(
+        tmp_path,
+        [{"id": "91", "concept_en": "a", "source_item": "5.4", "source_survey": "KLQ"}],
+    )
+    _seed_overlap(tmp_path, {})
+    _seed_identity_overrides(
+        tmp_path,
+        [{"uid": "c-a", "label": "a", "members": ["91", "9999"], "origin": "manual:merge"}],
+    )
+
+    identity = load_concept_identity(tmp_path)
+
+    assert any("9999" in warning and "unknown" in warning for warning in identity.warnings)

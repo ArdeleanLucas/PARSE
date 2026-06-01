@@ -87,6 +87,12 @@ class ConceptIdentity:
     concepts: list[Concept]
     uid_by_row: dict[str, str] = field(default_factory=dict)
     rows_by_uid: dict[str, list[str]] = field(default_factory=dict)
+    # Non-fatal problems surfaced for the caller (e.g. an unreadable override
+    # file, dropped unknown member ids, or a uid collision). Never silent: the
+    # override file holds the linguist's authoritative decisions, so a failure
+    # to apply them must be visible rather than reverting to the auto grouping
+    # without a trace.
+    warnings: list[str] = field(default_factory=list)
 
     def uid_for_row(self, row_id: object) -> str | None:
         return self.uid_by_row.get(str(row_id or "").strip())
@@ -189,14 +195,20 @@ def compute_auto_components(
 # --------------------------------------------------------------------------- #
 # Overrides (linguist authority) + materialisation
 # --------------------------------------------------------------------------- #
-def _load_overrides(project_root: Path) -> list[dict[str, Any]]:
+def _load_overrides(project_root: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    """Return ``(overrides, warnings)``. A malformed/unreadable override file
+    yields a warning rather than silently discarding the linguist's splits."""
+
     path = project_root / CONCEPT_IDENTITY_FILENAME
     if not path.exists():
-        return []
+        return [], []
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return []
+    except (json.JSONDecodeError, OSError) as error:
+        return [], [
+            f"{CONCEPT_IDENTITY_FILENAME} could not be read ({error.__class__.__name__}); "
+            "manual concept splits/merges were NOT applied — falling back to the auto grouping."
+        ]
     raw = payload.get("concepts") if isinstance(payload, Mapping) else None
     out: list[dict[str, Any]] = []
     if isinstance(raw, list):
@@ -218,7 +230,7 @@ def _load_overrides(project_root: Path) -> list[dict[str, Any]]:
                     "origin": str(entry.get("origin") or "manual:merge").strip() or "manual:merge",
                 }
             )
-    return out
+    return out, []
 
 
 def _auto_label(member_ids: Sequence[str], by_id: Mapping[str, ConceptRow]) -> str:
@@ -241,32 +253,64 @@ def _auto_uid(member_ids: Sequence[str]) -> str:
     return f"c-{_sorted_ids(member_ids)[0]}" if member_ids else "c-empty"
 
 
+def _unique_uid(candidate: str, used: set[str]) -> str:
+    """Return ``candidate`` if free, else the first ``candidate-2``, ``-3`` … that
+    is not yet taken. Guards against a manual uid colliding with an auto-derived
+    one (which would otherwise overwrite a concept in the uid lookup)."""
+
+    if candidate not in used:
+        return candidate
+    suffix = 2
+    while f"{candidate}-{suffix}" in used:
+        suffix += 1
+    return f"{candidate}-{suffix}"
+
+
 def materialize(
     rows: Sequence[ConceptRow],
     state: Mapping[str, Any],
     overrides: Sequence[Mapping[str, Any]],
+    *,
+    warnings: Sequence[str] = (),
 ) -> ConceptIdentity:
     """Closure → apply manual overrides → materialised, deterministic concepts."""
 
     by_id = {row.id: row for row in rows}
     valid_ids = set(by_id)
+    notices: list[str] = list(warnings)
+    used_uids: set[str] = set()
+
+    def _add(concept_uid: str, label: str, members: list[str], origin: str) -> None:
+        unique = _unique_uid(concept_uid, used_uids)
+        if unique != concept_uid:
+            notices.append(
+                f"concept uid '{concept_uid}' collided and was renamed to '{unique}'."
+            )
+        used_uids.add(unique)
+        concepts.append(Concept(uid=unique, label=label, members=members, origin=origin))
 
     # 1. Manual concepts are authoritative for the rows they claim. Drop member
     #    ids that no longer exist (reconcile-on-load: never silently keep orphans).
     claimed: set[str] = set()
     concepts: list[Concept] = []
     for entry in overrides:
-        members = _sorted_ids(m for m in entry["members"] if m in valid_ids and m not in claimed)
+        requested = [m for m in entry["members"] if m]
+        unknown = [m for m in requested if m not in valid_ids]
+        members = _sorted_ids(m for m in requested if m in valid_ids and m not in claimed)
+        label_hint = entry["label"] or (entry["uid"] or "?")
+        if unknown:
+            notices.append(
+                f"concept '{label_hint}' referenced {len(unknown)} unknown row id(s) "
+                f"({', '.join(unknown)}); they were dropped."
+            )
         if not members:
             continue
         claimed.update(members)
-        concepts.append(
-            Concept(
-                uid=entry["uid"] or _auto_uid(members),
-                label=entry["label"] or _auto_label(members, by_id),
-                members=members,
-                origin=entry["origin"] or "manual:merge",
-            )
+        _add(
+            entry["uid"] or _auto_uid(members),
+            entry["label"] or _auto_label(members, by_id),
+            members,
+            entry["origin"] or "manual:merge",
         )
 
     # 2. Remaining rows keep their auto grouping, minus any claimed members
@@ -275,14 +319,7 @@ def materialize(
         members = [rid for rid in component if rid not in claimed]
         if not members:
             continue
-        concepts.append(
-            Concept(
-                uid=_auto_uid(members),
-                label=_auto_label(members, by_id),
-                members=members,
-                origin="auto",
-            )
-        )
+        _add(_auto_uid(members), _auto_label(members, by_id), members, "auto")
 
     concepts.sort(key=lambda c: _id_sort_key(c.members[0]) if c.members else (1, "9" * 9))
 
@@ -293,7 +330,12 @@ def materialize(
         for rid in concept.members:
             uid_by_row[rid] = concept.uid
 
-    return ConceptIdentity(concepts=concepts, uid_by_row=uid_by_row, rows_by_uid=rows_by_uid)
+    return ConceptIdentity(
+        concepts=concepts,
+        uid_by_row=uid_by_row,
+        rows_by_uid=rows_by_uid,
+        warnings=notices,
+    )
 
 
 def load_concept_identity(
@@ -306,8 +348,8 @@ def load_concept_identity(
     project_root = Path(project_root)
     rows = _concept_rows(project_root)
     overlap = state if state is not None else load_survey_overlap_state(project_root)
-    overrides = _load_overrides(project_root)
-    return materialize(rows, overlap, overrides)
+    overrides, warnings = _load_overrides(project_root)
+    return materialize(rows, overlap, overrides, warnings=warnings)
 
 
 def identity_payload(identity: ConceptIdentity) -> dict[str, Any]:
