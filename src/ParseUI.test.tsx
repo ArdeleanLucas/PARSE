@@ -2185,6 +2185,7 @@ describe("ParseUI", () => {
     expect(screen.getByRole("button", { name: /Accept concept/i }).className).toContain("bg-emerald-700");
   });
 
+
   it("waits for the newly selected speaker audio to become ready before seeking and drawing a region", async () => {
     mockConfig = {
       project_name: "PARSE",
@@ -3020,6 +3021,29 @@ describe("ParseUI", () => {
     expect(mockSetConceptTag).toHaveBeenCalledWith("Kalh01", "1", "problematic");
     expect(mockSetConceptTag).toHaveBeenCalledWith("Fail01", "1", "confirmed");
     expect(mockSetConceptTag).toHaveBeenCalledWith("Kalh01", "1", "confirmed");
+  });
+
+  it("toggles compare Flag and Accept concept off when the tag is already set (MC-449-B)", () => {
+    mockRecords = {
+      Fail01: { ...makeRecord("Fail01", []), concept_tags: { "1": ["problematic", "confirmed"] } },
+      Kalh01: { ...makeRecord("Kalh01", []), concept_tags: { "1": ["problematic", "confirmed"] } },
+    };
+
+    render(<ParseUI />);
+
+    // Regression (MC-449-B): an already flagged/accepted concept must be
+    // reversible from the compare header. Previously the onClick was a no-op
+    // when the tag was set, so the buttons could only ever turn ON.
+    fireEvent.click(screen.getByRole("button", { name: /^Flag$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Accept concept/i }));
+
+    expect(mockClearConceptTag).toHaveBeenCalledWith("Fail01", "1", "problematic");
+    expect(mockClearConceptTag).toHaveBeenCalledWith("Kalh01", "1", "problematic");
+    expect(mockClearConceptTag).toHaveBeenCalledWith("Fail01", "1", "confirmed");
+    expect(mockClearConceptTag).toHaveBeenCalledWith("Kalh01", "1", "confirmed");
+    // Must not re-set the very tag it was asked to clear.
+    expect(mockSetConceptTag).not.toHaveBeenCalledWith("Fail01", "1", "problematic");
+    expect(mockSetConceptTag).not.toHaveBeenCalledWith("Fail01", "1", "confirmed");
   });
 
   it("compare table row flag button targets a single speaker via enrichment overrides", async () => {

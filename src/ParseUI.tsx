@@ -180,6 +180,7 @@ export function ParseUI() {
   const updateStoreTag   = useTagStore(s => s.updateTag);
   const annotationRecords = useAnnotationStore(s => s.records);
   const setConceptTag = useAnnotationStore(s => s.setConceptTag);
+  const clearConceptTag = useAnnotationStore(s => s.clearConceptTag);
   const enrichmentData = useEnrichmentStore(s => s.data);
   const setActiveSpeakerUI = useUIStore(s => s.setActiveSpeaker);
   const setActiveConceptUI = useUIStore(s => s.setActiveConcept);
@@ -940,11 +941,19 @@ export function ParseUI() {
   );
   const activeTagScopeKey = activeTagScope.join('\u0000');
 
-  const setConceptTagForSelectedSpeakers = useCallback((tagId: string, conceptKey: string) => {
+  // Toggle a concept-level tag for the in-scope speakers. When `isSet` (the
+  // tag is already present anywhere in scope) clear it everywhere, otherwise
+  // set it. Without the clear branch the Flag / Accept buttons could only ever
+  // turn ON — once tagged you could never un-flag from the compare header.
+  const toggleConceptTagForSelectedSpeakers = useCallback((tagId: string, conceptKey: string, isSet: boolean) => {
     for (const targetSpeaker of selectedTagTargetSpeakers()) {
-      setConceptTag(targetSpeaker, conceptKey, tagId);
+      if (isSet) {
+        clearConceptTag(targetSpeaker, conceptKey, tagId);
+      } else {
+        setConceptTag(targetSpeaker, conceptKey, tagId);
+      }
     }
-  }, [selectedTagTargetSpeakers, setConceptTag]);
+  }, [selectedTagTargetSpeakers, setConceptTag, clearConceptTag]);
 
   const activeSpeakerForSidebar = selectedSpeakers[0] ?? null;
   const elicitedConceptKeys = useMemo(
@@ -2147,17 +2156,23 @@ export function ParseUI() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'problematic')
-                      ? null
-                      : setConceptTagForSelectedSpeakers('problematic', concept.key)}
+                    aria-pressed={getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'problematic')}
+                    onClick={() => toggleConceptTagForSelectedSpeakers(
+                      'problematic',
+                      concept.key,
+                      getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'problematic'),
+                    )}
                     className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'problematic') ? 'border-amber-300 bg-amber-100 text-amber-800' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
                   >
                     <Flag className="h-3.5 w-3.5"/> Flag
                   </button>
                   <button
-                    onClick={() => getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'confirmed')
-                      ? null
-                      : setConceptTagForSelectedSpeakers('confirmed', concept.key)}
+                    aria-pressed={getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'confirmed')}
+                    onClick={() => toggleConceptTagForSelectedSpeakers(
+                      'confirmed',
+                      concept.key,
+                      getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'confirmed'),
+                    )}
                     className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold shadow-sm transition ${getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'confirmed') ? 'bg-emerald-700 text-white' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
                   >
                     <Check className="h-3.5 w-3.5"/> Accept concept
