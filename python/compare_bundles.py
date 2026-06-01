@@ -273,14 +273,74 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
     stored_canonical = load_canonical_lexemes(project_root)
     selected_speakers = list(speakers) if speakers is not None else _load_project_speakers(project_root)
 
+    # Group rows into bundles by union-find. Two rows merge when they share a
+    # normalized stem (variant suffixes such as "(A)") OR a cross-survey identity
+    # declared in the overlap sidecar. The latter is essential: e.g. "salt"
+    # (KLQ 3.14) and "salt (eating)" (JBIL 139) cross-reference each other, so
+    # they are one concept — but their English stems differ ("salt" vs
+    # "salt (eating)"), so a stem-only grouping splits them and a speaker's
+    # candidates get read from only one of the linked concept ids.
+    parent: dict[str, str] = {}
+
+    def _find(node: str) -> str:
+        parent.setdefault(node, node)
+        root = node
+        while parent[root] != root:
+            root = parent[root]
+        while parent[node] != root:
+            parent[node], node = root, parent[node]
+        return root
+
+    def _union(a: str, b: str) -> None:
+        ra, rb = _find(a), _find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    def _id_sort_key(value: object) -> tuple[int, object]:
+        text = str(value or "").strip()
+        return (0, int(text)) if text.isdigit() else (1, text)
+
+    row_by_id: dict[str, Mapping[str, Any]] = {}
+    row_order: list[str] = []
+    stem_rep: dict[str, str] = {}
+    pair_rep: dict[tuple[str, str], str] = {}
+    for row in rows:
+        rid = str(row.get("id"))
+        row_by_id[rid] = row
+        row_order.append(rid)
+        _find(rid)
+        stem = _stem_key(row.get("concept_en", ""))
+        if stem:
+            if stem in stem_rep:
+                _union(stem_rep[stem], rid)
+            else:
+                stem_rep[stem] = rid
+        for survey_id, source_item in concept_survey_links_for_row(row, overlap).items():
+            pair = (normalize_survey_id(survey_id), str(source_item or "").strip())
+            if not pair[0] or not pair[1]:
+                continue
+            if pair in pair_rep:
+                _union(pair_rep[pair], rid)
+            else:
+                pair_rep[pair] = rid
+
     groups: dict[str, dict[str, Any]] = {}
     ordered_keys: list[str] = []
-    for row in rows:
-        key = _stem_key(row.get("concept_en", ""))
-        if key not in groups:
-            groups[key] = {"label": _stem(row.get("concept_en", "")) or row.get("concept_en", ""), "rows": []}
-            ordered_keys.append(key)
-        groups[key]["rows"].append(row)
+    for rid in row_order:
+        root = _find(rid)
+        if root not in groups:
+            groups[root] = {"label": "", "rows": []}
+            ordered_keys.append(root)
+        groups[root]["rows"].append(row_by_id[rid])
+    # Bundle label: prefer a clean gloss (no parenthetical clarifier), then the
+    # shortest, then the lowest concept id — so a merged group shows "salt", not
+    # "salt (eating)".
+    for root in ordered_keys:
+        rep = sorted(
+            groups[root]["rows"],
+            key=lambda r: ("(" in str(r.get("concept_en", "")), len(str(r.get("concept_en", ""))), _id_sort_key(r.get("id"))),
+        )[0]
+        groups[root]["label"] = _stem(rep.get("concept_en", "")) or rep.get("concept_en", "")
 
     used_slugs: dict[str, int] = {}
     built: list[dict[str, Any]] = []
