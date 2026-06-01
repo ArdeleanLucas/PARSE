@@ -27,6 +27,7 @@ EXPORT_TOOL_NAMES = (
     "export_annotations_elan",
     "export_annotations_textgrid",
     "export_review_data",
+    "export_beast2_xml",
 )
 
 
@@ -165,6 +166,61 @@ EXPORT_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                         _tool_condition(
                             "export_file_written",
                             "When dryRun=false and outputPath is provided, the requested export file is written inside the project.",
+                            kind="filesystem_write",
+                        ),
+                    ),
+                ),
+    "export_beast2_xml": ChatToolSpec(
+                    name="export_beast2_xml",
+                    description=(
+                        "Export a runnable BEAST2 (v2.7) XML analysis from the cognate-character matrix "
+                        "for direct phylogenetic inference — no BEAUti step required. Uses a binary "
+                        "substitution model, Yule tree prior, and strict clock. Supports conceptTag / "
+                        "consolidate exactly like export_nexus. Without outputPath returns a preview "
+                        "(first 2000 chars); with outputPath writes inside the project. Run the result "
+                        "with BEAST2 (`beast <file>.xml`)."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "outputPath": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512,
+                                "description": "Project-relative or absolute path inside project root (e.g. exports/beast2/analysis.xml).",
+                            },
+                            "conceptTag": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200,
+                                "description": "If set, restrict to this concept tag and fold survey-overlap duplicate concept ids into one canonical character.",
+                            },
+                            "consolidate": {"type": "boolean", "description": "Fold survey-overlap duplicate concept ids (implied when conceptTag is set)."},
+                            "chainLength": {
+                                "type": "integer",
+                                "minimum": 1000,
+                                "maximum": 1000000000,
+                                "description": "MCMC chain length (default 10000000). Loggers sample ~200 times across the chain.",
+                            },
+                            "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
+                        },
+                    },
+                    mutability="mutating",
+                    supports_dry_run=True,
+                    dry_run_parameter="dryRun",
+                    preconditions=(
+                        _project_loaded_condition(),
+                        _tool_condition(
+                            "cognate_matrix_available",
+                            "The project must contain enough cognate/enrichment data to build a character matrix.",
+                            kind="project_state",
+                        ),
+                    ),
+                    postconditions=(
+                        _tool_condition(
+                            "export_file_written",
+                            "When dryRun=false and outputPath is provided, the BEAST2 XML is written inside the project.",
                             kind="filesystem_write",
                         ),
                     ),
@@ -608,24 +664,35 @@ def export_lingpy_tsv(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str
             raise ChatToolExecutionError("LingPy TSV export failed: {0}".format(exc)) from exc
 
 
+def _nexus_text_and_meta(tools: "ParseChatTools", args: Dict[str, Any]) -> Tuple[str, bool, str, Optional[Dict[str, Any]], List[str]]:
+        """Build the NEXUS matrix text honoring conceptTag/consolidate.
+
+        Returns ``(nexus_text, consolidate, concept_tag, summary, extra_warnings)``.
+        Shared by ``export_nexus`` and ``export_beast2_xml`` so they always agree
+        on the underlying character matrix.
+        """
+        concept_tag = str(args.get("conceptTag") or "").strip()
+        consolidate = bool(args.get("consolidate")) or bool(concept_tag)
+        summary: Optional[Dict[str, Any]] = None
+        extra_warnings: List[str] = []
+        if consolidate:
+            from compare.consolidated_matrix import build_nexus_from_sets
+            cognate_sets, meta, _id_to_key, speakers, _allowed = _consolidated_sets(tools, concept_tag)
+            nexus_text = build_nexus_from_sets(cognate_sets, speakers)
+            summary = _consolidation_summary(meta)
+            extra_warnings = list(meta.get("warnings") or [])
+        else:
+            nexus_text = build_nexus_text(tools)
+        return nexus_text, consolidate, concept_tag, summary, extra_warnings
+
+
 def export_nexus(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
         """Build NEXUS matrix via _build_nexus_text(). Preview = first 2000 chars; write requires outputPath."""
         output_path_str = str(args.get("outputPath") or "").strip()
         dry_run = bool(args.get("dryRun", False))
-        concept_tag = str(args.get("conceptTag") or "").strip()
-        consolidate = bool(args.get("consolidate")) or bool(concept_tag)
 
-        summary: Optional[Dict[str, Any]] = None
-        extra_warnings: List[str] = []
         try:
-            if consolidate:
-                from compare.consolidated_matrix import build_nexus_from_sets
-                cognate_sets, meta, _id_to_key, speakers, _allowed = _consolidated_sets(tools, concept_tag)
-                nexus_text = build_nexus_from_sets(cognate_sets, speakers)
-                summary = _consolidation_summary(meta)
-                extra_warnings = list(meta.get("warnings") or [])
-            else:
-                nexus_text = build_nexus_text(tools)
+            nexus_text, consolidate, concept_tag, summary, extra_warnings = _nexus_text_and_meta(tools, args)
         except ChatToolError:
             raise
         except Exception as exc:
@@ -653,6 +720,63 @@ def export_nexus(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(nexus_text, encoding="utf-8")
         base.update({"success": True, "outputPath": str(out_path), "totalChars": len(nexus_text)})
+        return base
+
+
+def export_beast2_xml(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a runnable BEAST 2.7 XML from the (optionally consolidated) cognate matrix.
+
+        Wraps the same NEXUS character matrix as ``export_nexus`` into a
+        self-contained BEAST2 analysis (binary model, Yule prior, strict clock),
+        so the full PARSE -> BEAST2 chain needs no BEAUti step or external script.
+        Preview = first 2000 chars; write requires outputPath.
+        """
+        from compare.beast2_xml import nexus_to_beast2_xml, DEFAULT_CHAIN_LENGTH
+
+        output_path_str = str(args.get("outputPath") or "").strip()
+        dry_run = bool(args.get("dryRun", False))
+        raw_chain = args.get("chainLength")
+        try:
+            chain_length = DEFAULT_CHAIN_LENGTH if raw_chain in (None, "") else int(raw_chain)
+        except (TypeError, ValueError):
+            raise ChatToolExecutionError("chainLength must be an integer.")
+        if chain_length < 1:
+            raise ChatToolExecutionError("chainLength must be a positive integer.")
+
+        try:
+            nexus_text, consolidate, concept_tag, summary, extra_warnings = _nexus_text_and_meta(tools, args)
+            xml_text = nexus_to_beast2_xml(nexus_text, chain_length=chain_length)
+        except ChatToolError:
+            raise
+        except Exception as exc:
+            raise ChatToolExecutionError("BEAST2 XML build failed: {0}".format(exc)) from exc
+
+        # Readiness reflects the underlying matrix (an empty/uncoded matrix yields
+        # a structurally-valid but uninformative analysis).
+        warnings = nexus_readiness(nexus_text) + extra_warnings
+        base: Dict[str, Any] = {
+            "chainLength": chain_length,
+            "warnings": warnings,
+            "beast2_ready": not warnings,
+            "note": "Run with BEAST2 (e.g. `beast <file>.xml`); outputs use the XML's basename.",
+        }
+        if consolidate:
+            base.update({"consolidated": True, "conceptTag": concept_tag or None, "consolidation": summary})
+
+        if dry_run or not output_path_str:
+            base.update({
+                "readOnly": True,
+                "previewOnly": True,
+                "preview": xml_text[:2000],
+                "truncated": len(xml_text) > 2000,
+                "totalChars": len(xml_text),
+            })
+            return base
+
+        out_path = tools._resolve_project_path(output_path_str, allowed_roots=[tools.project_root])
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(xml_text, encoding="utf-8")
+        base.update({"success": True, "outputPath": str(out_path), "totalChars": len(xml_text)})
         return base
 
 
@@ -899,6 +1023,7 @@ EXPORT_TOOL_HANDLERS = {
     "export_annotations_csv": export_annotations_csv,
     "export_lingpy_tsv": export_lingpy_tsv,
     "export_nexus": export_nexus,
+    "export_beast2_xml": export_beast2_xml,
     "export_annotations_elan": export_annotations_elan,
     "export_annotations_textgrid": export_annotations_textgrid,
     "export_review_data": export_review_data,
@@ -912,6 +1037,7 @@ __all__ = [
     "build_nexus_text",
     "lingpy_tsv_readiness",
     "nexus_readiness",
+    "export_beast2_xml",
     "export_annotations_csv",
     "export_lingpy_tsv",
     "export_nexus",

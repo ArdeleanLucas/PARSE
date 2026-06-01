@@ -5,6 +5,9 @@ import json
 import pathlib
 import re
 import sys
+import xml.etree.ElementTree as ET
+
+import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
@@ -89,3 +92,26 @@ def test_unknown_concept_tag_emits_distinct_warning(tmp_path: pathlib.Path) -> N
     assert res["consolidated"] is True
     # A typo'd / unknown tag must not look like a silent "no data" export.
     assert any("matched 0 concepts" in w for w in res["warnings"])
+
+
+def test_export_beast2_xml_wraps_consolidated_matrix(tmp_path: pathlib.Path) -> None:
+    _seed_workspace(tmp_path)
+    tools = ParseChatTools(project_root=tmp_path)
+
+    res = tools._tool_export_beast2_xml(
+        {"conceptTag": "custom-sk-concept-list", "chainLength": 12345, "outputPath": "exports/a.xml"}
+    )
+    assert res["consolidated"] is True and res["chainLength"] == 12345
+    root = ET.fromstring((tmp_path / "exports" / "a.xml").read_text(encoding="utf-8"))
+    assert root.get("version") == "2.7"
+    assert root.find("run").get("chainLength") == "12345"
+    assert root.find("data").get("dataType") == "binary"
+    # 3 speakers in the seed workspace -> 3 taxa sequences
+    assert len(root.find("data").findall("sequence")) == 3
+
+
+def test_export_beast2_xml_rejects_bad_chain_length(tmp_path: pathlib.Path) -> None:
+    _seed_workspace(tmp_path)
+    tools = ParseChatTools(project_root=tmp_path)
+    with pytest.raises(Exception):
+        tools._tool_export_beast2_xml({"consolidate": True, "chainLength": 0, "dryRun": True})
