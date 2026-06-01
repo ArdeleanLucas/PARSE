@@ -287,3 +287,49 @@ def test_single_realization_candidate_has_no_realizations_key(tmp_path: pathlib.
 
     assert "realizations" not in candidate
     assert "realization_index" not in candidate
+
+
+def _salt_rows() -> list[dict[str, str]]:
+    # Two concept rows that the overlap sidecar declares the same concept, but
+    # whose English stems differ ("salt" vs "salt (eating)").
+    return [
+        {"id": "52", "concept_en": "salt", "source_item": "3.14", "source_survey": "KLQ", "custom_order": "52"},
+        {"id": "352", "concept_en": "salt (eating)", "source_item": "139", "source_survey": "JBIL", "custom_order": "352"},
+    ]
+
+
+def test_cross_survey_linked_rows_merge_into_one_bundle(tmp_path: pathlib.Path) -> None:
+    # 52 (KLQ 3.14) <-> 352 (JBIL 139) cross-reference each other in the sidecar.
+    _seed_concepts(tmp_path, _salt_rows())
+    (tmp_path / "survey-overlap.json").write_text(
+        json.dumps({"concept_survey_links": {"52": {"jbil": "139"}, "352": {"klq": "3.14"}}}),
+        encoding="utf-8",
+    )
+    # Saha01 recorded salt under the JBIL row (352); Badr01 under the KLQ row (52).
+    _seed_annotation(tmp_path, "Saha01", [{"text": "salt", "concept_id": "352", "start": 1.0, "end": 2.0, "ipa": "xwa", "ortho": "خوە"}])
+    _seed_annotation(tmp_path, "Badr01", [{"text": "salt", "concept_id": "52", "start": 1.0, "end": 2.0, "ipa": "xwā", "ortho": "xwā"}])
+
+    payload = build_compare_bundles(tmp_path, speakers=["Saha01", "Badr01"])
+
+    # One merged bundle (not two), labelled with the clean gloss.
+    assert len(payload["bundles"]) == 1
+    bundle = payload["bundles"][0]
+    assert bundle["bundle_id"] == "bundle:salt"
+    assert bundle["label"] == "salt"
+    assert set(bundle["row_ids"]) == {"52", "352"}
+    # Both speakers' candidates live in the SAME bundle, each under the concept id
+    # they actually recorded — the speaker who used row 52 is no longer dropped.
+    assert bundle["candidates"]["Badr01"]["52"]["ipa"] == "xwā"
+    assert bundle["candidates"]["Badr01"].get("352") is None
+    assert bundle["candidates"]["Saha01"]["352"]["ipa"] == "xwa"
+    assert bundle["candidates"]["Saha01"].get("52") is None
+
+
+def test_unlinked_distinct_stems_stay_separate_bundles(tmp_path: pathlib.Path) -> None:
+    # Without a cross-survey link, distinct stems must NOT merge (no false union).
+    _seed_concepts(tmp_path, _salt_rows())  # no survey-overlap.json
+    _seed_annotation(tmp_path, "Saha01", [{"text": "salt", "concept_id": "352", "start": 1.0, "end": 2.0, "ipa": "xwa", "ortho": "خوە"}])
+
+    payload = build_compare_bundles(tmp_path, speakers=["Saha01"])
+
+    assert sorted(b["bundle_id"] for b in payload["bundles"]) == ["bundle:salt", "bundle:salt-eating"]
