@@ -131,6 +131,57 @@ def test_singleton_bundle_auto_picks_single_candidate_without_persisting(tmp_pat
     assert not (tmp_path / "parse-enrichments.json").exists()
 
 
+def test_each_realization_keeps_its_own_sibling_transcription(tmp_path: pathlib.Path) -> None:
+    # A speaker who records two realizations (A/B) of one concept must get each
+    # realization's OWN IPA/ortho from the sibling tiers — not realization A's
+    # transcription copied onto B. Regression: the sibling selector pinned every
+    # realization to the first same-conceptId interval, so B duplicated A and the
+    # distinct second variant never surfaced in Compare. The IPA/ortho siblings
+    # are intentionally keyed by time overlap, so the file order below (B before
+    # A) must not change which transcription each realization receives.
+    _seed_concepts(tmp_path, [{"id": "1", "concept_en": "hair", "source_item": "1.1", "source_survey": "KLQ"}])
+    annotations = tmp_path / "annotations"
+    annotations.mkdir(exist_ok=True)
+    payload = {
+        "speaker": "Saha01",
+        "audio": {"source_wav": "Saha01.wav"},
+        "tiers": {
+            "concept": {
+                "intervals": [
+                    {"text": "hair", "concept_id": "1", "start": 20.0, "end": 21.0},
+                    {"text": "hair", "concept_id": "1", "start": 10.0, "end": 11.0},
+                ]
+            },
+            "ipa": {
+                "intervals": [
+                    {"text": "ipa-late", "concept_id": "1", "start": 20.0, "end": 21.0},
+                    {"text": "ipa-early", "concept_id": "1", "start": 10.0, "end": 11.0},
+                ]
+            },
+            "ortho": {
+                "intervals": [
+                    {"text": "ortho-late", "concept_id": "1", "start": 20.0, "end": 21.0},
+                    {"text": "ortho-early", "concept_id": "1", "start": 10.0, "end": 11.0},
+                ]
+            },
+            "ortho_words": {"intervals": []},
+        },
+    }
+    (annotations / "Saha01.parse.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    candidate = build_compare_bundles(tmp_path, speakers=["Saha01"])["bundles"][0]["candidates"]["Saha01"]["1"]
+    realizations = candidate["realizations"]
+
+    # Realizations are start-sorted (A = earliest), each carrying its own time-
+    # aligned transcription rather than realization A's repeated twice.
+    assert [r["realization_index"] for r in realizations] == [0, 1]
+    assert [r["ipa"] for r in realizations] == ["ipa-early", "ipa-late"]
+    assert [r["ortho"] for r in realizations] == ["ortho-early", "ortho-late"]
+    # The primary candidate still mirrors realization A.
+    assert candidate["ipa"] == "ipa-early"
+    assert candidate["realization_index"] == 0
+
+
 def test_bundle_id_collision_suffix_is_deterministic(tmp_path: pathlib.Path) -> None:
     _seed_concepts(
         tmp_path,
