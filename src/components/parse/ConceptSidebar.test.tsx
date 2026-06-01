@@ -92,6 +92,47 @@ describe('ConceptSidebar', () => {
     expect(onConceptSelect).toHaveBeenCalledWith(247, '247:1');
   });
 
+  it('reassign flow: context menu → picker → onReassignInterval(speaker, fromKey, index, target)', () => {
+    const onReassignInterval = vi.fn();
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={[{ id: 247, key: '247', name: 'head', tag: 'confirmed' as const }]}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={247}
+        activeRealizationKey="247:0"
+        onConceptSelect={vi.fn()}
+        activeSpeaker="S1"
+        elicitationVariantLabelsByConceptKey={{ '247': ['A', 'B'] }}
+        onReassignInterval={onReassignInterval}
+        reassignConceptOptions={[{ id: '247', name: 'head' }, { id: '999', name: 'neck' }]}
+      />,
+    );
+
+    // Right-click the B realization pill (interval index 1) → context menu.
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'head (B)' }));
+    // Open the reassign picker.
+    fireEvent.click(screen.getByRole('menuitem', { name: /move to concept/i }));
+    // Source concept (247) is filtered out of the target list; only 'neck' (999) remains.
+    expect(screen.getByRole('dialog', { name: /move recording from head/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio'));
+    fireEvent.click(screen.getByRole('button', { name: /move recording/i }));
+
+    expect(onReassignInterval).toHaveBeenCalledWith('S1', '247', 1, '999');
+  });
+
   it('adds data-realization-key to only pill-less concept rows in DOM order', () => {
     render(
       <ConceptSidebar

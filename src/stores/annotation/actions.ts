@@ -456,6 +456,40 @@ export function createAnnotationActionsSlice(
       commitRecordMutation(set, scheduleAutosave, speaker, pre, clone, "create concept interval");
     },
 
+    reassignRealization: (
+      speaker: string,
+      fromConceptId: string,
+      intervalIndex: number,
+      toConceptId: string,
+    ): boolean => {
+      const from = String(fromConceptId ?? "").trim();
+      const to = String(toConceptId ?? "").trim();
+      if (!from || !to || from === to) return false;
+      if (!Number.isInteger(intervalIndex) || intervalIndex < 0) return false;
+
+      const pre = selectSpeakerRecord(get(), speaker);
+      if (!pre) return false;
+
+      const clone = deepClone(pre);
+      const intervals = clone.tiers.concept?.intervals ?? [];
+      const candidates = intervals
+        .map((interval, index) => ({ interval, index }))
+        .filter((entry) => String(entry.interval.concept_id ?? "") === from)
+        .sort(
+          (left, right) =>
+            (left.interval.start - right.interval.start) ||
+            (left.interval.end - right.interval.end),
+        );
+      const target = candidates[intervalIndex];
+      if (!target) return false;
+
+      intervals[target.index] = { ...target.interval, concept_id: to };
+      clone.modified_at = nowIsoUtc();
+
+      commitRecordMutation(set, scheduleAutosave, speaker, pre, clone, "reassign realization");
+      return true;
+    },
+
     clearConceptTag: (speaker: string, conceptId: string, tagId: string) => {
       const pre = selectSpeakerRecord(get(), speaker);
       if (!pre) return;
