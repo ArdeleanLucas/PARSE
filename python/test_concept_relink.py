@@ -256,6 +256,24 @@ def test_apply_rewrites_and_dedupes_compare_notes_sidecar(tmp_path: pathlib.Path
     assert any(path.endswith("/parseui-compare-notes-v1.json") for path in response["backup_paths"])
 
 
+def test_apply_concept_keys_collision_keeps_destination_nested_dict(tmp_path: pathlib.Path) -> None:
+    # When keep (122) and merge (635) both hold a nested enrichment value under
+    # the same section, the merge must collapse to the canonical keep_id entry
+    # and drop the merged-in one (keep_id wins), regardless of differing data.
+    _seed_two_to_fly(tmp_path)
+    (tmp_path / "parse-enrichments.json").write_text(
+        json.dumps({"cognate_sets": {"122": {"A": ["S1"]}, "635": {"B": ["S2"]}, "3": {"C": ["S3"]}}}),
+        encoding="utf-8",
+    )
+
+    response = apply_relink_by_gloss(tmp_path, accepted_groups=[{"keep_concept_id": "122", "merge_concept_ids": ["635"]}])
+
+    assert response["ok"] is True and response["applied"] is True
+    enrichments = _read_json(tmp_path / "parse-enrichments.json")
+    assert enrichments["cognate_sets"] == {"122": {"A": ["S1"]}, "3": {"C": ["S3"]}}
+    assert any(path.endswith("/parse-enrichments.json") for path in response["backup_paths"])
+
+
 def test_assert_no_merged_refs_raises_on_dangling_reference(tmp_path: pathlib.Path) -> None:
     # Safety gate: an incomplete rewrite (a stray reference to a merged id) must
     # fail loudly so the apply rolls back, rather than declaring success.

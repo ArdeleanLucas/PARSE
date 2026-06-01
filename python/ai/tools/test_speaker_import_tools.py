@@ -975,6 +975,68 @@ def test_processed_import_dry_run_reports_potential_duplicate(tmp_path) -> None:
     assert [m["id"] for m in dups[0]["existingMatches"]] == ["313"]
 
 
+def test_processed_import_apply_blocks_silent_duplicate_creation(tmp_path) -> None:
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    _fly_dup_concepts_fixture(project_root)
+    wav_path, annotation_path, _peaks = _write_processed_artifacts(
+        project_root,
+        "Khan05",
+        {
+            "version": 1,
+            "speaker": "Khan05",
+            "source_audio": "audio/working/Khan05/speaker.wav",
+            "source_audio_duration_sec": 1.0,
+            "metadata": {"language_code": "sdh"},
+            "tiers": {"concept": {"display_order": 1, "intervals": [{"start": 0.0, "end": 1.0, "text": "635: fly (verb)"}]}},
+        },
+    )
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[project_root])
+
+    with pytest.raises(ChatToolValidationError) as excinfo:
+        speaker_import_tools.tool_import_processed_speaker(
+            tools,
+            {"speaker": "Khan05", "workingWav": str(wav_path), "annotationJson": str(annotation_path), "dryRun": False},
+        )
+    assert "allowDuplicateConcepts" in str(excinfo.value)
+    # Apply was blocked before any write: no parse.json, no new concept row.
+    assert not (project_root / "annotations" / "Khan05.parse.json").exists()
+    _fieldnames, rows = _read_concepts_fixture(project_root / "concepts.csv")
+    assert "635" not in {row["id"] for row in rows}
+
+
+def test_lexical_apply_does_not_block_when_reimporting_existing_concept_id(tmp_path) -> None:
+    # Re-importing an EXISTING concept id must never be flagged as a duplicate,
+    # even when the project already holds another same-gloss concept. Only NEW
+    # ids can duplicate; this locks the load-bearing `concept_id in existing_ids`
+    # skip so speaker refreshes don't false-block.
+    external_root = tmp_path / "external"
+    source_csv = external_root / "qorv01.csv"
+    _write_lexical_wordlist(
+        source_csv,
+        [{"concept_id": "1", "gloss": "ash", "ipa_form": "aʃ", "order": 10, "source_survey": "KLQ"}],
+    )
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    _write_concepts_fixture(
+        project_root / "concepts.csv",
+        [
+            {"id": "1", "concept_en": "ash", "source_item": "1.1", "source_survey": "KLQ", "custom_order": "10"},
+            {"id": "53", "concept_en": "ash", "source_item": "9.9", "source_survey": "JBIL", "custom_order": "20"},
+        ],
+    )
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+
+    payload = speaker_import_tools.tool_onboard_lexical_speaker(
+        tools,
+        {"speaker": "Qorv01", "sourceCsv": str(source_csv), "dryRun": False},
+    )
+
+    assert payload["ok"] is True and payload["dryRun"] is False
+    assert payload["plan"]["potentialDuplicates"] == []
+    assert (project_root / "annotations" / "Qorv01.parse.json").exists()
+
+
 def test_import_specs_expose_allow_duplicate_concepts_param() -> None:
     for name in ("onboard_lexical_speaker", "import_processed_speaker"):
         spec = speaker_import_tools.SPEAKER_IMPORT_TOOL_SPECS[name]
