@@ -18,14 +18,17 @@ Exports a complete PARSE phylogenetics bundle — LingPy TSV + NEXUS character m
 - For TSV-only or NEXUS-only exports — call `export_lingpy_tsv` or `export_nexus` directly. The workflow's overhead is only worth it when you actually want both.
 - For per-stage parameter tuning — the workflow wraps the underlying tools with defaults. For custom thresholds on `cognate_compute_preview` or `contact_lexeme_lookup`, call those tools individually first, then run the unbundled exports.
 - Without first verifying enrichments. The workflow assumes `parse-enrichments.json` has enough cognate data; if cognate decisions haven't been made, the export will be empty or partial.
-- For arbitrary file destinations. The workflow writes to `exports/lingpy/wordlist.tsv` and `exports/lingpy/dataset.nex` — fixed paths.
+- For per-file destinations. The workflow writes `wordlist.tsv` + `dataset.nex` into one directory (`outputDir`, default `exports/lingpy/`). To place the TSV and NEXUS at unrelated paths, call `export_lingpy_tsv` / `export_nexus` individually.
 
 ## Parameters
 
-| Parameter            | Type    | Required | Description                                                                       | Default | Example  |
-|----------------------|---------|----------|-----------------------------------------------------------------------------------|---------|----------|
-| with_contact_lexemes | boolean | No       | If `true`, run `contact_lexeme_lookup` as a first stage before TSV / NEXUS export. | `false` | `true`   |
-| dryRun               | boolean | No       | If `true`, preview the bundle and planned artifacts without writing files.        | `false` | `true`   |
+| Parameter            | Type    | Required | Description                                                                       | Default          | Example  |
+|----------------------|---------|----------|-----------------------------------------------------------------------------------|------------------|----------|
+| with_contact_lexemes | boolean | No       | If `true`, run `contact_lexeme_lookup` as a first stage before TSV / NEXUS export. | `false`          | `true`   |
+| outputDir            | string  | No       | Project-relative output directory for the bundle. Date-stamp it to avoid clobbering prior evidence. | `exports/lingpy` | `exports/beast2/2026-05-31-thesis` |
+| conceptTag           | string  | No       | Restrict the bundle to this concept tag (e.g. the thesis list) **and** fold survey-overlap duplicate concept ids into one canonical character. | _(none)_ | `custom-sk-concept-list` |
+| consolidate          | boolean | No       | Fold survey-overlap duplicate concept ids into one canonical character (implied when `conceptTag` is set). | `false`          | `true`   |
+| dryRun               | boolean | No       | If `true`, preview the bundle and planned artifacts without writing files.        | `false`          | `true`   |
 
 ## Expected Output
 On `dryRun: true`: returns the planned artifact paths (`exports/lingpy/wordlist.tsv`, `exports/lingpy/dataset.nex`) and a per-stage preview from each underlying tool (`export_lingpy_tsv`, `export_nexus`, optional `contact_lexeme_lookup`). The response shape includes `stages: [{ stage, tool, status: "preview", payload }, ...]`.

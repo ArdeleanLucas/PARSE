@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from ..chat_tools import (
     ANNOTATION_FILENAME_SUFFIX,
@@ -93,6 +93,13 @@ EXPORT_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                                 "maxLength": 512,
                                 "description": "Project-relative or absolute path inside project root.",
                             },
+                            "conceptTag": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200,
+                                "description": "If set, restrict the matrix to this concept tag (e.g. custom-sk-concept-list, the thesis tag) and fold survey-overlap duplicate concept ids into one canonical character.",
+                            },
+                            "consolidate": {"type": "boolean", "description": "Fold survey-overlap duplicate concept ids into one canonical character (implied when conceptTag is set)."},
                             "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
                         },
                     },
@@ -133,6 +140,13 @@ EXPORT_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                                 "maxLength": 512,
                                 "description": "Project-relative or absolute path inside project root.",
                             },
+                            "conceptTag": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200,
+                                "description": "If set, restrict the matrix to this concept tag (e.g. custom-sk-concept-list, the thesis tag) and fold survey-overlap duplicate concept ids into one canonical character.",
+                            },
+                            "consolidate": {"type": "boolean", "description": "Fold survey-overlap duplicate concept ids into one canonical character (implied when conceptTag is set)."},
                             "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
                         },
                     },
@@ -418,16 +432,15 @@ def nexus_readiness(nexus_text: str) -> List[str]:
         if not matrix_match:
             return warnings
 
-        total_cells = 0
-        missing_cells = 0
+        # NOTE: '?' is a valid NEXUS state (missing data), and comparative
+        # wordlists are routinely sparse, so per-cell missingness is NOT flagged.
+        # Only a *fully* missing taxon (no forms for any concept) is a real no-go.
         fully_missing: List[str] = []
         for raw_row in matrix_match.group(1).splitlines():
             parts = raw_row.split()
             if len(parts) < 2:
                 continue
             taxon, seq = parts[0], parts[1]
-            total_cells += len(seq)
-            missing_cells += seq.count("?")
             if seq and all(ch == "?" for ch in seq):
                 fully_missing.append(taxon)
 
@@ -437,13 +450,70 @@ def nexus_readiness(nexus_text: str) -> List[str]:
                     len(fully_missing), ", ".join(fully_missing)
                 )
             )
-        if total_cells and (missing_cells / total_cells) >= 0.5:
-            warnings.append(
-                "High missingness: {0:.0f}% of matrix cells are '?'.".format(
-                    100.0 * missing_cells / total_cells
-                )
-            )
         return warnings
+
+
+def _consolidated_sets(tools: "ParseChatTools", concept_tag: str) -> Tuple[Any, Dict[str, Any], Dict[str, str], List[str], Any]:
+        """Build the consolidated (canonical-collapsed) cognate sets + speakers.
+
+        Reuses ``compare.consolidated_matrix`` so survey-overlap duplicate
+        concept ids fold into one canonical character. ``concept_tag`` (e.g. the
+        thesis tag) restricts the matrix to that tag's concepts.
+
+        Note: this reads concepts.csv + enrichments + tags + project.json on each
+        call. ``export_complete_lingpy_dataset`` therefore reads them twice (once
+        for the TSV stage, once for NEXUS). That is acceptable at current corpus
+        sizes; revisit with a cached resolve if concepts.csv grows large.
+        """
+        import csv as _csv
+        from compare.consolidated_matrix import (
+            build_consolidated_cognate_sets,
+            tag_concept_ids,
+        )
+
+        concepts_path = tools.project_root / "concepts.csv"
+        concepts_rows: List[Dict[str, Any]] = []
+        if concepts_path.exists():
+            with concepts_path.open(encoding="utf-8", newline="") as handle:
+                concepts_rows = list(_csv.DictReader(handle))
+
+        enrichments = _read_json_file(tools.enrichments_path, {})
+        allowed_ids = None
+        if concept_tag:
+            tags_payload = _read_json_file(tools.tags_path, [])
+            allowed_ids = tag_concept_ids(tags_payload, concept_tag)
+
+        cognate_sets, meta, id_to_key = build_consolidated_cognate_sets(
+            concepts_rows, enrichments, allowed_ids
+        )
+
+        # Distinguish "tag matched nothing" from "tag has no cognate data": an
+        # unknown / empty conceptTag otherwise looks like a silent empty export.
+        if concept_tag and not allowed_ids:
+            meta.setdefault("warnings", []).insert(
+                0,
+                "conceptTag '{0}' matched 0 concepts (unknown or empty tag); "
+                "the export is empty.".format(concept_tag),
+            )
+
+        project_payload = _read_json_file(tools.project_json_path, {})
+        sp_block = project_payload.get("speakers") if isinstance(project_payload, dict) else None
+        if isinstance(sp_block, dict):
+            speakers = [str(s) for s in sp_block.keys() if str(s).strip()]
+        elif isinstance(sp_block, list):
+            speakers = [str(s) for s in sp_block if str(s).strip()]
+        else:
+            speakers = []
+        return cognate_sets, meta, id_to_key, speakers, allowed_ids
+
+
+def _consolidation_summary(meta: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "concept_count": meta.get("concept_count"),
+            "character_count": meta.get("character_count"),
+            "collapsed_groups": len(meta.get("collapsed") or []),
+            "needs_recluster_groups": len(meta.get("needs_recluster") or []),
+        }
 
 
 def export_lingpy_tsv(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
@@ -451,11 +521,45 @@ def export_lingpy_tsv(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str
         if cognate_compute_module is None:
             raise ChatToolExecutionError("cognate_compute is not importable")
 
+        concept_tag = str(args.get("conceptTag") or "").strip()
+        consolidate = bool(args.get("consolidate")) or bool(concept_tag)
+
         import os as _os
         import tempfile
 
         output_path_str = str(args.get("outputPath") or "").strip()
         dry_run = bool(args.get("dryRun", False))
+
+        if consolidate:
+            try:
+                from compare.consolidated_matrix import build_wordlist_rows, wordlist_rows_to_tsv
+                cognate_sets, meta, id_to_key, _speakers, allowed_ids = _consolidated_sets(tools, concept_tag)
+                rows = build_wordlist_rows(tools.annotations_dir, cognate_sets, id_to_key, allowed_ids)
+                content = wordlist_rows_to_tsv(rows)
+            except ChatToolError:
+                raise
+            except Exception as exc:
+                raise ChatToolExecutionError("Consolidated LingPy TSV export failed: {0}".format(exc)) from exc
+
+            warnings = lingpy_tsv_readiness(content) + list(meta.get("warnings") or [])
+            summary = _consolidation_summary(meta)
+            if dry_run or not output_path_str:
+                lines = content.splitlines()
+                return {
+                    "readOnly": True, "previewOnly": True,
+                    "previewLines": "\n".join(lines[:20]), "totalLines": len(lines),
+                    "truncated": len(lines) > 20, "rowCount": len(rows),
+                    "consolidated": True, "conceptTag": concept_tag or None,
+                    "consolidation": summary, "warnings": warnings, "beast2_ready": not warnings,
+                }
+            out_path = tools._resolve_project_path(output_path_str, allowed_roots=[tools.project_root])
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(content, encoding="utf-8")
+            return {
+                "success": True, "outputPath": str(out_path), "rowCount": len(rows),
+                "consolidated": True, "conceptTag": concept_tag or None,
+                "consolidation": summary, "warnings": warnings, "beast2_ready": not warnings,
+            }
 
         try:
             if dry_run or not output_path_str:
@@ -508,35 +612,48 @@ def export_nexus(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any
         """Build NEXUS matrix via _build_nexus_text(). Preview = first 2000 chars; write requires outputPath."""
         output_path_str = str(args.get("outputPath") or "").strip()
         dry_run = bool(args.get("dryRun", False))
+        concept_tag = str(args.get("conceptTag") or "").strip()
+        consolidate = bool(args.get("consolidate")) or bool(concept_tag)
 
+        summary: Optional[Dict[str, Any]] = None
+        extra_warnings: List[str] = []
         try:
-            nexus_text = build_nexus_text(tools)
+            if consolidate:
+                from compare.consolidated_matrix import build_nexus_from_sets
+                cognate_sets, meta, _id_to_key, speakers, _allowed = _consolidated_sets(tools, concept_tag)
+                nexus_text = build_nexus_from_sets(cognate_sets, speakers)
+                summary = _consolidation_summary(meta)
+                extra_warnings = list(meta.get("warnings") or [])
+            else:
+                nexus_text = build_nexus_text(tools)
+        except ChatToolError:
+            raise
         except Exception as exc:
             raise ChatToolExecutionError("NEXUS build failed: {0}".format(exc)) from exc
 
-        warnings = nexus_readiness(nexus_text)
+        warnings = nexus_readiness(nexus_text) + extra_warnings
+        base: Dict[str, Any] = {
+            "warnings": warnings,
+            "beast2_ready": not warnings,
+        }
+        if consolidate:
+            base.update({"consolidated": True, "conceptTag": concept_tag or None, "consolidation": summary})
 
         if dry_run or not output_path_str:
-            return {
+            base.update({
                 "readOnly": True,
                 "previewOnly": True,
                 "preview": nexus_text[:2000],
                 "truncated": len(nexus_text) > 2000,
                 "totalChars": len(nexus_text),
-                "warnings": warnings,
-                "beast2_ready": not warnings,
-            }
+            })
+            return base
 
         out_path = tools._resolve_project_path(output_path_str, allowed_roots=[tools.project_root])
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(nexus_text, encoding="utf-8")
-        return {
-            "success": True,
-            "outputPath": str(out_path),
-            "totalChars": len(nexus_text),
-            "warnings": warnings,
-            "beast2_ready": not warnings,
-        }
+        base.update({"success": True, "outputPath": str(out_path), "totalChars": len(nexus_text)})
+        return base
 
 
 def build_nexus_text(tools: "ParseChatTools") -> str:
