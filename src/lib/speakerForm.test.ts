@@ -47,7 +47,7 @@ describe('buildSpeakerForm', () => {
       },
     };
 
-    expect(buildSpeakerForm(record, concept, 'Fail02', enrichments, false, ['ar', 'fa'])).toEqual({
+    expect(buildSpeakerForm(record, concept, 'Fail02', enrichments, ['ar', 'fa'])).toEqual({
       speaker: 'Fail02',
       ipa: 'muwi',
       ortho: 'مووی',
@@ -80,7 +80,7 @@ describe('buildSpeakerForm', () => {
       ipa: [{ start: 1.1, end: 1.4, text: 'aw' }],
     });
 
-    const form = buildSpeakerForm(record, singletonConcept, 'Fail01', {}, false, []);
+    const form = buildSpeakerForm(record, singletonConcept, 'Fail01', {}, []);
 
     expect(form.utterances).toBe(1);
     expect(form.ipa).toBe('aw');
@@ -101,7 +101,7 @@ describe('buildSpeakerForm', () => {
       ],
     });
 
-    const form = buildSpeakerForm(record, concept, 'Fail02', {}, false, []);
+    const form = buildSpeakerForm(record, concept, 'Fail02', {}, []);
 
     expect(form.realizations).toEqual([
       { ipa: 'muwi', ortho: 'مووی', startSec: 10.1, endSec: 10.4 },
@@ -133,7 +133,7 @@ describe('buildSpeakerForm', () => {
 
     const form = buildSpeakerForm(record, concept, 'Fail02', {
       manual_overrides: { canonical_realizations: { hair: { Fail02: 1 } } },
-    }, false, []);
+    }, []);
 
     expect(form.selectedIdx).toBe(1);
     expect(form.variantCount).toBe(2);
@@ -154,7 +154,7 @@ describe('buildSpeakerForm', () => {
 
     const form = buildSpeakerForm(record, concept, 'Fail02', {
       manual_overrides: { canonical_realizations: { hair: { Fail02: 5 } } },
-    }, false, []);
+    }, []);
 
     expect(form.selectedIdx).toBe(1);
     expect(form.ipa).toBe('muː');
@@ -171,10 +171,10 @@ describe('buildSpeakerForm', () => {
 
     expect(buildSpeakerForm(record, concept, 'Fail02', {
       manual_overrides: { canonical_realizations: { hair: { Fail02: -1 } } },
-    }, false, []).selectedIdx).toBe(0);
+    }, []).selectedIdx).toBe(0);
     expect(buildSpeakerForm(record, concept, 'Fail02', {
       manual_overrides: { canonical_realizations: { hair: { Fail02: 1.5 } } },
-    }, false, []).selectedIdx).toBe(0);
+    }, []).selectedIdx).toBe(0);
   });
 
   it('prefers manual cognate overrides and per-speaker flags over automatic enrichments', () => {
@@ -197,9 +197,37 @@ describe('buildSpeakerForm', () => {
       },
     };
 
-    const form = buildSpeakerForm(record, concept, 'Fail02', enrichments, false, ['ar']);
+    const form = buildSpeakerForm(record, concept, 'Fail02', enrichments, ['ar']);
     expect(form.cognate).toBe('A');
     expect(form.flagged).toBe(true);
+  });
+
+  it('flagged reflects only the per-speaker flag, so an explicit false clears it (MC-449-A)', () => {
+    // Regression: the per-row Flag button toggles speaker_flags[concept][speaker].
+    // Writing `false` must clear form.flagged regardless of any concept-level
+    // "problematic" tag — otherwise the per-row flag is stuck amber forever.
+    const record = makeRecord({
+      concept: [{ start: 2, end: 2.4, text: 'hair', concept_id: 'hair' }],
+      ipa: [{ start: 2.05, end: 2.3, text: 'muwi' }],
+    });
+
+    const flaggedOn = buildSpeakerForm(
+      record,
+      concept,
+      'Fail02',
+      { manual_overrides: { speaker_flags: { hair: { Fail02: true } } } },
+      ['ar'],
+    );
+    expect(flaggedOn.flagged).toBe(true);
+
+    const flaggedOff = buildSpeakerForm(
+      record,
+      concept,
+      'Fail02',
+      { manual_overrides: { speaker_flags: { hair: { Fail02: false } } } },
+      ['ar'],
+    );
+    expect(flaggedOff.flagged).toBe(false);
   });
 
 
@@ -242,7 +270,7 @@ describe('buildSpeakerForm', () => {
           '599': { Fail02: true },
         },
       },
-    }, false, ['ar']);
+    }, ['ar']);
 
     expect(form.selectedIdx).toBe(1);
     expect(form.cognateKey).toBe('599');
@@ -278,7 +306,7 @@ describe('buildSpeakerForm', () => {
           '248': { Fail02: true },
         },
       },
-    }, false, []);
+    }, []);
 
     expect(form.selectedIdx).toBe(2);
     expect(form.cognateKey).toBe('248');
@@ -296,7 +324,7 @@ describe('buildSpeakerForm', () => {
     const form = buildSpeakerForm(record, singletonConcept, 'Fail02', {
       cognate_sets: { '527': { D: ['Fail02'] } },
       manual_overrides: { speaker_flags: { '527': { Fail02: true } } },
-    }, false, []);
+    }, []);
 
     expect(form.cognateKey).toBe('527');
     expect(form.cognate).toBe('D');
@@ -332,7 +360,7 @@ describe('buildSpeakerForm', () => {
       ],
     });
 
-    const form = buildSpeakerForm(record, sourceConcept, 'Fail02', {}, false, []);
+    const form = buildSpeakerForm(record, sourceConcept, 'Fail02', {}, []);
 
     expect(form.realizationsSource).toBe('source-item');
     expect(form.realizations).toEqual([
@@ -370,7 +398,7 @@ describe('buildSpeakerForm', () => {
 
     const form = buildSpeakerForm(record, sourceConcept, 'Fail02', {
       manual_overrides: { canonical_realizations: { '2.15': { Fail02: 1 } } },
-    }, false, []);
+    }, []);
 
     expect(form.realizationsSource).toBe('source-item');
     expect(form.selectedIdx).toBe(1);
@@ -409,7 +437,7 @@ describe('buildSpeakerForm', () => {
           'source:EXT:5.1': { Saha01: 1 },
         },
       },
-    }, false, []);
+    }, []);
 
     expect(form.realizationsSource).toBe('source-item');
     expect(form.selectedIdx).toBe(1);
@@ -434,7 +462,7 @@ describe('buildSpeakerForm', () => {
       ortho_words: [{ start: 1.15, end: 1.35, text: 'برا ئا' }],
     });
 
-    const form = buildSpeakerForm(record, sourceConcept, 'Fail02', {}, false, []);
+    const form = buildSpeakerForm(record, sourceConcept, 'Fail02', {}, []);
 
     expect(form.realizationsSource).toBe('source-item');
     expect(form.realizations).toEqual([
@@ -460,7 +488,7 @@ describe('buildSpeakerForm', () => {
 
     const form = buildSpeakerForm(record, concept, 'Fail02', {
       manual_overrides: { auto_detect_dismissed: { hair: { Fail02: true } } },
-    }, false, []);
+    }, []);
 
     expect(form.realizationsSource).toBe('single');
     expect(form.realizations).toEqual([
@@ -495,19 +523,25 @@ describe('buildSpeakerForm', () => {
 
     const form = buildSpeakerForm(record, sourceConcept, 'Fail02', {
       manual_overrides: { auto_detect_dismissed: { 'concept-a': { Fail02: true } } },
-    }, false, []);
+    }, []);
 
     expect(form.realizationsSource).toBe('source-item');
     expect(form.realizations).toHaveLength(2);
   });
 
-  it('preserves external flagged state and leaves timing empty when no concept interval matches', () => {
+  it('reflects the per-speaker flag and leaves timing empty when no concept interval matches', () => {
     const record = makeRecord({
       concept: [{ start: 4, end: 4.4, text: 'water' }],
       ipa: [{ start: 4.05, end: 4.2, text: 'aw' }],
     });
 
-    const form = buildSpeakerForm(record, concept, 'Fail02', {}, true, ['ar']);
+    const form = buildSpeakerForm(
+      record,
+      concept,
+      'Fail02',
+      { manual_overrides: { speaker_flags: { hair: { Fail02: true } } } },
+      ['ar'],
+    );
     expect(form.flagged).toBe(true);
     expect(form.startSec).toBeNull();
     expect(form.endSec).toBeNull();
@@ -539,7 +573,7 @@ describe('buildSpeakerForm', () => {
       ],
     });
 
-    const form = buildSpeakerForm(record, mergedConcept, 'Fail02', {}, false, []);
+    const form = buildSpeakerForm(record, mergedConcept, 'Fail02', {}, []);
 
     expect(form.realizationsSource).toBe('merged');
     expect(form.realizations).toEqual([
@@ -569,7 +603,7 @@ describe('buildSpeakerForm', () => {
 
     const form = buildSpeakerForm(record, mergedConcept, 'Fail02', {
       manual_overrides: { canonical_realizations: { '527': { Fail02: 2 } } },
-    }, false, []);
+    }, []);
 
     expect(form.realizationsSource).toBe('merged');
     expect(form.selectedIdx).toBe(2);
@@ -583,7 +617,7 @@ describe('buildSpeakerForm', () => {
       ipa: [{ start: 1.1, end: 1.4, text: 'sar' }],
     });
 
-    const form = buildSpeakerForm(record, mergedConcept, 'Fail02', {}, false, []);
+    const form = buildSpeakerForm(record, mergedConcept, 'Fail02', {}, []);
 
     expect(form.realizationsSource).toBe('merged');
     expect(form.realizations).toEqual([
@@ -600,7 +634,7 @@ describe('buildSpeakerForm', () => {
       ipa: [{ start: 3.1, end: 3.4, text: 'sar-a' }],
     });
 
-    const form = buildSpeakerForm(record, mergedConcept, 'Fail02', {}, false, []);
+    const form = buildSpeakerForm(record, mergedConcept, 'Fail02', {}, []);
 
     expect(form.utterances).toBe(1);
     expect(form.ipa).toBe('');
@@ -633,7 +667,7 @@ describe('buildSpeakerForm', () => {
       ],
     });
 
-    const form = buildSpeakerForm(record, mergedSourceConcept, 'Fail02', {}, false, []);
+    const form = buildSpeakerForm(record, mergedSourceConcept, 'Fail02', {}, []);
 
     expect(form.realizationsSource).toBe('merged');
     expect(form.realizations).toHaveLength(3);
@@ -655,7 +689,7 @@ describe('buildSpeakerForm', () => {
         concept: [{ start: 100, end: 101, text: 'hair', concept_id: 'hair' }],
         ipa: [{ start: 100, end: 101, text: 'mu' }],
       });
-      const form = buildSpeakerForm(record, concept, 'Fail02', {}, false, []);
+      const form = buildSpeakerForm(record, concept, 'Fail02', {}, []);
       expect(form.pastEndOfAudio).toBe(false);
     });
 
@@ -663,7 +697,7 @@ describe('buildSpeakerForm', () => {
       const record = makeRecordWithDuration(8590,
         [{ start: 8000, end: 8001, text: 'mu' }],
         [{ start: 8000, end: 8001, text: 'hair', concept_id: 'hair' }]);
-      const form = buildSpeakerForm(record, concept, 'Khan02', {}, false, []);
+      const form = buildSpeakerForm(record, concept, 'Khan02', {}, []);
       expect(form.startSec).toBe(8000);
       expect(form.pastEndOfAudio).toBe(false);
     });
@@ -672,7 +706,7 @@ describe('buildSpeakerForm', () => {
       const record = makeRecordWithDuration(8590,
         [{ start: 12000, end: 12001, text: 'mu' }],
         [{ start: 12000, end: 12001, text: 'hair', concept_id: 'hair' }]);
-      const form = buildSpeakerForm(record, concept, 'Khan01', {}, false, []);
+      const form = buildSpeakerForm(record, concept, 'Khan01', {}, []);
       expect(form.startSec).toBe(12000);
       expect(form.pastEndOfAudio).toBe(true);
     });
@@ -681,7 +715,7 @@ describe('buildSpeakerForm', () => {
       const record = makeRecordWithDuration(8590,
         [{ start: 8589, end: 8591, text: 'mu' }],
         [{ start: 8589, end: 8591, text: 'hair', concept_id: 'hair' }]);
-      const form = buildSpeakerForm(record, concept, 'Khan01', {}, false, []);
+      const form = buildSpeakerForm(record, concept, 'Khan01', {}, []);
       expect(form.pastEndOfAudio).toBe(true);
     });
 
@@ -689,13 +723,13 @@ describe('buildSpeakerForm', () => {
       const record = makeRecordWithDuration(8590,
         [{ start: 8590, end: 8590.5, text: 'mu' }],
         [{ start: 8590, end: 8590.5, text: 'hair', concept_id: 'hair' }]);
-      const form = buildSpeakerForm(record, concept, 'Khan01', {}, false, []);
+      const form = buildSpeakerForm(record, concept, 'Khan01', {}, []);
       expect(form.pastEndOfAudio).toBe(true);
     });
 
     it('is false when there is no matching realization (no canonical to flag)', () => {
       const record = makeRecordWithDuration(8590, [], []);
-      const form = buildSpeakerForm(record, concept, 'Empty', {}, false, []);
+      const form = buildSpeakerForm(record, concept, 'Empty', {}, []);
       expect(form.startSec).toBeNull();
       expect(form.pastEndOfAudio).toBe(false);
     });
@@ -727,10 +761,10 @@ describe('buildSpeakerForm', () => {
       ortho_words: [{ start: 9, end: 10, text: 'سەر' }],
     });
 
-    expect(buildSpeakerForm(record, head, 'Fail01', {}, false, [], '527', 1).ipa).toBe('kapul');
-    expect(buildSpeakerForm(record, head, 'Fail01', {}, false, [], '527', 2).ortho).toBe('کەپول٢');
-    expect(buildSpeakerForm(record, head, 'Fail01', {}, false, [], '527', 99).ipa).toBe('sar');
-    expect(buildSpeakerForm(oneIntervalRecord, head, 'Saha01', {}, false, [], '527', 2).ipa).toBe('saha-first');
+    expect(buildSpeakerForm(record, head, 'Fail01', {}, [], '527', 1).ipa).toBe('kapul');
+    expect(buildSpeakerForm(record, head, 'Fail01', {}, [], '527', 2).ortho).toBe('کەپول٢');
+    expect(buildSpeakerForm(record, head, 'Fail01', {}, [], '527', 99).ipa).toBe('sar');
+    expect(buildSpeakerForm(oneIntervalRecord, head, 'Saha01', {}, [], '527', 2).ipa).toBe('saha-first');
   });
 
   it('uses the focused grouped variant key for source-item variants', () => {
@@ -756,8 +790,8 @@ describe('buildSpeakerForm', () => {
       ],
     });
 
-    expect(buildSpeakerForm(record, sourceConcept, 'Fail01', {}, false, [], '527', 0).ipa).toBe('sar-b');
-    expect(buildSpeakerForm(record, sourceConcept, 'Fail01', {}, false, [], 'missing', 0).ipa).toBe('sar-a');
+    expect(buildSpeakerForm(record, sourceConcept, 'Fail01', {}, [], '527', 0).ipa).toBe('sar-b');
+    expect(buildSpeakerForm(record, sourceConcept, 'Fail01', {}, [], 'missing', 0).ipa).toBe('sar-a');
   });
 
 });

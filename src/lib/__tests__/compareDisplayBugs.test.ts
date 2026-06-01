@@ -76,7 +76,7 @@ describe('Bug 1 — collapsed IPA cell vs expanded variant card (Saha01 "big")',
     });
 
     const backendCandidateIpa = 'ɡoːrɔ';
-    const form = buildSpeakerForm(record, bigConcept, 'Saha01', {}, false, []);
+    const form = buildSpeakerForm(record, bigConcept, 'Saha01', {}, []);
     expect(form.ipa).toBe(backendCandidateIpa);
   });
 });
@@ -116,7 +116,7 @@ describe('Bug 2 — empty form.ipa when only a non-zero variant has data (Fail01
       ],
     });
 
-    const form = buildSpeakerForm(record, bigConcept, 'Fail01', {}, false, []);
+    const form = buildSpeakerForm(record, bigConcept, 'Fail01', {}, []);
     expect(form.realizations[2]).toMatchObject({ ipa: 'ɡap' });
     expect(form.realizations[0]).toMatchObject({ ipa: '' });
     expect(form.ipa).toBe('ɡap');
@@ -148,8 +148,8 @@ describe('Bug 2 — empty form.ipa when only a non-zero variant has data (Fail01
       ],
     });
 
-    const failForm = buildSpeakerForm(fail01, bigConcept, 'Fail01', {}, false, []);
-    const sahaForm = buildSpeakerForm(saha01, bigConcept, 'Saha01', {}, false, []);
+    const failForm = buildSpeakerForm(fail01, bigConcept, 'Fail01', {}, []);
+    const sahaForm = buildSpeakerForm(saha01, bigConcept, 'Saha01', {}, []);
 
     expect(failForm.variantCount).toBe(1);
     expect(failForm.ipa).toBe('ɡap');
