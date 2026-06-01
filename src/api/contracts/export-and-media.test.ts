@@ -1,4 +1,13 @@
-// @vitest-environment jsdom
+// @vitest-environment node
+//
+// Runs under the node environment (not jsdom) on purpose. These are pure
+// request-shaping/URL contracts plus one download helper; none need the DOM.
+// Under jsdom, `fetch`/`Response` come from undici while `Blob`/`FileReader`
+// come from jsdom, and `response.blob()` returns an undici Blob in CI but a
+// jsdom Blob locally — the two implementations are not interchangeable, so any
+// `blob.text()` / `FileReader` read is environment-fragile. In node, the global
+// Blob is Node's own (with a working `.text()`), matching the sibling
+// node-environment contract test `offset-tools.test.ts`.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getCanonicalLexemesReport, mediaUrlFromSourceWav, spectrogramUrl } from "./export-and-media";
 
