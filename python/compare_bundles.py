@@ -354,25 +354,47 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
                         used_legacy_text_fallback = True
                         warnings.append(f"legacy text fallback used for {speaker} row {row_id}")
                 if matches:
-                    concept_interval = matches[0]
-                    cid = _interval_concept_id(concept_interval)
-                    ortho_interval = (
-                        _pick_sibling(ortho_by_concept.get(cid, []), tiers["ortho"], concept_interval, 0)
-                        if cid
-                        else None
+                    # A speaker can record several realizations (A/B/…) of one
+                    # concept. Sort by start so realization_index matches the
+                    # start-rank letters Annotate assigns (A = earliest).
+                    matches = sorted(
+                        matches,
+                        key=lambda interval: _seconds(interval.get("start", interval.get("start_sec", 0.0))),
                     )
-                    ipa_interval = (
-                        _pick_sibling(ipa_by_concept.get(cid, []), tiers["ipa"], concept_interval, 0)
-                        if cid
-                        else None
-                    )
-                    speaker_candidates[row_id] = _candidate_from_interval(
-                        concept_interval,
-                        source_wav,
-                        ortho_interval=ortho_interval,
-                        ipa_interval=ipa_interval,
-                        allow_interval_transcription=not used_legacy_text_fallback,
-                    )
+                    realizations: list[dict[str, Any]] = []
+                    for concept_interval in matches:
+                        cid = _interval_concept_id(concept_interval)
+                        ortho_interval = (
+                            _pick_sibling(ortho_by_concept.get(cid, []), tiers["ortho"], concept_interval, 0)
+                            if cid
+                            else None
+                        )
+                        ipa_interval = (
+                            _pick_sibling(ipa_by_concept.get(cid, []), tiers["ipa"], concept_interval, 0)
+                            if cid
+                            else None
+                        )
+                        realizations.append(
+                            _candidate_from_interval(
+                                concept_interval,
+                                source_wav,
+                                ortho_interval=ortho_interval,
+                                ipa_interval=ipa_interval,
+                                allow_interval_transcription=not used_legacy_text_fallback,
+                            )
+                        )
+                    # The row's primary candidate stays the first realization, so
+                    # single-realization rows are byte-identical to before. When a
+                    # speaker has 2+ realizations, every one rides along under
+                    # "realizations" (each tagged with its start-rank index) so
+                    # Compare can show and select B, C, … — not just the first.
+                    candidate = dict(realizations[0])
+                    if len(realizations) > 1:
+                        for index, entry in enumerate(realizations):
+                            entry["realization_index"] = index
+                        candidate = dict(realizations[0])
+                        candidate["realizations"] = realizations
+                    speaker_candidates[row_id] = candidate
                     candidate_rows.append(row_id)
                 else:
                     speaker_candidates[row_id] = None
