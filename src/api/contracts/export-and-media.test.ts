@@ -1,17 +1,15 @@
-// @vitest-environment jsdom
+// @vitest-environment node
+//
+// Runs under the node environment (not jsdom) on purpose. These are pure
+// request-shaping/URL contracts plus one download helper; none need the DOM.
+// Under jsdom, `fetch`/`Response` come from undici while `Blob`/`FileReader`
+// come from jsdom, and `response.blob()` returns an undici Blob in CI but a
+// jsdom Blob locally — the two implementations are not interchangeable, so any
+// `blob.text()` / `FileReader` read is environment-fragile. In node, the global
+// Blob is Node's own (with a working `.text()`), matching the sibling
+// node-environment contract test `offset-tools.test.ts`.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getCanonicalLexemesReport, mediaUrlFromSourceWav, spectrogramUrl } from "./export-and-media";
-
-// jsdom's Blob lacks `.text()`/`.arrayBuffer()` (unlike a real browser or Node Blob),
-// so read the body through FileReader, which jsdom does implement.
-function readBlobText(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsText(blob);
-  });
-}
 
 describe("export-and-media contracts", () => {
   beforeEach(() => {
@@ -28,7 +26,7 @@ describe("export-and-media contracts", () => {
     const blob = await getCanonicalLexemesReport();
 
     expect(fetchMock).toHaveBeenCalledWith("/api/exports/canonical-lexemes-report", { method: "GET" });
-    expect(await readBlobText(blob)).toBe("concept_id\tspeaker\n");
+    expect(await blob.text()).toBe("concept_id\tspeaker\n");
   });
 
   it("omits basename-only audio hints from spectrogram URLs so the backend can use speaker fallback", () => {
