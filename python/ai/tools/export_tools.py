@@ -432,16 +432,15 @@ def nexus_readiness(nexus_text: str) -> List[str]:
         if not matrix_match:
             return warnings
 
-        total_cells = 0
-        missing_cells = 0
+        # NOTE: '?' is a valid NEXUS state (missing data), and comparative
+        # wordlists are routinely sparse, so per-cell missingness is NOT flagged.
+        # Only a *fully* missing taxon (no forms for any concept) is a real no-go.
         fully_missing: List[str] = []
         for raw_row in matrix_match.group(1).splitlines():
             parts = raw_row.split()
             if len(parts) < 2:
                 continue
             taxon, seq = parts[0], parts[1]
-            total_cells += len(seq)
-            missing_cells += seq.count("?")
             if seq and all(ch == "?" for ch in seq):
                 fully_missing.append(taxon)
 
@@ -449,12 +448,6 @@ def nexus_readiness(nexus_text: str) -> List[str]:
             warnings.append(
                 "{0} taxa have no character data (all '?'): {1}.".format(
                     len(fully_missing), ", ".join(fully_missing)
-                )
-            )
-        if total_cells and (missing_cells / total_cells) >= 0.5:
-            warnings.append(
-                "High missingness: {0:.0f}% of matrix cells are '?'.".format(
-                    100.0 * missing_cells / total_cells
                 )
             )
         return warnings

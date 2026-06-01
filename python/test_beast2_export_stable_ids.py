@@ -111,7 +111,7 @@ def test_lingpy_tsv_readiness_flags_empty_wordlist() -> None:
     assert any("no data rows" in w for w in warnings)
 
 
-def test_nexus_readiness_flags_fully_missing_and_high_missingness() -> None:
+def test_nexus_readiness_flags_fully_missing_taxa_only() -> None:
     nexus = (
         "#NEXUS\n\nBEGIN CHARACTERS;\n"
         "    DIMENSIONS NCHAR=2;\n"
@@ -122,8 +122,10 @@ def test_nexus_readiness_flags_fully_missing_and_high_missingness() -> None:
         "    ;\nEND;\n"
     )
     warnings = nexus_readiness(nexus)
+    # Fully-missing taxa (Spk1, Spk2) are flagged...
     assert any("no character data" in w for w in warnings)
-    assert any("missingness" in w.lower() for w in warnings)
+    # ...but per-cell missingness ('?') is valid NEXUS and is NOT flagged.
+    assert not any("missingness" in w.lower() for w in warnings)
 
 
 def test_nexus_readiness_flags_no_characters() -> None:

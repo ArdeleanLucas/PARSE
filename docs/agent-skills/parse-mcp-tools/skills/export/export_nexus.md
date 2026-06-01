@@ -26,6 +26,8 @@ Exports a NEXUS cognate-character matrix for BEAST2 and other phylogenetic tools
 | Parameter  | Type    | Required | Description                                                                                              | Default | Example                              |
 |------------|---------|----------|----------------------------------------------------------------------------------------------------------|---------|--------------------------------------|
 | outputPath | string  | No       | Project-relative or absolute path inside project root. Omit for preview. `minLength=1`, `maxLength=512`. | (preview only) | `"exports/lingpy/dataset.nex"`  |
+| conceptTag | string  | No       | Restrict to a concept tag (e.g. the thesis list) **and** fold survey-overlap duplicate concept ids into one canonical character. | (none) | `"custom-sk-concept-list"` |
+| consolidate | boolean | No      | Fold survey-overlap duplicate concept ids (implied when `conceptTag` is set). Response gains a `consolidation` summary. | `false` | `true` |
 | dryRun     | boolean | No       | If `true`, preview only — never writes.                                                                  | `false` | `true`                               |
 
 ## Expected Output

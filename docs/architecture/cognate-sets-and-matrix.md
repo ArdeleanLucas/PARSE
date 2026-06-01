@@ -112,8 +112,8 @@ same meaning carries several numeric ids, e.g. tooth = `255` *and* `529`, tongue
 *and* `530`, red = `90`/`166`/`386`. See `docs/plans/MC-338-survey-overlap.md` and
 `docs/cross-survey-concept-linking-plan.md` for the linking model.
 
-Cognate **resolution folds these together by concept**, so duplicate ids do **not**
-create duplicate cognate characters and do **not** leave tokens uncoded:
+Different consumers handle this overlap differently — and this is a real behavioral
+distinction, not a uniform invariant:
 
 - **Display / review export** (`export_review_data.py`): concepts are matched across
   surveys by **stem** (normalized label), gathering each speaker's tokens from *all*
@@ -121,11 +121,19 @@ create duplicate cognate characters and do **not** leave tokens uncoded:
   (`_cognate_class_for` → `_enrichment_keys`, which tries `concept_id` then the label).
 - **Compare bundles** (`compare_bundles.py`): rows are "grouped by a normalized stem,"
   and survey links resolve duplicate ids to one bucket.
+- **LingPy / NEXUS export, default mode** (`export_wordlist_tsv`, `build_nexus`):
+  keys strictly by `concept_id` and does **not** fold survey-overlap ids — each coded
+  id becomes its **own** character block. So *big* committed under both `53` and `150`
+  yields two character blocks unless consolidation is requested.
+- **LingPy / NEXUS export, consolidated mode** (`consolidate` / `conceptTag`, via
+  `python/compare/consolidated_matrix.py`): folds survey-overlap duplicate ids into one
+  canonical character (byte-identical `safe_union` columns only; divergent columns are
+  kept separate with a warning). See
+  [`phylogenetic-export-pipeline.md`](./phylogenetic-export-pipeline.md) §3.
 
-So whether a speaker's token happens to be tagged with the primary id or a duplicate id,
-it resolves to the same concept and the same cognate decision. The decision only needs to
-be committed once per concept; the canonical id already carries the full (folded) speaker
-membership.
+So for the **default** LingPy/NEXUS path, a gloss committed under multiple ids appears
+multiple times in the matrix; request **consolidation** to fold them into one canonical
+character.
 
 ---
 
@@ -182,7 +190,7 @@ do change the output. Diff the **partition**, not the key list.
 |---|---|---|
 | `COGID` column all `0` / all distinct | No committed cognate decisions in `manual_overrides.cognate_sets` | Commit decisions via the UI compare flow or `enrichments_write`; preview with `cognate_compute_preview`. |
 | COGID integers differ between two exports | Different key count or sort order → renumbering (§2.2) | Not a bug. Compare the partition, not the integers. |
-| A concept appears "twice" in analysis | Survey-overlap duplicate ids treated as separate concepts by a consumer that does **not** fold by concept | Confirm the consumer folds by stem/label (§3); the LingPy wordlist path does. |
+| A concept appears "twice" in analysis | The default LingPy/NEXUS export keys by `concept_id` and does **not** fold survey-overlap duplicate ids (§3) | Request consolidation — pass `consolidate: true` (or `conceptTag`) to `export_lingpy_tsv` / `export_nexus` / `export_complete_lingpy_dataset`. See [`phylogenetic-export-pipeline.md`](./phylogenetic-export-pipeline.md). |
 | One speaker uncoded for a concept others have | That speaker's token is tagged under a duplicate id the decision wasn't written to **and** the canonical id's membership doesn't include them | Verify the canonical concept's group membership includes the speaker (folding relies on the primary id carrying the full set). |
 
 ---
