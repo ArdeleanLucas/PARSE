@@ -53,6 +53,24 @@ describe("export-and-media contracts", () => {
     expect(await blob.text()).toBe("# Concept Appendix\n");
   });
 
+  it("includes a non-empty speaker subset in the concept-appendix request body", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ok: true, result: { markdown: "# x\n" } }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getConceptAppendixExport({ speakers: ["Fail01", "Kalh01"] });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      includeCognates: true,
+      speakers: ["Fail01", "Kalh01"],
+    });
+  });
+
   it("throws when the concept-appendix tool envelope carries no markdown", async () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       new Response(JSON.stringify({ ok: true, result: {} }), {

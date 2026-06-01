@@ -98,7 +98,7 @@ def test_concept_appendix_tool_is_registered_for_chat_and_http_catalog(tmp_path:
     spec = tools.tool_spec("export_concept_appendix_md")
     assert spec.mutability == "mutating"
     assert spec.parameters["additionalProperties"] is False
-    assert set(spec.parameters["properties"]) == {"tagId", "includeCognates", "outputPath", "dryRun"}
+    assert set(spec.parameters["properties"]) == {"tagId", "includeCognates", "speakers", "outputPath", "dryRun"}
 
     catalog = build_mcp_http_catalog(project_root=tmp_path, mode="all")
     assert "export_concept_appendix_md" in {tool["name"] for tool in catalog["tools"]}
@@ -134,6 +134,34 @@ def test_appendix_preview_includes_cognate_matrix_decisions(tmp_path: pathlib.Pa
     assert "B ⟳" in md
     assert "**Sets:** A = {SpkA}" in md
     assert "excluded: SpkB" in md
+
+
+def test_appendix_speaker_subset_limits_matrix_and_forms(tmp_path: pathlib.Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    result = ParseChatTools(project_root=workspace).execute(
+        "export_concept_appendix_md", {"speakers": ["SpkA", "SpkC"]}
+    )
+
+    assert result["ok"] is True
+    payload = result["result"]
+    assert payload["speakers"] == 2
+    md = payload["markdown"]
+    assert "**Speakers (2).** SpkA, SpkC." in md
+    # SpkB is filtered out entirely — not a matrix column nor a forms row.
+    assert "| SpkB |" not in md
+    assert "| SpkA |" in md
+    assert "| SpkC |" in md
+
+
+def test_appendix_unknown_speaker_returns_invalid_args(tmp_path: pathlib.Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    result = ParseChatTools(project_root=workspace).execute(
+        "export_concept_appendix_md", {"speakers": ["Nope01"]}
+    )
+    payload = result["result"]
+    assert payload["ok"] is False
+    assert payload["error_kind"] == "invalid_args"
+    assert "Nope01" in payload["error"]
 
 
 def test_appendix_excluded_speaker_renders_question_mark_not_letter(tmp_path: pathlib.Path) -> None:

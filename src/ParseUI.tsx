@@ -854,7 +854,9 @@ export function ParseUI() {
     setAppendixExporting(true);
     setActionsMenuOpen(false);
     try {
-      await exportConceptAppendix();
+      // Export the speakers currently selected in compare mode; an empty
+      // selection exports all speakers (handled server-side).
+      await exportConceptAppendix(selectedSpeakers);
     } catch (err) {
       console.error('[ParseUI] Concept appendix export failed:', err);
     } finally {

@@ -124,17 +124,21 @@ describe("useExport", () => {
     expect(anchor?.download).toBe("canonical-lexemes.tsv");
   });
 
-  it("exportConceptAppendix downloads concept-appendix.md from getConceptAppendixExport", async () => {
+  it("exportConceptAppendix forwards selected speakers and saves concept-appendix.md", async () => {
     const mdBlob = new Blob(["# Concept Appendix\n"], { type: "text/markdown" });
     vi.mocked(getConceptAppendixExport).mockResolvedValueOnce(mdBlob);
 
     const { result } = renderHook(() => useExport());
 
     await act(async () => {
-      await result.current.exportConceptAppendix();
+      await result.current.exportConceptAppendix(["Fail01", "Kalh01"]);
     });
 
-    expect(getConceptAppendixExport).toHaveBeenCalledWith({ includeCognates: true });
+    expect(getConceptAppendixExport).toHaveBeenCalledWith({
+      includeCognates: true,
+      speakers: ["Fail01", "Kalh01"],
+    });
+    // No File System Access API in jsdom → saveBlob falls back to an anchor download.
     expect(mockCreateObjectURL).toHaveBeenCalledWith(mdBlob);
     const anchor = vi.mocked(document.createElement).mock.results.find(
       (call) => call.type === "return" && (call.value as HTMLElement).tagName === "A",

@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { getCanonicalLexemesReport, getConceptAppendixExport, getLingPyExport, getNEXUSExport } from "../api/client";
+import { saveBlob } from "../lib/fileSave";
 import { useEnrichmentStore } from "../stores/enrichmentStore";
 
 const WORDLIST_HEADERS = ["ID", "CONCEPT", "DOCULECT", "IPA", "COGID", "TOKENS", "BORROWING"] as const;
@@ -115,9 +116,9 @@ export function useExport() {
     triggerDownload(blob, "canonical-lexemes.tsv");
   }, []);
 
-  const exportConceptAppendix = useCallback(async (): Promise<void> => {
-    const blob = await getConceptAppendixExport({ includeCognates: true });
-    triggerDownload(blob, "concept-appendix.md");
+  const exportConceptAppendix = useCallback(async (speakers?: string[]): Promise<void> => {
+    const blob = await getConceptAppendixExport({ includeCognates: true, speakers });
+    await saveBlob(blob, "concept-appendix.md", { mimeType: "text/markdown" });
   }, []);
 
   const exportCSV = useCallback((): void => {

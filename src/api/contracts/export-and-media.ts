@@ -14,12 +14,13 @@ export async function getLingPyExport(): Promise<Blob> {
  *  Runs the tool with no outputPath so the full markdown is returned in the
  *  response envelope rather than written server-side. */
 export async function getConceptAppendixExport(
-  options: { includeCognates?: boolean; tagId?: string } = {},
+  options: { includeCognates?: boolean; tagId?: string; speakers?: string[] } = {},
 ): Promise<Blob> {
   const body: Record<string, unknown> = {
     includeCognates: options.includeCognates ?? true,
   };
   if (options.tagId) body.tagId = options.tagId;
+  if (options.speakers && options.speakers.length > 0) body.speakers = options.speakers;
   // mode=default serves the full *safe* MCP surface (read + curated writes), which always
   // includes this first-party export tool — unlike mode=active, which honors the workspace's
   // external-client curation (config/mcp_config.json expose_all_tools=false → curated subset).

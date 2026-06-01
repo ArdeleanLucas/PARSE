@@ -406,6 +406,11 @@ EXPORT_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                                 "type": "boolean",
                                 "description": "Include cognate-set decisions (default true). When false, emits the plain forms-only appendix.",
                             },
+                            "speakers": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Optional speaker subset; project.json order is preserved and unknown speakers return invalid_args. Omit or pass an empty list for all speakers.",
+                            },
                             "outputPath": {
                                 "type": "string",
                                 "minLength": 1,
@@ -1094,6 +1099,12 @@ def export_concept_appendix_md(tools: "ParseChatTools", args: Dict[str, Any]) ->
     }
     if tag_id_raw:
         kwargs["tag_id"] = tag_id_raw
+
+    speakers_raw = args.get("speakers")
+    if isinstance(speakers_raw, list):
+        speakers = [str(s).strip() for s in speakers_raw if str(s).strip()]
+        if speakers:
+            kwargs["speaker_filter"] = speakers
 
     try:
         result = build_concept_appendix_markdown(**kwargs)
