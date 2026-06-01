@@ -63,7 +63,7 @@ const contractGroups = [
   },
   {
     modulePath: "./contracts/export-and-media",
-    exports: ["getLingPyExport", "getNEXUSExport", "getCanonicalLexemesReport", "spectrogramUrl"],
+    exports: ["getLingPyExport", "getConceptAppendixExport", "getNEXUSExport", "getCanonicalLexemesReport", "spectrogramUrl"],
   },
   {
     modulePath: "./contracts/clef-contact-lexeme",

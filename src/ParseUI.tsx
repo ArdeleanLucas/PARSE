@@ -226,7 +226,7 @@ export function ParseUI() {
     });
   }, [speakerSurveyChoices, updateSurveyOverlap]);
   const conceptImportInputRef = useRef<HTMLInputElement>(null);
-  const { exportLingPyTSV } = useExport();
+  const { exportLingPyTSV, exportConceptAppendix } = useExport();
   const {
     summary: conceptImportSummary,
     error: conceptImportError,
@@ -846,6 +846,21 @@ export function ParseUI() {
       console.error('[ParseUI] LingPy export failed:', err);
     } finally {
       setExporting(false);
+    }
+  };
+
+  const [appendixExporting, setAppendixExporting] = useState(false);
+  const handleExportConceptAppendix = async () => {
+    setAppendixExporting(true);
+    setActionsMenuOpen(false);
+    try {
+      // Export the speakers currently selected in compare mode; an empty
+      // selection exports all speakers (handled server-side).
+      await exportConceptAppendix(selectedSpeakers);
+    } catch (err) {
+      console.error('[ParseUI] Concept appendix export failed:', err);
+    } finally {
+      setAppendixExporting(false);
     }
   };
 
@@ -1921,6 +1936,15 @@ export function ParseUI() {
                     >
                       <Download className="h-3.5 w-3.5 text-indigo-400"/>
                       {exporting ? 'Exporting…' : 'Export LingPy TSV'}
+                    </button>
+                    <button
+                      data-testid="actions-export-concept-appendix"
+                      onClick={handleExportConceptAppendix}
+                      disabled={appendixExporting}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                    >
+                      <Download className="h-3.5 w-3.5 text-indigo-400"/>
+                      {appendixExporting ? 'Exporting…' : 'Export Concepts MD'}
                     </button>
                     <div className="my-1 border-t border-slate-100"/>
                     <button
