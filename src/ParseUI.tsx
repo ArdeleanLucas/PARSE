@@ -1415,6 +1415,38 @@ export function ParseUI() {
   }, [flashActionFeedback, reloadSpeakerAnnotation]);
 
 
+  const handleReassignInterval = useCallback(async (speaker: string, conceptKey: string, intervalIndex: number, targetConceptId: string) => {
+    try {
+      const moved = useAnnotationStore.getState().reassignRealization(speaker, conceptKey, intervalIndex, targetConceptId);
+      if (!moved) {
+        flashActionFeedback('Could not move that recording — interval not found.', 'warning');
+        return;
+      }
+      flashActionFeedback('Recording moved to the selected concept; saved.', 'warning');
+    } catch (err) {
+      console.error('[ParseUI] reassignRealization failed:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      flashActionFeedback(`Could not move recording: ${message}`, 'error');
+    }
+  }, [flashActionFeedback]);
+
+  const reassignConceptOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const options: { id: string; name: string }[] = [];
+    for (const concept of concepts) {
+      const entries = concept.variants && concept.variants.length > 0
+        ? concept.variants.map((variant) => ({ id: variant.conceptKey, name: variant.conceptEn }))
+        : [{ id: concept.key ?? String(concept.id), name: concept.name }];
+      for (const entry of entries) {
+        const id = String(entry.id ?? '').trim();
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        options.push({ id, name: entry.name });
+      }
+    }
+    return options.sort((left, right) => left.name.localeCompare(right.name));
+  }, [concepts]);
+
   const resolveDeleteConceptLabel = useCallback((conceptKey: string): string => {
     const raw = rawConcepts.find((entry) => String(entry.id) === conceptKey);
     if (raw?.label) return raw.label;
@@ -2076,6 +2108,8 @@ export function ParseUI() {
           }}
           onAddElicitation={handleAddElicitation}
           onDeleteInterval={handleDeleteInterval}
+          onReassignInterval={handleReassignInterval}
+          reassignConceptOptions={reassignConceptOptions}
         />
 
         {/* MAIN + AI STACK */}

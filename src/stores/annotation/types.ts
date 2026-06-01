@@ -63,6 +63,19 @@ export interface AnnotationStoreActionsSlice {
   ) => void;
   setConceptTag: (speaker: string, conceptId: string, tagId: string) => void;
   createConceptInterval: (speaker: string, conceptId: string, start: number, end: number) => void;
+  /**
+   * Non-destructively move a single realization (concept-tier interval) from one
+   * concept to another. `intervalIndex` is the position of the interval among the
+   * source concept's intervals sorted by start time (matching the sidebar's
+   * realization pill ordering). Returns true when an interval was re-linked.
+   * Only the interval's concept_id changes; timing/text/transcription are kept.
+   */
+  reassignRealization: (
+    speaker: string,
+    fromConceptId: string,
+    intervalIndex: number,
+    toConceptId: string,
+  ) => boolean;
   clearConceptTag: (speaker: string, conceptId: string, tagId: string) => void;
   setIpaReview: (speaker: string, key: string, review: IpaReviewState | null) => void;
   moveIntervalAcrossTiers: (

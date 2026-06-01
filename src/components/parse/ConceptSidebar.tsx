@@ -8,6 +8,7 @@ import { conceptMatchesElicitedKeys } from '../../lib/speakerElicitedConcepts';
 import { resolveSurveyLinksForSpeaker, surveyRowIdsForConcept, type SpeakerSurveyLinkBucket } from '../../lib/surveyLinksForSpeaker';
 import { SurveyBadge } from '../shared/SurveyBadge';
 import { VariantChip } from '../shared/VariantChip';
+import { ReassignConceptPicker, type ReassignConceptOption } from './sidebar/ReassignConceptPicker';
 import { buildRealizationKey, parseRealizationKey } from '../../lib/conceptGrouping';
 import type { ElicitationDetail } from '../../lib/elicitationDetails';
 import { defaultSurveySettings, normalizeSurveyId, resolveConceptSurvey, surveyLabelFor } from '../../lib/surveyOverlap';
@@ -100,6 +101,10 @@ interface ConceptSidebarProps {
   onAddElicitation?: (concept: SidebarConcept) => void;
   onDeleteConcept?: (concept: SidebarConcept) => void;
   onDeleteInterval?: (speaker: string, conceptKey: string, intervalIndex: number) => void | Promise<void>;
+  /** Non-destructively move a single realization to a different concept. */
+  onReassignInterval?: (speaker: string, conceptKey: string, intervalIndex: number, targetConceptId: string) => void | Promise<void>;
+  /** Flattened concept targets (underlying concept_id + display name) for the reassign picker. */
+  reassignConceptOptions?: readonly ReassignConceptOption[];
   /**
    * Optional grouped/source-item variant visibility predicate. ParseUI wires this to
    * src/lib/sidebarVisibility.ts so speaker-scope and tag filters are applied to each
@@ -219,6 +224,8 @@ export function ConceptSidebar({
   onAddElicitation,
   onDeleteConcept,
   onDeleteInterval,
+  onReassignInterval,
+  reassignConceptOptions,
   isConceptVariantVisibleInSidebar,
   hideVariantPills = false,
   scopedToSpeaker = false,
@@ -230,6 +237,7 @@ export function ConceptSidebar({
   onDismissActionFeedback,
 }: ConceptSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{ concept: SidebarConcept; x: number; y: number; intervalIndex?: number; intervalLabel?: string; intervalDetail?: ElicitationDetail } | null>(null);
+  const [reassignFor, setReassignFor] = useState<{ speaker: string; conceptKey: string; conceptName: string; intervalIndex: number } | null>(null);
   const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
   const [surveyLinkEditor, setSurveyLinkEditor] = useState<SurveyLinkEditorState | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -834,6 +842,25 @@ export function ConceptSidebar({
               Delete this interval
             </button>
           )}
+          {contextMenu.intervalIndex !== undefined && activeSpeaker && contextMenu.concept.key && onReassignInterval && (
+            <button
+              type="button"
+              role="menuitem"
+              title="Move only this recording to a different concept; the recording and its transcription are kept"
+              className="block w-full rounded px-2 py-1 text-left text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                setReassignFor({
+                  speaker: activeSpeaker,
+                  conceptKey: contextMenu.concept.key as string,
+                  conceptName: contextMenu.concept.name,
+                  intervalIndex: contextMenu.intervalIndex as number,
+                });
+                setContextMenu(null);
+              }}
+            >
+              Move to concept…
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"
@@ -950,6 +977,17 @@ export function ConceptSidebar({
             </button>
           )}
         </div>
+      )}
+      {reassignFor && onReassignInterval && (
+        <ReassignConceptPicker
+          sourceName={reassignFor.conceptName}
+          options={(reassignConceptOptions ?? []).filter((option) => option.id !== reassignFor.conceptKey)}
+          onConfirm={(targetConceptId) => {
+            void onReassignInterval(reassignFor.speaker, reassignFor.conceptKey, reassignFor.intervalIndex, targetConceptId);
+            setReassignFor(null);
+          }}
+          onCancel={() => setReassignFor(null)}
+        />
       )}
     </aside>
   );
