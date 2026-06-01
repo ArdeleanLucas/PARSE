@@ -1453,7 +1453,6 @@ export function ParseUI() {
 
   const speakerForms = useMemo<SpeakerForm[]>(() => {
     const activeSpeakers = selectedSpeakers.filter((speaker) => speakers.includes(speaker));
-    const flagged = getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'problematic');
 
     return activeSpeakers.map((speaker) => {
       const focusedConceptId = selectedRealization && conceptUnderlyingKeys(concept).includes(selectedRealization.conceptId)
@@ -1464,13 +1463,12 @@ export function ParseUI() {
         concept,
         speaker,
         enrichmentData,
-        flagged,
         primaryContactCodes,
         focusedConceptId,
         focusedConceptId ? selectedRealization?.intervalIndex : undefined,
       );
     });
-  }, [annotationRecords, concept, enrichmentData, getTagsForConcept, activeTagScopeKey, selectedSpeakers, speakers, primaryContactCodes, selectedRealization]);
+  }, [annotationRecords, concept, enrichmentData, selectedSpeakers, speakers, primaryContactCodes, selectedRealization]);
   const fallbackCompareBundle = useMemo<CompareBundle | null>(() => {
     if (speakerForms.length === 0) return null;
     const rowId = concept.key;
