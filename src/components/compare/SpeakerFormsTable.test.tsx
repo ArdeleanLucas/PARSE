@@ -1056,3 +1056,70 @@ describe('SpeakerFormsTable orphaned loadedmetadata listener after toggle-off', 
     }
   });
 });
+
+describe('SpeakerFormsTable per-realization cards', () => {
+  function hairBundle(): CompareBundle {
+    const reals = [0, 1, 2].map((index) => ({
+      csv_row_id: '1',
+      ipa: ['A', 'B', 'C'][index],
+      ortho: ['oA', 'oB', 'oC'][index],
+      start_sec: 1 + index * 2,
+      end_sec: 2 + index * 2,
+      source_wav: 'audio/working/Saha01.wav',
+      realization_index: index,
+    }));
+    return {
+      bundle_id: 'hair',
+      label: 'hair',
+      row_ids: ['1'],
+      buckets: [
+        {
+          bucket_key: 'jbl 32',
+          survey_id: 'jbl',
+          source_item: '32',
+          variants: [{ csv_row_id: '1', concept_en: 'hair', variant_label: 'A' }],
+        },
+      ],
+      candidates: { Saha01: { '1': { ...reals[0], realizations: reals } } },
+      canonical: { Saha01: null },
+      speaker_concept_survey_links: { Saha01: { '1': { jbl: '32' } } },
+    };
+  }
+
+  it('renders one card per realization, auto-picks the first, and selects the chosen realization', async () => {
+    mocks.putCanonicalLexeme.mockResolvedValue({ bundle: { bundle_id: 'hair', canonical: {} } });
+    render(
+      <SpeakerFormsTable
+        bundle={hairBundle()}
+        speakers={['Saha01']}
+        speakerForms={[makeForm({ speaker: 'Saha01', ipa: 'A', ortho: 'oA' })]}
+        primaryContactCodes={PRIMARY_CODES}
+        contactLanguageNames={CONTACT_NAMES}
+        conceptKey="hair"
+        initialExpandedSpeaker="Saha01"
+      />,
+    );
+
+    // One card per realization (A/B/C), with distinct ids.
+    expect(screen.queryAllByTestId(/^variant-card-Saha01-1-r\d$/)).toHaveLength(3);
+    expect(screen.queryAllByTestId('variant-card-Saha01-1-r0')).toHaveLength(1);
+    expect(screen.queryAllByTestId('variant-card-Saha01-1-r2')).toHaveLength(1);
+
+    // Collapsed-row count reflects realizations, not rows (+2 of 3).
+    expect(screen.getByTestId('variant-count-Saha01').textContent).toMatch(/\+2 variant/);
+
+    // Auto-canonical is the first realization only.
+    expect(screen.queryAllByTestId('variant-canonical-badge-Saha01-1-r0')).toHaveLength(1);
+    expect(screen.queryAllByTestId('variant-canonical-badge-Saha01-1-r2')).toHaveLength(0);
+
+    // Selecting realization C sends the row id + realization_index 2.
+    const optionC = screen.getByTestId('canonical-option-Saha01-1-r2');
+    fireEvent.click(within(optionC).getByRole('radio'));
+    await waitFor(() =>
+      expect(mocks.putCanonicalLexeme).toHaveBeenCalledWith('hair', 'Saha01', {
+        csv_row_id: '1',
+        realization_index: 2,
+      }),
+    );
+  });
+});

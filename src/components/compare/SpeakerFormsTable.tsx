@@ -24,7 +24,6 @@ import { mediaUrlFromSourceWav, spectrogramUrl } from '../../api/contracts/expor
 import type {
   CanonicalLexemeSelection,
   CompareBundle,
-  CompareCandidate,
   CompareVariant,
 } from '../../api/types';
 import {
@@ -56,6 +55,11 @@ export interface SpeakerFormsTableVariant {
   source_wav: string | null;
   start_sec: number | null;
   end_sec: number | null;
+  /** Which recorded realization (A/B/…) of csv_row_id this card represents.
+   * Undefined for single-realization rows; set when a row is expanded into one
+   * card per realization. Drives the canonical pick (putCanonicalLexeme) while
+   * cognate/similarity stay keyed by csv_row_id. */
+  realizationIndex?: number;
 }
 
 export interface SpeakerFormsTableProps {
@@ -111,24 +115,64 @@ function speakerVariants(bundle: CompareBundle, speaker: string): CompareVariant
   return out;
 }
 
+const REALIZATION_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+function realizationLetter(index: number): string {
+  return REALIZATION_LETTERS[index] ?? `#${index + 1}`;
+}
+
+/** Stable per-card identity: the row id, plus the realization index when a row
+ * is expanded into multiple cards. Used to key play/error state and React keys
+ * so each realization's controls are independent. */
+function variantCardKey(variant: SpeakerFormsTableVariant): string {
+  return variant.realizationIndex != null
+    ? `${variant.csv_row_id}#${variant.realizationIndex}`
+    : variant.csv_row_id;
+}
+
+/** Total selectable forms for a speaker: one per realization, summed across
+ * rows. A row with N recorded realizations counts as N (not 1). */
+function speakerFormCount(bundle: CompareBundle, speaker: string): number {
+  return speakerVariants(bundle, speaker).reduce((total, variant) => {
+    const realizations = bundle.candidates?.[speaker]?.[variant.csv_row_id]?.realizations;
+    return total + (realizations && realizations.length > 1 ? realizations.length : 1);
+  }, 0);
+}
+
 function buildVariantList(bundle: CompareBundle, speaker: string): SpeakerFormsTableVariant[] {
-  return speakerVariants(bundle, speaker)
-    .map((variant) => {
-      const candidate = bundle.candidates?.[speaker]?.[variant.csv_row_id] ?? null;
-      const label = variant.variant_label ?? variant.concept_en ?? variant.label ?? variant.csv_row_id;
-      const letterFromLabel = variant.label?.match(/\(([A-Z])\)/)?.[1] ?? '';
-      const letter = letterFromLabel || (/^[A-Z]$/.test(variant.variant_label ?? '') ? variant.variant_label! : '');
-      return {
+  return speakerVariants(bundle, speaker).flatMap((variant) => {
+    const candidate = bundle.candidates?.[speaker]?.[variant.csv_row_id] ?? null;
+    const label = variant.variant_label ?? variant.concept_en ?? variant.label ?? variant.csv_row_id;
+    const letterFromLabel = variant.label?.match(/\(([A-Z])\)/)?.[1] ?? '';
+    const baseLetter = letterFromLabel || (/^[A-Z]$/.test(variant.variant_label ?? '') ? variant.variant_label! : '');
+    // A speaker can record several realizations (A/B/…) of one row. When the
+    // backend supplies them, render one card per realization. csv_row_id stays
+    // the row (cognate/similarity are per-row); realizationIndex selects which
+    // take is canonical.
+    const realizations = candidate?.realizations;
+    if (realizations && realizations.length > 1) {
+      return realizations.map((realization, index) => ({
         csv_row_id: variant.csv_row_id,
         label,
-        letter,
-        ipa: candidate?.ipa ?? null,
-        ortho: candidate?.ortho ?? null,
-        source_wav: candidate?.source_wav ?? null,
-        start_sec: candidate?.start_sec ?? null,
-        end_sec: candidate?.end_sec ?? null,
-      } satisfies SpeakerFormsTableVariant;
-    });
+        letter: realizationLetter(realization.realization_index ?? index),
+        ipa: realization.ipa ?? null,
+        ortho: realization.ortho ?? null,
+        source_wav: realization.source_wav ?? null,
+        start_sec: realization.start_sec ?? null,
+        end_sec: realization.end_sec ?? null,
+        realizationIndex: realization.realization_index ?? index,
+      } satisfies SpeakerFormsTableVariant));
+    }
+    return [{
+      csv_row_id: variant.csv_row_id,
+      label,
+      letter: baseLetter,
+      ipa: candidate?.ipa ?? null,
+      ortho: candidate?.ortho ?? null,
+      source_wav: candidate?.source_wav ?? null,
+      start_sec: candidate?.start_sec ?? null,
+      end_sec: candidate?.end_sec ?? null,
+    } satisfies SpeakerFormsTableVariant];
+  });
 }
 
 function readLexemeUserNote(
@@ -250,7 +294,6 @@ interface VariantCardProps {
   speaker: string;
   bundle: CompareBundle;
   variant: SpeakerFormsTableVariant;
-  candidate: CompareCandidate | null;
   isCanonical: boolean;
   isPlaying: boolean;
   playError?: string | null;
@@ -263,7 +306,6 @@ function VariantCard({
   speaker,
   bundle,
   variant,
-  candidate,
   isCanonical,
   isPlaying,
   playError,
@@ -273,27 +315,32 @@ function VariantCard({
 }: VariantCardProps) {
   const [showSpec, setShowSpec] = useState(false);
   const [specErrored, setSpecErrored] = useState(false);
-  const hasAudio = !!candidate?.source_wav
-    && typeof candidate.start_sec === 'number'
-    && typeof candidate.end_sec === 'number';
+  // Audio/spectrogram come from the variant itself (per realization), not the
+  // row's primary candidate — so realization B's card plays B, not A.
+  const cardId = variant.realizationIndex != null
+    ? `${variant.csv_row_id}-r${variant.realizationIndex}`
+    : variant.csv_row_id;
+  const hasAudio = !!variant.source_wav
+    && typeof variant.start_sec === 'number'
+    && typeof variant.end_sec === 'number';
   const specUrl = hasAudio
     ? spectrogramUrl({
         speaker,
-        startSec: candidate!.start_sec as number,
-        endSec: candidate!.end_sec as number,
-        audio: candidate!.source_wav ?? undefined,
+        startSec: variant.start_sec as number,
+        endSec: variant.end_sec as number,
+        audio: variant.source_wav ?? undefined,
       })
     : '';
 
   return (
     <div
       className="rounded-lg border border-slate-200 bg-white p-3"
-      data-testid={`variant-card-${speaker}-${variant.csv_row_id}`}
+      data-testid={`variant-card-${speaker}-${cardId}`}
     >
       <div className="flex items-start gap-3">
         <label
           className="mt-0.5 inline-flex cursor-pointer items-center"
-          data-testid={`canonical-option-${speaker}-${variant.csv_row_id}`}
+          data-testid={`canonical-option-${speaker}-${cardId}`}
         >
           <input
             type="radio"
@@ -311,7 +358,7 @@ function VariantCard({
           />
         </label>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-baseline gap-2" data-testid={`variant-card-header-${speaker}-${variant.csv_row_id}`}>
+          <div className="flex flex-wrap items-baseline gap-2" data-testid={`variant-card-header-${speaker}-${cardId}`}>
             {variant.letter && <VariantChip letter={variant.letter} />}
             {variant.ipa && (
               <span className="font-mono text-[13px] text-indigo-700">/{variant.ipa}/</span>
@@ -325,7 +372,7 @@ function VariantCard({
             {isCanonical && (
               <span
                 className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-100"
-                data-testid={`variant-canonical-badge-${speaker}-${variant.csv_row_id}`}
+                data-testid={`variant-canonical-badge-${speaker}-${cardId}`}
               >
                 <CheckCircle2 className="h-2.5 w-2.5" /> canonical
               </span>
@@ -335,7 +382,7 @@ function VariantCard({
         <div className="flex shrink-0 items-center gap-1.5">
           <button
             type="button"
-            data-testid={`variant-play-${speaker}-${variant.csv_row_id}`}
+            data-testid={`variant-play-${speaker}-${cardId}`}
             disabled={!hasAudio}
             onClick={(e) => {
               e.stopPropagation();
@@ -352,7 +399,7 @@ function VariantCard({
           </button>
           <button
             type="button"
-            data-testid={`variant-spec-${speaker}-${variant.csv_row_id}`}
+            data-testid={`variant-spec-${speaker}-${cardId}`}
             disabled={!hasAudio}
             onClick={(e) => {
               e.stopPropagation();
@@ -366,7 +413,7 @@ function VariantCard({
           </button>
           <button
             type="button"
-            data-testid={`variant-open-annotate-${speaker}-${variant.csv_row_id}`}
+            data-testid={`variant-open-annotate-${speaker}-${cardId}`}
             onClick={(e) => {
               e.stopPropagation();
               onOpenInAnnotate(variant);
@@ -381,13 +428,13 @@ function VariantCard({
       {playError && (
         <div
           className="mt-2 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700"
-          data-testid={`variant-play-error-${speaker}-${variant.csv_row_id}`}
+          data-testid={`variant-play-error-${speaker}-${cardId}`}
         >
           Playback failed: {playError}
         </div>
       )}
       {showSpec && hasAudio && (
-        <div className="mt-3" data-testid={`variant-spec-image-${speaker}-${variant.csv_row_id}`}>
+        <div className="mt-3" data-testid={`variant-spec-image-${speaker}-${cardId}`}>
           {specErrored ? (
             <div className="rounded border border-slate-200 bg-slate-50 px-3 py-4 text-center text-[11px] text-slate-500">
               spectrogram unavailable
@@ -396,7 +443,7 @@ function VariantCard({
             <img
               src={specUrl}
               loading="lazy"
-              alt={`spectrogram for ${speaker} ${(candidate!.start_sec as number).toFixed(2)}–${(candidate!.end_sec as number).toFixed(2)}`}
+              alt={`spectrogram for ${speaker} ${(variant.start_sec as number).toFixed(2)}–${(variant.end_sec as number).toFixed(2)}`}
               onError={() => setSpecErrored(true)}
               className="block w-full rounded border border-slate-200 bg-white"
             />
@@ -468,6 +515,7 @@ function ExpandedPanel({
       if (!variant.source_wav || typeof variant.start_sec !== 'number' || typeof variant.end_sec !== 'number') {
         return;
       }
+      const playKey = variantCardKey(variant);
       let audio = audioRef.current;
       if (!audio) {
         audio = new Audio();
@@ -477,7 +525,7 @@ function ExpandedPanel({
       const requestId = ++playRequestIdRef.current;
       clearPendingListeners();
       // Toggle off when the same variant is already playing.
-      if (playingVariantId === variant.csv_row_id) {
+      if (playingVariantId === playKey) {
         cancelRaf();
         try {
           audio.pause();
@@ -498,9 +546,9 @@ function ExpandedPanel({
       }
       // Clear prior error for this variant when retrying.
       setPlayErrorByVariant((prev) => {
-        if (!(variant.csv_row_id in prev)) return prev;
+        if (!(playKey in prev)) return prev;
         const next = { ...prev };
-        delete next[variant.csv_row_id];
+        delete next[playKey];
         return next;
       });
 
@@ -529,8 +577,8 @@ function ExpandedPanel({
           playPromise.catch((err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err ?? 'play failed');
             console.error('[SpeakerFormsTable] audio.play() rejected', err);
-            setPlayErrorByVariant((prev) => ({ ...prev, [variant.csv_row_id]: msg }));
-            setPlayingVariantId((id) => (id === variant.csv_row_id ? null : id));
+            setPlayErrorByVariant((prev) => ({ ...prev, [playKey]: msg }));
+            setPlayingVariantId((id) => (id === playKey ? null : id));
           });
         }
       };
@@ -555,8 +603,8 @@ function ExpandedPanel({
             ? `audio load failed (code ${err.code})`
             : `audio load failed for ${desiredSrc}`;
           console.error('[SpeakerFormsTable] audio load error', err);
-          setPlayErrorByVariant((prev) => ({ ...prev, [variant.csv_row_id]: msg }));
-          setPlayingVariantId((id) => (id === variant.csv_row_id ? null : id));
+          setPlayErrorByVariant((prev) => ({ ...prev, [playKey]: msg }));
+          setPlayingVariantId((id) => (id === playKey ? null : id));
         };
         audio.addEventListener('loadedmetadata', onLoaded);
         audio.addEventListener('error', onError);
@@ -569,7 +617,7 @@ function ExpandedPanel({
       } else {
         seekAndPlay();
       }
-      setPlayingVariantId(variant.csv_row_id);
+      setPlayingVariantId(playKey);
       const tick = () => {
         const a = audioRef.current;
         if (!a) {
@@ -582,7 +630,7 @@ function ExpandedPanel({
           } catch {
             /* noop */
           }
-          setPlayingVariantId((id) => (id === variant.csv_row_id ? null : id));
+          setPlayingVariantId((id) => (id === playKey ? null : id));
           rafRef.current = null;
           return;
         }
@@ -597,10 +645,13 @@ function ExpandedPanel({
     async (variant: SpeakerFormsTableVariant) => {
       setError(null);
       const candidate = bundle.candidates?.[speaker]?.[variant.csv_row_id] ?? null;
+      // Prefer this card's own realization index; fall back to the row's primary
+      // realization index for single-realization rows.
+      const realizationIndex = variant.realizationIndex ?? candidate?.realization_index;
       try {
         const response = await putCanonicalLexeme(bundle.bundle_id, speaker, {
           csv_row_id: variant.csv_row_id,
-          realization_index: candidate?.realization_index,
+          realization_index: realizationIndex,
         });
         const nextSelection: CanonicalLexemeSelection | null =
           response.bundle.canonical?.[speaker] ?? null;
@@ -677,18 +728,22 @@ function ExpandedPanel({
         )}
         <div className="space-y-2">
           {variants.map((variant) => {
-            const candidate = bundle.candidates?.[speaker]?.[variant.csv_row_id] ?? null;
-            const isCanonical = current?.csv_row_id === variant.csv_row_id;
+            const cardKey = variantCardKey(variant);
+            // A row's canonical is matched by row id and — when the row was
+            // expanded into per-realization cards — the realization index too,
+            // so only the chosen realization shows as canonical.
+            const isCanonical = current?.csv_row_id === variant.csv_row_id
+              && (variant.realizationIndex === undefined
+                || (current?.realization_index ?? 0) === variant.realizationIndex);
             return (
               <VariantCard
-                key={variant.csv_row_id}
+                key={cardKey}
                 speaker={speaker}
                 bundle={bundle}
                 variant={variant}
-                candidate={candidate}
                 isCanonical={isCanonical}
-                isPlaying={playingVariantId === variant.csv_row_id}
-                playError={playErrorByVariant[variant.csv_row_id] ?? null}
+                isPlaying={playingVariantId === cardKey}
+                playError={playErrorByVariant[cardKey] ?? null}
                 onPlayToggle={handlePlayToggle}
                 onCanonicalSelect={handleCanonicalSelect}
                 onOpenInAnnotate={(v) => onOpenInAnnotate(speaker, v)}
@@ -841,7 +896,7 @@ export function SpeakerFormsTable({
 
   // Build the filtered + sorted speaker list.
   const orderedSpeakers = useMemo(() => {
-    const variantCountFor = (speaker: string): number => speakerVariants(bundle, speaker).length;
+    const variantCountFor = (speaker: string): number => speakerFormCount(bundle, speaker);
     const filtered = speakers.filter((speaker) => {
       const form = formsBySpeaker.get(speaker);
       if (filters.flaggedOnly && !form?.flagged) return false;
@@ -1008,7 +1063,7 @@ export function SpeakerFormsTable({
               const isExpanded = expanded === speaker;
               const activeBucket = resolveActiveBucketForSpeaker(bundle, speaker);
               const surveyId = activeBucket?.survey_id ?? null;
-              const variantCount = speakerVariants(bundle, speaker).length;
+              const variantCount = speakerFormCount(bundle, speaker);
               const current = canonicalFor(bundle, speaker);
               const canonicalChosen = !!current;
               const collapsedIpa = collapsedIpaForSpeaker(bundle, speaker, form?.ipa);
