@@ -388,11 +388,11 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
                     # speaker has 2+ realizations, every one rides along under
                     # "realizations" (each tagged with its start-rank index) so
                     # Compare can show and select B, C, … — not just the first.
-                    candidate = dict(realizations[0])
                     if len(realizations) > 1:
                         for index, entry in enumerate(realizations):
                             entry["realization_index"] = index
-                        candidate = dict(realizations[0])
+                    candidate = dict(realizations[0])
+                    if len(realizations) > 1:
                         candidate["realizations"] = realizations
                     speaker_candidates[row_id] = candidate
                     candidate_rows.append(row_id)
