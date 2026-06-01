@@ -9,7 +9,12 @@
 // Blob is Node's own (with a working `.text()`), matching the sibling
 // node-environment contract test `offset-tools.test.ts`.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getCanonicalLexemesReport, mediaUrlFromSourceWav, spectrogramUrl } from "./export-and-media";
+import {
+  getCanonicalLexemesReport,
+  getConceptAppendixExport,
+  mediaUrlFromSourceWav,
+  spectrogramUrl,
+} from "./export-and-media";
 
 describe("export-and-media contracts", () => {
   beforeEach(() => {
@@ -27,6 +32,35 @@ describe("export-and-media contracts", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("/api/exports/canonical-lexemes-report", { method: "GET" });
     expect(await blob.text()).toBe("concept_id\tspeaker\n");
+  });
+
+  it("posts to the concept-appendix MCP tool and unwraps result.markdown into a Blob", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ tool: "export_concept_appendix_md", ok: true, result: { markdown: "# Concept Appendix\n" } }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const blob = await getConceptAppendixExport();
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/mcp/tools/export_concept_appendix_md?mode=active");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ includeCognates: true });
+    expect(blob.type).toContain("text/markdown");
+    expect(await blob.text()).toBe("# Concept Appendix\n");
+  });
+
+  it("throws when the concept-appendix tool envelope carries no markdown", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true, result: {} }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      }),
+    ));
+    await expect(getConceptAppendixExport()).rejects.toThrow(/no markdown/i);
   });
 
   it("omits basename-only audio hints from spectrogram URLs so the backend can use speaker fallback", () => {

@@ -9,6 +9,7 @@ vi.mock("../../api/client", () => ({
   getLingPyExport: vi.fn(),
   getNEXUSExport: vi.fn(),
   getCanonicalLexemesReport: vi.fn(),
+  getConceptAppendixExport: vi.fn(),
 }));
 
 vi.mock("../../stores/enrichmentStore", () => ({
@@ -16,7 +17,7 @@ vi.mock("../../stores/enrichmentStore", () => ({
     selector({ data: mockData }),
 }));
 
-import { getLingPyExport, getNEXUSExport, getCanonicalLexemesReport } from "../../api/client";
+import { getLingPyExport, getNEXUSExport, getCanonicalLexemesReport, getConceptAppendixExport } from "../../api/client";
 
 const mockCreateObjectURL = vi.fn(() => "blob:mock-url");
 const mockRevokeObjectURL = vi.fn();
@@ -121,6 +122,24 @@ describe("useExport", () => {
       (call) => call.type === "return" && (call.value as HTMLElement).tagName === "A",
     )?.value as HTMLAnchorElement | undefined;
     expect(anchor?.download).toBe("canonical-lexemes.tsv");
+  });
+
+  it("exportConceptAppendix downloads concept-appendix.md from getConceptAppendixExport", async () => {
+    const mdBlob = new Blob(["# Concept Appendix\n"], { type: "text/markdown" });
+    vi.mocked(getConceptAppendixExport).mockResolvedValueOnce(mdBlob);
+
+    const { result } = renderHook(() => useExport());
+
+    await act(async () => {
+      await result.current.exportConceptAppendix();
+    });
+
+    expect(getConceptAppendixExport).toHaveBeenCalledWith({ includeCognates: true });
+    expect(mockCreateObjectURL).toHaveBeenCalledWith(mdBlob);
+    const anchor = vi.mocked(document.createElement).mock.results.find(
+      (call) => call.type === "return" && (call.value as HTMLElement).tagName === "A",
+    )?.value as HTMLAnchorElement | undefined;
+    expect(anchor?.download).toBe("concept-appendix.md");
   });
 
   it("exportNEXUS calls client.ts getNEXUSExport", async () => {

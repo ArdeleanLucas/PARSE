@@ -28,6 +28,7 @@ EXPORT_TOOL_NAMES = (
     "export_annotations_textgrid",
     "export_review_data",
     "export_beast2_xml",
+    "export_concept_appendix_md",
 )
 
 
@@ -377,6 +378,58 @@ EXPORT_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                         _tool_condition(
                             "review_data_export_written",
                             "The tool writes review_data.json plus timestamp CSVs and optional audio clips to the requested output directory.",
+                            kind="filesystem_write",
+                        ),
+                    ),
+                ),
+    "export_concept_appendix_md": ChatToolSpec(
+                    name="export_concept_appendix_md",
+                    description=(
+                        "Export a per-concept markdown appendix (per-speaker IPA/ORTH forms per "
+                        "survey concept), optionally annotated with the cognate-set decisions made "
+                        "in compare mode (cognate-set letters, accepted/split/merge verdict, "
+                        "borrowing markers, excluded speakers, and a speaker x concept cognate "
+                        "matrix). Language/survey-neutral. Without outputPath returns the full "
+                        "markdown; with outputPath writes a .md file inside the project."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "tagId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200,
+                                "description": "parse-tags.json tag id to filter concepts by (default: custom-sk-concept-list).",
+                            },
+                            "includeCognates": {
+                                "type": "boolean",
+                                "description": "Include cognate-set decisions (default true). When false, emits the plain forms-only appendix.",
+                            },
+                            "outputPath": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512,
+                                "description": "Project-relative or absolute path inside project root (e.g. exports/concept-appendix.md).",
+                            },
+                            "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
+                        },
+                    },
+                    mutability="mutating",
+                    supports_dry_run=True,
+                    dry_run_parameter="dryRun",
+                    preconditions=(
+                        _project_loaded_condition(),
+                        _tool_condition(
+                            "review_workspace_available",
+                            "The project must contain concepts.csv and tag-filtered annotations to build the appendix.",
+                            kind="project_state",
+                        ),
+                    ),
+                    postconditions=(
+                        _tool_condition(
+                            "export_file_written",
+                            "When dryRun=false and outputPath is provided, the requested markdown file is written inside the project.",
                             kind="filesystem_write",
                         ),
                     ),
@@ -1019,6 +1072,61 @@ def export_review_data(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[st
     return {"ok": True, **summary}
 
 
+def export_concept_appendix_md(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the per-concept markdown appendix (+ cognate decisions).
+
+    Preview (no outputPath / dryRun) returns the full markdown; with outputPath writes a
+    .md file inside the project. Workspace is always the active project root.
+    """
+    try:
+        from concept_appendix import build_concept_appendix_markdown  # type: ignore[import]
+    except Exception as exc:
+        raise ChatToolExecutionError("concept_appendix is not importable: {0}".format(exc)) from exc
+
+    tag_id_raw = str(args.get("tagId") or "").strip()
+    include_cognates = bool(args.get("includeCognates", True))
+    output_path_str = str(args.get("outputPath") or "").strip()
+    dry_run = bool(args.get("dryRun", False))
+
+    kwargs: Dict[str, Any] = {
+        "workspace": tools.project_root,
+        "include_cognates": include_cognates,
+    }
+    if tag_id_raw:
+        kwargs["tag_id"] = tag_id_raw
+
+    try:
+        result = build_concept_appendix_markdown(**kwargs)
+    except (FileNotFoundError, ValueError) as exc:
+        return {"ok": False, "error": str(exc), "error_kind": "invalid_args"}
+    except ChatToolError:
+        raise
+    except Exception as exc:
+        raise ChatToolExecutionError("concept appendix export failed: {0}".format(exc)) from exc
+
+    markdown = str(result.get("markdown") or "")
+    if dry_run or not output_path_str:
+        return {
+            "readOnly": True,
+            "previewOnly": True,
+            "markdown": markdown,
+            "concepts": result.get("concepts", 0),
+            "speakers": result.get("speakers", 0),
+            "includeCognates": include_cognates,
+        }
+
+    out_path = tools._resolve_project_path(output_path_str, allowed_roots=[tools.project_root])
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(markdown, encoding="utf-8")
+    return {
+        "success": True,
+        "outputPath": str(out_path),
+        "concepts": result.get("concepts", 0),
+        "speakers": result.get("speakers", 0),
+        "bytes": len(markdown.encode("utf-8")),
+    }
+
+
 EXPORT_TOOL_HANDLERS = {
     "export_annotations_csv": export_annotations_csv,
     "export_lingpy_tsv": export_lingpy_tsv,
@@ -1027,6 +1135,7 @@ EXPORT_TOOL_HANDLERS = {
     "export_annotations_elan": export_annotations_elan,
     "export_annotations_textgrid": export_annotations_textgrid,
     "export_review_data": export_review_data,
+    "export_concept_appendix_md": export_concept_appendix_md,
 }
 
 
@@ -1044,4 +1153,5 @@ __all__ = [
     "export_annotations_elan",
     "export_annotations_textgrid",
     "export_review_data",
+    "export_concept_appendix_md",
 ]

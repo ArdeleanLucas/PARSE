@@ -39,6 +39,8 @@ function renderRightPanel(overrides: Partial<ComponentProps<typeof RightPanel>> 
       onSaveDecisions={vi.fn()}
       onExportLingPy={vi.fn()}
       exporting={false}
+      onExportConceptAppendix={vi.fn()}
+      appendixExporting={false}
       onOpenCommentsImport={vi.fn()}
       activeActionSpeaker="Fail01"
       workspaceConcepts={[]}
@@ -242,6 +244,8 @@ describe('RightPanel', () => {
         onSaveDecisions={vi.fn()}
         onExportLingPy={vi.fn()}
         exporting={false}
+        onExportConceptAppendix={vi.fn()}
+        appendixExporting={false}
         onOpenCommentsImport={vi.fn()}
         activeActionSpeaker="Fail01"
         workspaceConcepts={[activeConcept]}
@@ -433,6 +437,19 @@ describe('RightPanel', () => {
     expect(onOpenCommentsImport).toHaveBeenCalledOnce();
   });
 
+  it('renders the concept-appendix export button in compare mode and fires its handler', () => {
+    const onExportConceptAppendix = vi.fn();
+    renderRightPanel({ currentMode: 'compare', onExportConceptAppendix });
+
+    fireEvent.click(screen.getByTestId('export-concept-appendix'));
+    expect(onExportConceptAppendix).toHaveBeenCalledOnce();
+  });
+
+  it('disables the concept-appendix export button while an export is in flight', () => {
+    renderRightPanel({ currentMode: 'compare', appendixExporting: true });
+    expect((screen.getByTestId('export-concept-appendix') as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('wires compare compute controls without rendering the rebuild-only explainer drift', () => {
     const onComputeModeChange = vi.fn();
     const onComputeRun = vi.fn();
@@ -516,6 +533,8 @@ describe('RightPanel', () => {
         onSaveDecisions={vi.fn()}
         onExportLingPy={vi.fn()}
         exporting={false}
+        onExportConceptAppendix={vi.fn()}
+        appendixExporting={false}
         onOpenCommentsImport={vi.fn()}
         activeActionSpeaker="Fail01"
         workspaceConcepts={[]}

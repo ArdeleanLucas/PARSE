@@ -26,6 +26,8 @@ type CompareTabContentProps = Pick<
   | 'onSaveDecisions'
   | 'onExportLingPy'
   | 'exporting'
+  | 'onExportConceptAppendix'
+  | 'appendixExporting'
   | 'onOpenCommentsImport'
 >;
 
@@ -49,6 +51,8 @@ export function CompareTabContent({
   onSaveDecisions,
   onExportLingPy,
   exporting,
+  onExportConceptAppendix,
+  appendixExporting,
   onOpenCommentsImport,
 }: CompareTabContentProps) {
   return (
@@ -182,6 +186,16 @@ export function CompareTabContent({
           >
             <Download className="h-3 w-3" />
             {exporting ? 'Exporting…' : 'Export LingPy TSV'}
+          </button>
+          <button
+            data-testid="export-concept-appendix"
+            className="flex w-full items-center gap-2 rounded-md bg-indigo-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+            onClick={onExportConceptAppendix}
+            disabled={appendixExporting}
+            title="Export a per-concept markdown appendix (forms + cognate decisions)"
+          >
+            <Download className="h-3 w-3" />
+            {appendixExporting ? 'Exporting…' : 'Export Concept Appendix (.md)'}
           </button>
           <button
             data-testid="open-comments-import"

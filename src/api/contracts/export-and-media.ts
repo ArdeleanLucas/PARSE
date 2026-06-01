@@ -9,6 +9,34 @@ export async function getLingPyExport(): Promise<Blob> {
   return response.blob();
 }
 
+/** Build the per-concept markdown appendix (forms + cognate decisions) via the
+ *  `export_concept_appendix_md` MCP tool and return it as a downloadable Blob.
+ *  Runs the tool with no outputPath so the full markdown is returned in the
+ *  response envelope rather than written server-side. */
+export async function getConceptAppendixExport(
+  options: { includeCognates?: boolean; tagId?: string } = {},
+): Promise<Blob> {
+  const body: Record<string, unknown> = {
+    includeCognates: options.includeCognates ?? true,
+  };
+  if (options.tagId) body.tagId = options.tagId;
+  const response = await fetch("/api/mcp/tools/export_concept_appendix_md?mode=active", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => response.statusText);
+    throw new Error(`POST /api/mcp/tools/export_concept_appendix_md failed ${response.status}: ${text}`);
+  }
+  const envelope = (await response.json()) as { ok?: boolean; result?: { markdown?: unknown } };
+  const markdown = envelope?.result?.markdown;
+  if (typeof markdown !== "string") {
+    throw new Error("Concept appendix export returned no markdown");
+  }
+  return new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+}
+
 function normalizeWorkspaceAudioPath(value: string): string {
   return value.trim().replace(/\\/g, "/").replace(/^\/+/, "");
 }

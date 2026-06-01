@@ -226,7 +226,7 @@ export function ParseUI() {
     });
   }, [speakerSurveyChoices, updateSurveyOverlap]);
   const conceptImportInputRef = useRef<HTMLInputElement>(null);
-  const { exportLingPyTSV } = useExport();
+  const { exportLingPyTSV, exportConceptAppendix } = useExport();
   const {
     summary: conceptImportSummary,
     error: conceptImportError,
@@ -846,6 +846,19 @@ export function ParseUI() {
       console.error('[ParseUI] LingPy export failed:', err);
     } finally {
       setExporting(false);
+    }
+  };
+
+  const [appendixExporting, setAppendixExporting] = useState(false);
+  const handleExportConceptAppendix = async () => {
+    setAppendixExporting(true);
+    setActionsMenuOpen(false);
+    try {
+      await exportConceptAppendix();
+    } catch (err) {
+      console.error('[ParseUI] Concept appendix export failed:', err);
+    } finally {
+      setAppendixExporting(false);
     }
   };
 
@@ -2508,6 +2521,8 @@ export function ParseUI() {
           onSaveDecisions={() => handleSaveDecisions(false)}
           onExportLingPy={handleExportLingPy}
           exporting={exporting}
+          onExportConceptAppendix={handleExportConceptAppendix}
+          appendixExporting={appendixExporting}
           onOpenCommentsImport={modals.commentsImport.open}
           activeActionSpeaker={activeActionSpeaker}
           offsetPhase={offsetState.phase}
