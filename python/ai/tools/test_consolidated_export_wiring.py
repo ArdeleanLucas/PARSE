@@ -79,3 +79,13 @@ def test_export_lingpy_tsv_consolidates_duplicate_ids(tmp_path: pathlib.Path) ->
     # Spk1 (id 53) and Spk3 (id 150) fold into a single canonical "big" concept.
     concept_col = {line.split("\t")[1] for line in res["previewLines"].splitlines()[1:]}
     assert concept_col == {"big"}
+
+
+def test_unknown_concept_tag_emits_distinct_warning(tmp_path: pathlib.Path) -> None:
+    _seed_workspace(tmp_path)
+    tools = ParseChatTools(project_root=tmp_path)
+
+    res = tools._tool_export_nexus({"conceptTag": "does-not-exist", "dryRun": True})
+    assert res["consolidated"] is True
+    # A typo'd / unknown tag must not look like a silent "no data" export.
+    assert any("matched 0 concepts" in w for w in res["warnings"])

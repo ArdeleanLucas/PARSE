@@ -134,9 +134,15 @@ def build_consolidated_cognate_sets(
                 )
             )
             for cid, cols in coded:
-                consolidated["{0}#{1}".format(canonical_key, cid)] = {
+                suffixed_key = "{0}#{1}".format(canonical_key, cid)
+                consolidated[suffixed_key] = {
                     str(group): list(members) for group, members in cols.items()
                 }
+                # Route this id's forms to its OWN character key so the wordlist
+                # and the NEXUS agree. Overrides the bare canonical mapping set
+                # above: divergent per-id letters are not cross-comparable, so
+                # the forms must not collapse onto a shared concept column.
+                id_to_key[cid] = suffixed_key
 
     meta = {
         "collapsed": collapsed,

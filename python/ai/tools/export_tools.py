@@ -459,6 +459,11 @@ def _consolidated_sets(tools: "ParseChatTools", concept_tag: str) -> Tuple[Any, 
         Reuses ``compare.consolidated_matrix`` so survey-overlap duplicate
         concept ids fold into one canonical character. ``concept_tag`` (e.g. the
         thesis tag) restricts the matrix to that tag's concepts.
+
+        Note: this reads concepts.csv + enrichments + tags + project.json on each
+        call. ``export_complete_lingpy_dataset`` therefore reads them twice (once
+        for the TSV stage, once for NEXUS). That is acceptable at current corpus
+        sizes; revisit with a cached resolve if concepts.csv grows large.
         """
         import csv as _csv
         from compare.consolidated_matrix import (
@@ -481,6 +486,15 @@ def _consolidated_sets(tools: "ParseChatTools", concept_tag: str) -> Tuple[Any, 
         cognate_sets, meta, id_to_key = build_consolidated_cognate_sets(
             concepts_rows, enrichments, allowed_ids
         )
+
+        # Distinguish "tag matched nothing" from "tag has no cognate data": an
+        # unknown / empty conceptTag otherwise looks like a silent empty export.
+        if concept_tag and not allowed_ids:
+            meta.setdefault("warnings", []).insert(
+                0,
+                "conceptTag '{0}' matched 0 concepts (unknown or empty tag); "
+                "the export is empty.".format(concept_tag),
+            )
 
         project_payload = _read_json_file(tools.project_json_path, {})
         sp_block = project_payload.get("speakers") if isinstance(project_payload, dict) else None

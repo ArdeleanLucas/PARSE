@@ -39,15 +39,46 @@ def test_safe_union_collapses_byte_identical_duplicate_to_one_character_block():
     assert meta["needs_recluster"] == []
 
 
-def test_needs_recluster_kept_separate_with_warning():
-    enr = {"manual_overrides": {"cognate_sets": {
+def _divergent_enrichments():
+    return {"manual_overrides": {"cognate_sets": {
         "53": {"A": ["Spk1", "Spk2"], "B": ["Spk3"]},
         "150": {"A": ["Spk1"], "B": ["Spk2", "Spk3"]},
     }}}
-    cons, meta, _ = build_consolidated_cognate_sets(CONCEPTS, enr)
+
+
+def test_needs_recluster_kept_separate_with_warning():
+    cons, meta, id_to_key = build_consolidated_cognate_sets(CONCEPTS, _divergent_enrichments())
     # divergent letters are NOT merged
     assert sorted(cons.keys()) == ["big#150", "big#53"]
     assert meta["needs_recluster"] and meta["warnings"]
+    # each id routes to its OWN character key (so TSV and NEXUS stay consistent)
+    assert id_to_key["53"] == "big#53"
+    assert id_to_key["150"] == "big#150"
+    # character_count reflects the separate columns (2 groups each)
+    assert meta["character_count"] == 4
+
+
+def test_needs_recluster_wordlist_routes_forms_to_matching_character(tmp_path: pathlib.Path):
+    cons, _meta, id_to_key = build_consolidated_cognate_sets(CONCEPTS, _divergent_enrichments())
+    ann = tmp_path / "annotations"
+    ann.mkdir()
+    def write(speaker: str, concept_id: str, ipa: str) -> None:
+        (ann / f"{speaker}.parse.json").write_text(json.dumps({
+            "speaker": speaker,
+            "tiers": {
+                "concept": {"intervals": [{"text": "big", "concept_id": concept_id, "start": 0.0, "end": 1.0}]},
+                "ipa": {"intervals": [{"text": ipa, "start": 0.0, "end": 1.0}]},
+            },
+        }), encoding="utf-8")
+    write("Spk1", "53", "gewra")    # tagged under id 53
+    write("Spk3", "150", "kalan")   # tagged under the divergent id 150
+
+    rows = build_wordlist_rows(ann, cons, id_to_key)
+    by_speaker = {row[2]: row for row in rows}
+    # Forms route to their id's own canonical key — and get a NON-zero COGID,
+    # matching the NEXUS columns (the bug was COGID=0 here while NEXUS coded them).
+    assert by_speaker["Spk1"][1] == "big#53" and by_speaker["Spk1"][4] != 0
+    assert by_speaker["Spk3"][1] == "big#150" and by_speaker["Spk3"][4] != 0
 
 
 def test_tag_filter_restricts_to_tagged_ids():
