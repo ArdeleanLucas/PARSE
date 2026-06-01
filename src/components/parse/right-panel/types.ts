@@ -35,8 +35,6 @@ export interface RightPanelProps {
   onSaveDecisions: () => void;
   onExportLingPy: () => void;
   exporting: boolean;
-  onExportConceptAppendix: () => void;
-  appendixExporting: boolean;
   onOpenCommentsImport: () => void;
   activeActionSpeaker: string | null;
   offsetPhase: OffsetPhase;

@@ -375,6 +375,7 @@ vi.mock("./api/client", () => ({
   getConfig: mockGetConfig,
   getSurveyOverlap: mockGetSurveyOverlap,
   getLingPyExport: vi.fn().mockResolvedValue(''),
+  getConceptAppendixExport: vi.fn().mockResolvedValue(new Blob(['# Concept Appendix\n'], { type: 'text/markdown' })),
   getCompareBundles: (...args: unknown[]) => mockGetCompareBundles(...args),
   putCanonicalLexeme: vi.fn().mockResolvedValue({ bundle: { bundle_id: 'water', label: 'water', row_ids: [], buckets: [] } }),
   deleteCanonicalLexeme: vi.fn().mockResolvedValue({ bundle: { bundle_id: 'water', label: 'water', row_ids: [], buckets: [] } }),
@@ -4508,6 +4509,24 @@ describe("Actions menu — transcription run flow", () => {
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:lingpy");
     expect(screen.queryByText("Run Cross-Speaker Match")).toBeNull();
+
+    clickSpy.mockRestore();
+  });
+
+  it("shows the concept-appendix export below Export LingPy TSV in the Actions menu and runs it", async () => {
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:md"), revokeObjectURL: vi.fn() });
+
+    render(<ParseUI />);
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+
+    // The appendix entry lives in the Actions menu, directly after Export LingPy TSV.
+    const lingpy = screen.getAllByRole("button", { name: /Export LingPy TSV/i })[0];
+    const appendix = screen.getByTestId("actions-export-concept-appendix");
+    expect(lingpy.compareDocumentPosition(appendix) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(appendix);
+    await waitFor(() => expect(apiClient.getConceptAppendixExport).toHaveBeenCalledTimes(1));
 
     clickSpy.mockRestore();
   });

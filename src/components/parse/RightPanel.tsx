@@ -97,8 +97,6 @@ export function RightPanel(props: RightPanelProps) {
             onSaveDecisions={props.onSaveDecisions}
             onExportLingPy={props.onExportLingPy}
             exporting={props.exporting}
-            onExportConceptAppendix={props.onExportConceptAppendix}
-            appendixExporting={props.appendixExporting}
             onOpenCommentsImport={props.onOpenCommentsImport}
           />
         ) : (
