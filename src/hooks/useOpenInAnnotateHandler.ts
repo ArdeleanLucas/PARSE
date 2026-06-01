@@ -58,6 +58,17 @@ export interface UseOpenInAnnotateHandlerParams {
    * unit-testable without wiring every consumer.
    */
   setSelectedRealizationKey?: (key: string | null) => void;
+  /**
+   * Optional. Seeds ParseUI's mode-switch concept resolver with the clicked
+   * row's underlying key (= csv_row_id). Without this, the resolver runs on the
+   * compare→annotate switch using the *previous* (compare) concept and both
+   * navigates `conceptId` back to it AND resets the realization index to 0 —
+   * so clicking a non-primary realization of a grouped concept would land on
+   * the wrong form. Seeding the resolver makes it resolve to the clicked row's
+   * concept and leave the chosen realization index intact. ParseUI wires this
+   * to assign its `previousActiveRawKeyRef`.
+   */
+  seedActiveConceptKey?: (conceptKey: string) => void;
 }
 
 /**
@@ -83,7 +94,7 @@ export interface UseOpenInAnnotateHandlerParams {
 export function useOpenInAnnotateHandler(
   params: UseOpenInAnnotateHandlerParams,
 ) {
-  const { conceptId, conceptKey, setCurrentMode, setSelectedRealizationKey } = params;
+  const { conceptId, conceptKey, setCurrentMode, setSelectedRealizationKey, seedActiveConceptKey } = params;
   return useCallback(
     (speaker: string, variant: OpenInAnnotateVariant) => {
       useCompareReturnStore.getState().save({
@@ -94,6 +105,12 @@ export function useOpenInAnnotateHandler(
       const playback = usePlaybackStore.getState();
       playback.setActiveSpeaker(speaker);
       playback.requestSeek(variant.start_sec ?? 0);
+      // Pre-seed the mode-switch resolver with the clicked row's key, BEFORE the
+      // mode flip, so it resolves `conceptId` to that row's concept and keeps
+      // the chosen realization index instead of restoring the prior concept and
+      // resetting to index 0. (Grouped concepts otherwise land on the wrong
+      // form.) The key is the underlying concept_id (= csv_row_id).
+      seedActiveConceptKey?.(variant.csv_row_id);
       // Select the exact interval the user clicked so annotate opens on that
       // realization's IPA/ortho, not the row's first. The realization key is
       // keyed by the underlying concept_id (= csv_row_id) and the start-rank
@@ -103,6 +120,6 @@ export function useOpenInAnnotateHandler(
       );
       setCurrentMode("annotate");
     },
-    [conceptId, conceptKey, setCurrentMode, setSelectedRealizationKey],
+    [conceptId, conceptKey, setCurrentMode, setSelectedRealizationKey, seedActiveConceptKey],
   );
 }

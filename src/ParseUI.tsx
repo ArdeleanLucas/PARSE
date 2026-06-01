@@ -43,7 +43,7 @@ import { buildSpeakerForm } from './lib/speakerForm';
 import { findBundleForConcept, normalizeBundles } from './lib/compareBundles';
 import { conceptMatchesElicitedKeys, conceptUnderlyingKeys, speakerElicitedConceptKeys } from './lib/speakerElicitedConcepts';
 import { buildSpeakerSortKeys } from './lib/speakerSortKeys';
-import { buildRealizationKey, findConceptByUnderlyingKey, groupConceptEntries, parseRealizationKey } from './lib/conceptGrouping';
+import { buildRealizationKey, findConceptByUnderlyingKey, groupConceptEntries, parseRealizationKey, resolveModeSwitchSelection } from './lib/conceptGrouping';
 import { buildElicitationDetailsByConceptKey } from './lib/elicitationDetails';
 import { isConceptVariantVisibleInSidebar as evaluateConceptVariantVisibleInSidebar } from './lib/sidebarVisibility';
 import type { Concept, SpeakerForm } from './lib/speakerForm';
@@ -1003,10 +1003,9 @@ export function ParseUI() {
 
   useEffect(() => {
     const rawKeyToResolve = previousActiveRawKeyRef.current ?? activeRawKey;
-    if (!rawKeyToResolve) return;
-    const next = findConceptByUnderlyingKey(concepts, rawKeyToResolve);
-    if (next && next.id !== conceptId) setConceptId(next.id);
-    if (next && selectedConceptKey !== rawKeyToResolve) setSelectedRealizationKey(buildRealizationKey(rawKeyToResolve, 0));
+    const resolution = resolveModeSwitchSelection(concepts, rawKeyToResolve, conceptId, selectedConceptKey);
+    if (resolution.conceptId !== undefined) setConceptId(resolution.conceptId);
+    if (resolution.realizationKey !== undefined) setSelectedRealizationKey(resolution.realizationKey);
   }, [concepts, currentMode]);
 
   useEffect(() => {
@@ -1511,11 +1510,19 @@ export function ParseUI() {
     return null;
   }, [compareBundles, compareBundlesError, concept, fallbackCompareBundle]);
   const selectedCompareSpeakers = useMemo(() => selectedSpeakers.filter((speaker) => speakers.includes(speaker)), [selectedSpeakers, speakers]);
+  // Seed the mode-switch resolver with the clicked row so it navigates to that
+  // concept and keeps the chosen realization index (mirrors the post-delete
+  // navigation seeding below). Memoized so the open-in-annotate handler keeps a
+  // stable identity across renders.
+  const seedActiveConceptKey = useCallback((key: string) => {
+    previousActiveRawKeyRef.current = key;
+  }, []);
   const handleOpenInAnnotate = useOpenInAnnotateHandler({
     conceptId,
     conceptKey: concept.key,
     setCurrentMode,
     setSelectedRealizationKey,
+    seedActiveConceptKey,
   });
   const handleCompareBundleUpdated = useCallback((nextBundle: CompareBundle) => {
     setCompareBundles((current) => current.map((bundle) => bundle.bundle_id === nextBundle.bundle_id ? nextBundle : bundle));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ConceptEntry } from '../api/types';
-import { buildRealizationKey, findConceptByUnderlyingKey, groupConceptEntries, parseRealizationKey } from './conceptGrouping';
+import { buildRealizationKey, findConceptByUnderlyingKey, groupConceptEntries, parseRealizationKey, resolveModeSwitchSelection } from './conceptGrouping';
 
 const untagged = () => 'untagged' as const;
 
@@ -306,5 +306,44 @@ describe('findConceptByUnderlyingKey', () => {
     ], untagged);
 
     expect(findConceptByUnderlyingKey(concepts, 'missing')).toBeUndefined();
+  });
+});
+
+describe('resolveModeSwitchSelection (open-in-annotate / mode-switch reconcile)', () => {
+  // "big" is a grouped concept: variants A (concept-a) and B (concept-b) share
+  // one source_item; "water" is a separate singleton concept.
+  const concepts = groupConceptEntries(
+    [
+      { id: 'concept-a', label: 'big A', source_item: '4.1', source_survey: 'KLQ', custom_order: 1 },
+      { id: 'concept-b', label: 'big B', source_item: '4.1', source_survey: 'KLQ', custom_order: 2 },
+      { id: 'concept-d', label: 'water' },
+    ],
+    untagged,
+  );
+  const big = concepts[0]; // id 1, key '4.1', variants concept-a / concept-b
+  const water = concepts[1]; // singleton
+
+  it('preserves the realization when the resolver is seeded with the clicked variant (the fix)', () => {
+    // Seeded: rawKeyToResolve === selectedConceptKey === the clicked variant B.
+    const res = resolveModeSwitchSelection(concepts, 'concept-b', big.id, 'concept-b');
+    expect(res.realizationKey).toBeUndefined(); // no reset → chosen index kept
+    expect(res.conceptId).toBeUndefined(); // already on the owning concept
+  });
+
+  it('clobbers a non-primary selection back to A when NOT seeded (documents the bug)', () => {
+    // Unseeded: resolver runs with the prior/primary key while the user picked B.
+    const res = resolveModeSwitchSelection(concepts, 'concept-a', big.id, 'concept-b');
+    expect(res.realizationKey).toBe(buildRealizationKey('concept-a', 0));
+  });
+
+  it('navigates conceptId to the concept that owns the seeded key', () => {
+    const res = resolveModeSwitchSelection(concepts, 'concept-d', big.id, 'concept-d');
+    expect(res.conceptId).toBe(water.id);
+    expect(res.realizationKey).toBeUndefined();
+  });
+
+  it('returns no-op for a null or unknown key', () => {
+    expect(resolveModeSwitchSelection(concepts, null, big.id, null)).toEqual({});
+    expect(resolveModeSwitchSelection(concepts, 'nope', big.id, 'nope')).toEqual({});
   });
 });
