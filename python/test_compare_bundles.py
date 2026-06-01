@@ -7,6 +7,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import compare_bundles
 from compare_bundles import build_compare_bundles, build_canonical_lexemes_report_tsv
 
 FIELDNAMES = ["id", "concept_en", "source_item", "source_survey", "custom_order"]
@@ -333,3 +334,44 @@ def test_unlinked_distinct_stems_stay_separate_bundles(tmp_path: pathlib.Path) -
     payload = build_compare_bundles(tmp_path, speakers=["Saha01"])
 
     assert sorted(b["bundle_id"] for b in payload["bundles"]) == ["bundle:salt", "bundle:salt-eating"]
+
+
+def test_annotation_is_read_once_per_speaker_not_once_per_bundle(
+    tmp_path: pathlib.Path, monkeypatch
+) -> None:
+    # Perf regression guard: each speaker's annotation must be loaded exactly
+    # once for the whole build, regardless of how many bundles exist. The old
+    # code loaded it inside the per-bundle loop -> O(bundles x speakers) reparses
+    # of the same file, which made Compare slow to load. Seed many distinct
+    # concepts (=> many bundles) and assert the read count equals the speaker
+    # count, not bundle_count x speaker_count.
+    rows = [
+        {"id": str(i), "concept_en": word, "source_item": str(i), "source_survey": "KLQ"}
+        for i, word in enumerate(
+            ["big", "small", "hair", "salt", "water", "fire", "tree", "stone"], start=1
+        )
+    ]
+    _seed_concepts(tmp_path, rows)
+    for speaker in ("Saha01", "Badr01"):
+        _seed_annotation(
+            tmp_path,
+            speaker,
+            [{"text": "big", "concept_id": "1", "start": 1.0, "end": 2.0, "ipa": "x", "ortho": "x"}],
+        )
+
+    calls: list[str] = []
+    real = compare_bundles._intervals_for_speaker
+
+    def _counting(project_root, speaker):
+        calls.append(speaker)
+        return real(project_root, speaker)
+
+    monkeypatch.setattr(compare_bundles, "_intervals_for_speaker", _counting)
+
+    payload = build_compare_bundles(tmp_path, speakers=["Saha01", "Badr01"])
+
+    # 8 distinct concepts -> 8 bundles. The old loop would have read each of the
+    # 2 speakers' files 8 times (16 reads); hoisted, it is exactly 2.
+    assert len(payload["bundles"]) == 8
+    assert len(calls) == 2
+    assert sorted(calls) == ["Badr01", "Saha01"]

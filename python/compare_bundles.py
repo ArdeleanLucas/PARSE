@@ -273,6 +273,34 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
     stored_canonical = load_canonical_lexemes(project_root)
     selected_speakers = list(speakers) if speakers is not None else _load_project_speakers(project_root)
 
+    # Index each speaker's annotation ONCE, up front. Previously the load +
+    # interval grouping below ran inside the per-bundle loop, so each speaker's
+    # full annotation JSON was read and re-parsed once per concept group
+    # (O(bundles x speakers) reparses of a handful of files). Nothing here
+    # depends on the bundle, so hoisting it makes the work O(speakers) and is
+    # byte-identical: the matching helpers below only read these structures.
+    speaker_index: dict[str, dict[str, Any]] = {}
+    for speaker in selected_speakers:
+        tiers, source_wav = _intervals_for_speaker(project_root, speaker)
+        by_concept: dict[str, list[dict[str, Any]]] = {}
+        legacy_by_text: dict[str, list[dict[str, Any]]] = {}
+        for interval in tiers["concept"]:
+            cid = _interval_concept_id(interval)
+            if cid:
+                by_concept.setdefault(cid, []).append(interval)
+            else:
+                legacy_by_text.setdefault(_stem_key(str(interval.get("text") or "")), []).append(interval)
+        ortho_by_concept, _ = _group_by_concept_id(tiers["ortho"])
+        ipa_by_concept, _ = _group_by_concept_id(tiers["ipa"])
+        speaker_index[speaker] = {
+            "tiers": tiers,
+            "source_wav": source_wav,
+            "by_concept": by_concept,
+            "legacy_by_text": legacy_by_text,
+            "ortho_by_concept": ortho_by_concept,
+            "ipa_by_concept": ipa_by_concept,
+        }
+
     # Group rows into bundles by union-find. Two rows merge when they share a
     # normalized stem (variant suffixes such as "(A)") OR a cross-survey identity
     # declared in the overlap sidecar. The latter is essential: e.g. "salt"
@@ -389,18 +417,13 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
                 if scoped:
                     bundle["speaker_concept_survey_links"][str(speaker)] = scoped
         for speaker in selected_speakers:
-            tiers, source_wav = _intervals_for_speaker(project_root, speaker)
-            concept_intervals = tiers["concept"]
-            ortho_by_concept, _ = _group_by_concept_id(tiers["ortho"])
-            ipa_by_concept, _ = _group_by_concept_id(tiers["ipa"])
-            by_concept: dict[str, list[dict[str, Any]]] = {}
-            legacy_by_text: dict[str, list[dict[str, Any]]] = {}
-            for interval in concept_intervals:
-                cid = _interval_concept_id(interval)
-                if cid:
-                    by_concept.setdefault(cid, []).append(interval)
-                else:
-                    legacy_by_text.setdefault(_stem_key(str(interval.get("text") or "")), []).append(interval)
+            idx = speaker_index[speaker]
+            tiers = idx["tiers"]
+            source_wav = idx["source_wav"]
+            by_concept = idx["by_concept"]
+            legacy_by_text = idx["legacy_by_text"]
+            ortho_by_concept = idx["ortho_by_concept"]
+            ipa_by_concept = idx["ipa_by_concept"]
             speaker_candidates: dict[str, Any] = {}
             candidate_rows: list[str] = []
             for row in group["rows"]:
