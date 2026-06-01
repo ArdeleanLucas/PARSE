@@ -839,3 +839,143 @@ def test_csv_reimport_round_trip_preserves_files(tmp_path) -> None:
 
     assert reverted["ok"] is True
     assert {filename: _sha256(path) for filename, path in _tracked_reimport_files(project_root).items()} == before
+
+
+# --- MC-448-A: import must not silently create concepts that duplicate an existing meaning ---
+
+def _fly_dup_concepts_fixture(project_root: pathlib.Path) -> None:
+    _write_concepts_fixture(
+        project_root / "concepts.csv",
+        [
+            {"id": "122", "concept_en": "to fly", "source_item": "7.12", "source_survey": "KLQ", "custom_order": ""},
+            {"id": "313", "concept_en": "fly (n.)", "source_item": "94", "source_survey": "JBIL", "custom_order": ""},
+        ],
+    )
+
+
+def _fly_verb_wordlist() -> list[dict[str, object]]:
+    # New concept id 635 whose gloss strips to "fly" — collides with existing
+    # "fly (n.)" (313) by dedupe key, exactly the cross-survey duplicate trap.
+    return [{"concept_id": "635", "gloss": "fly (verb)", "ipa_form": "pařīn", "order": 10, "source_survey": "Oxford-SK"}]
+
+
+def test_gloss_dedupe_key_strips_disambiguators_language_agnostically() -> None:
+    assert speaker_import_tools._gloss_dedupe_key("fly (verb)") == "fly"
+    assert speaker_import_tools._gloss_dedupe_key("fly (n.)") == "fly"
+    assert speaker_import_tools._gloss_dedupe_key("to fly") == "to fly"  # distinct key — not auto-equated
+    assert speaker_import_tools._gloss_dedupe_key("īma, īmna") == "īma"
+
+
+def test_lexical_dry_run_reports_potential_duplicate_new_concept(tmp_path) -> None:
+    external_root = tmp_path / "external"
+    source_csv = external_root / "qorv01.csv"
+    _write_lexical_wordlist(source_csv, _fly_verb_wordlist())
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    _fly_dup_concepts_fixture(project_root)
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+
+    payload = speaker_import_tools.tool_onboard_lexical_speaker(
+        tools,
+        {"speaker": "Qorv01", "sourceCsv": str(source_csv), "dryRun": True},
+    )
+
+    dups = payload["plan"]["potentialDuplicates"]
+    assert len(dups) == 1
+    assert dups[0]["conceptId"] == "635"
+    assert dups[0]["label"] == "fly (verb)"
+    assert [m["id"] for m in dups[0]["existingMatches"]] == ["313"]  # the noun — surfaced for review
+
+
+def test_lexical_apply_blocks_silent_duplicate_creation(tmp_path) -> None:
+    external_root = tmp_path / "external"
+    source_csv = external_root / "qorv01.csv"
+    _write_lexical_wordlist(source_csv, _fly_verb_wordlist())
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    _fly_dup_concepts_fixture(project_root)
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+
+    with pytest.raises(ChatToolValidationError) as excinfo:
+        speaker_import_tools.tool_onboard_lexical_speaker(
+            tools,
+            {"speaker": "Qorv01", "sourceCsv": str(source_csv), "dryRun": False},
+        )
+    assert "allowDuplicateConcepts" in str(excinfo.value)
+    # Nothing was written.
+    assert not (project_root / "annotations").exists()
+    _fieldnames, rows = _read_concepts_fixture(project_root / "concepts.csv")
+    assert "635" not in {row["id"] for row in rows}
+
+
+def test_lexical_apply_allows_duplicate_when_explicitly_acknowledged(tmp_path) -> None:
+    external_root = tmp_path / "external"
+    source_csv = external_root / "qorv01.csv"
+    _write_lexical_wordlist(source_csv, _fly_verb_wordlist())
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    _fly_dup_concepts_fixture(project_root)
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+
+    payload = speaker_import_tools.tool_onboard_lexical_speaker(
+        tools,
+        {"speaker": "Qorv01", "sourceCsv": str(source_csv), "dryRun": False, "allowDuplicateConcepts": True},
+    )
+
+    assert payload["ok"] is True and payload["dryRun"] is False
+    _fieldnames, rows = _read_concepts_fixture(project_root / "concepts.csv")
+    assert "635" in {row["id"] for row in rows}
+
+
+def test_lexical_unique_new_gloss_has_no_potential_duplicates(tmp_path) -> None:
+    external_root = tmp_path / "external"
+    source_csv = external_root / "qorv01.csv"
+    _write_lexical_wordlist(source_csv, _lexical_rows())  # new concept "dog" — no existing match
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    _write_concepts_fixture(
+        project_root / "concepts.csv",
+        [{"id": "1", "concept_en": "ash", "source_item": "1.1", "source_survey": "KLQ", "custom_order": "10"}],
+    )
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[external_root])
+
+    payload = speaker_import_tools.tool_onboard_lexical_speaker(
+        tools,
+        {"speaker": "Qorv01", "sourceCsv": str(source_csv), "dryRun": True},
+    )
+
+    assert payload["plan"]["potentialDuplicates"] == []
+
+
+def test_processed_import_dry_run_reports_potential_duplicate(tmp_path) -> None:
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    _fly_dup_concepts_fixture(project_root)
+    wav_path, annotation_path, _peaks = _write_processed_artifacts(
+        project_root,
+        "Khan05",
+        {
+            "version": 1,
+            "speaker": "Khan05",
+            "source_audio": "audio/working/Khan05/speaker.wav",
+            "source_audio_duration_sec": 1.0,
+            "metadata": {"language_code": "sdh"},
+            "tiers": {"concept": {"display_order": 1, "intervals": [{"start": 0.0, "end": 1.0, "text": "635: fly (verb)"}]}},
+        },
+    )
+    tools = ParseChatTools(project_root=project_root, external_read_roots=[project_root])
+
+    payload = speaker_import_tools.tool_import_processed_speaker(
+        tools,
+        {"speaker": "Khan05", "workingWav": str(wav_path), "annotationJson": str(annotation_path), "dryRun": True},
+    )
+
+    dups = payload["plan"]["potentialDuplicates"]
+    assert [d["conceptId"] for d in dups] == ["635"]
+    assert [m["id"] for m in dups[0]["existingMatches"]] == ["313"]
+
+
+def test_import_specs_expose_allow_duplicate_concepts_param() -> None:
+    for name in ("onboard_lexical_speaker", "import_processed_speaker"):
+        spec = speaker_import_tools.SPEAKER_IMPORT_TOOL_SPECS[name]
+        assert "allowDuplicateConcepts" in spec.parameters["properties"]

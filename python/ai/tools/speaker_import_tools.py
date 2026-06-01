@@ -153,6 +153,15 @@ SPEAKER_IMPORT_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                     "type": "boolean",
                     "description": "If true, preview the file-copy and metadata-write plan without mutating the workspace.",
                 },
+                "allowDuplicateConcepts": {
+                    "type": "boolean",
+                    "description": (
+                        "Default false. When the import would create new concept ids whose gloss matches an "
+                        "existing concept (see plan.potentialDuplicates), a non-dry-run apply is blocked so the "
+                        "duplicate can be reviewed and mapped to the existing id. Set true to import them as new "
+                        "concepts anyway."
+                    ),
+                },
             },
         },
         mutability="mutating",
@@ -207,6 +216,15 @@ SPEAKER_IMPORT_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                 "dryRun": {
                     "type": "boolean",
                     "description": "If true, validate and preview the import without writing files.",
+                },
+                "allowDuplicateConcepts": {
+                    "type": "boolean",
+                    "description": (
+                        "Default false. When the wordlist would create new concept ids whose gloss matches an "
+                        "existing concept (see plan.potentialDuplicates), a non-dry-run apply is blocked so the "
+                        "duplicate can be reviewed and mapped to the existing id. Set true to import them as new "
+                        "concepts anyway."
+                    ),
                 },
             },
         },
@@ -659,6 +677,77 @@ def _lexical_existing_concepts_by_id(tools: "ParseChatTools") -> Dict[str, str]:
         for row in rows
         if _normalize_space(row.get("id")) and row_value(row, "concept_en")
     }
+
+
+def _gloss_dedupe_key(label: str) -> str:
+    """Language-agnostic key for spotting same-meaning concepts across surveys.
+
+    Strips parenthetical disambiguators and comma alternatives, then lowercases
+    and collapses whitespace. Pure punctuation/format normalization — no
+    metalanguage-specific assumptions, so it works regardless of gloss language.
+    """
+
+    text = re.sub(r"\s*\([^)]*\)\s*", " ", str(label or ""))
+    text = text.split(",")[0]
+    return " ".join(text.split()).casefold()
+
+
+def _detect_potential_duplicate_concepts(
+    tools: "ParseChatTools", concepts: Sequence[Dict[str, str]]
+) -> List[Dict[str, Any]]:
+    """Flag incoming NEW concept ids whose gloss matches an existing concept.
+
+    A new concept id (absent from concepts.csv) that shares a dedupe key with one
+    or more existing concepts is very likely a cross-survey duplicate that should
+    be linked to the existing id rather than forked into a parallel concept (the
+    failure mode that put an Oxford "fly (verb)" under a new id instead of the
+    existing "to fly"). Returns report entries only; never mutates. Callers
+    surface these in the dry-run plan and block a silent apply unless explicitly
+    allowed, so a new concept is never created — nor silently dropped from a
+    tag — without a human decision.
+    """
+
+    existing_by_id = _lexical_existing_concepts_by_id(tools)
+    existing_ids = set(existing_by_id)
+    by_key: Dict[str, List[Dict[str, str]]] = {}
+    for concept_id, label in existing_by_id.items():
+        key = _gloss_dedupe_key(label)
+        if key:
+            by_key.setdefault(key, []).append({"id": concept_id, "label": label})
+    flagged: List[Dict[str, Any]] = []
+    for concept in concepts:
+        concept_id = _normalize_space(concept.get("id"))
+        label = _normalize_space(concept.get("label"))
+        if not concept_id or concept_id in existing_ids:
+            continue  # existing ids are checked by _validate_lexical_concept_labels; only NEW ids can duplicate
+        key = _gloss_dedupe_key(label)
+        if not key:
+            continue
+        matches = [match for match in by_key.get(key, []) if match["id"] != concept_id]
+        if matches:
+            flagged.append(
+                {
+                    "conceptId": concept_id,
+                    "label": label,
+                    "existingMatches": sorted(matches, key=lambda match: _concept_sort_key(match["id"])),
+                }
+            )
+    flagged.sort(key=lambda item: _concept_sort_key(item["conceptId"]))
+    return flagged
+
+
+def _duplicate_concepts_message(potential_duplicates: Sequence[Dict[str, Any]]) -> str:
+    parts: List[str] = []
+    for entry in potential_duplicates:
+        existing = "; ".join(
+            "{0} ({1})".format(match["id"], match["label"]) for match in entry.get("existingMatches", [])
+        )
+        parts.append("new {0!r} {1!r} ~ existing [{2}]".format(entry.get("conceptId"), entry.get("label"), existing))
+    return (
+        "Import would create {0} new concept id(s) that match existing concepts by gloss: {1}. "
+        "Map them to the existing id(s) (e.g. via cross-survey links) or re-run with "
+        "allowDuplicateConcepts=true to import them as new concepts.".format(len(potential_duplicates), " | ".join(parts))
+    )
 
 
 def _validate_lexical_concept_labels(tools: "ParseChatTools", concepts: Sequence[Dict[str, str]]) -> tuple[int, int]:
@@ -1171,9 +1260,11 @@ def tool_onboard_lexical_speaker(tools: "ParseChatTools", args: Dict[str, Any]) 
     language_code = _normalize_space(args.get("languageCode")) or "und"
     dry_run = bool(args.get("dryRun"))
 
+    allow_duplicate_concepts = bool(args.get("allowDuplicateConcepts"))
     rows = _read_lexical_wordlist_rows(source_csv)
     concepts = _lexical_concepts_from_rows(rows)
     existing_concept_count, new_concept_count = _validate_lexical_concept_labels(tools, concepts)
+    potential_duplicates = _detect_potential_duplicate_concepts(tools, concepts)
     annotation_dest = tools.annotations_dir / (speaker + ".parse.json")
     legacy_annotation_dest = tools.annotations_dir / (speaker + ".json")
     transcript_dest = tools.project_root / "imports" / "lexical" / speaker / source_csv.name
@@ -1189,6 +1280,7 @@ def tool_onboard_lexical_speaker(tools: "ParseChatTools", args: Dict[str, Any]) 
         "conceptsCsvDest": tools._display_readable_path(concepts_dest),
         "transcriptDest": tools._display_readable_path(transcript_dest),
         "languageCode": language_code,
+        "potentialDuplicates": potential_duplicates,
     }
     if dry_run:
         return {
@@ -1197,6 +1289,9 @@ def tool_onboard_lexical_speaker(tools: "ParseChatTools", args: Dict[str, Any]) 
             "plan": plan,
             "message": "Preview only. Run again with dryRun=false to import the audio-less lexical speaker.",
         }
+
+    if potential_duplicates and not allow_duplicate_concepts:
+        raise ChatToolValidationError(_duplicate_concepts_message(potential_duplicates))
 
     annotation_payload = _build_lexical_annotation(speaker, rows, language_code)
     annotation_dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1268,6 +1363,8 @@ def tool_import_processed_speaker(tools: "ParseChatTools", args: Dict[str, Any])
         )
 
     concepts = _extract_concepts_from_annotation(tools, annotation_payload)
+    allow_duplicate_concepts = bool(args.get("allowDuplicateConcepts"))
+    potential_duplicates = _detect_potential_duplicate_concepts(tools, concepts)
     metadata = annotation_payload.get("metadata") if isinstance(annotation_payload.get("metadata"), dict) else {}
     language_code = _normalize_space(metadata.get("language_code")) or "und"
     project_id = _normalize_space(annotation_payload.get("project_id")) or "parse-project"
@@ -1298,6 +1395,7 @@ def tool_import_processed_speaker(tools: "ParseChatTools", args: Dict[str, Any])
         "wavSizeBytes": working_wav.stat().st_size,
         "annotationSizeBytes": annotation_json.stat().st_size,
         "peaksSizeBytes": peaks_json.stat().st_size if peaks_json else None,
+        "potentialDuplicates": potential_duplicates,
     }
 
     if dry_run:
@@ -1307,6 +1405,9 @@ def tool_import_processed_speaker(tools: "ParseChatTools", args: Dict[str, Any])
             "plan": plan,
             "message": "Preview only. Run again with dryRun=false to copy processed artifacts and register the speaker.",
         }
+
+    if potential_duplicates and not allow_duplicate_concepts:
+        raise ChatToolValidationError(_duplicate_concepts_message(potential_duplicates))
 
     audio_dest.parent.mkdir(parents=True, exist_ok=True)
     annotation_dest.parent.mkdir(parents=True, exist_ok=True)

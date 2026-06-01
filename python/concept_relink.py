@@ -28,6 +28,16 @@ from survey_overlap import (
 
 ALGORITHM = "canonical_survey_gloss:v1-strict"
 
+# Concept-id reference fields can appear in either snake_case (legacy/python
+# payloads) or camelCase (PARSE annotation tier intervals: ``conceptId``). Both
+# must be rewritten on merge or the relink silently half-applies, leaving the
+# actual interval lexemes pointing at the merged-away id.
+_CONCEPT_ID_FIELDS = ("concept_id", "conceptId")
+
+# Concept-keyed sidecars rewritten on apply (in addition to annotations,
+# parse-tags.json, parse-enrichments.json, concepts.csv, and survey-overlap).
+_COMPARE_NOTES_FILENAME = "parseui-compare-notes-v1.json"
+
 
 class ConceptRelinkError(Exception):
     """Raised when a requested relink migration is invalid or cannot be applied."""
@@ -220,7 +230,7 @@ def _rewrite_annotation_payload(value: Any, mapping: Mapping[str, str]) -> tuple
                     new_key = new + new_key[len(old) :]
                     count += 1
                     break
-            if key == "concept_id" and str(item or "").strip() in mapping:
+            if key in _CONCEPT_ID_FIELDS and str(item or "").strip() in mapping:
                 new_dict[new_key] = mapping[str(item or "").strip()]
                 count += 1
             else:
@@ -247,16 +257,23 @@ def _rewrite_concept_keys(value: Any, mapping: Mapping[str, str]) -> tuple[Any, 
     if isinstance(value, dict):
         new_dict: dict[str, Any] = {}
         for key, item in value.items():
+            renamed = str(key) in mapping
             new_key = mapping.get(str(key), str(key))
-            if new_key != str(key):
+            if renamed:
                 count += 1
-            if key == "concept_id" and str(item or "").strip() in mapping:
-                new_dict[new_key] = mapping[str(item or "").strip()]
+            if key in _CONCEPT_ID_FIELDS and str(item or "").strip() in mapping:
+                value_out = mapping[str(item or "").strip()]
                 count += 1
             else:
-                rewritten, item_count = _rewrite_concept_keys(item, mapping)
-                new_dict[new_key] = rewritten
+                value_out, item_count = _rewrite_concept_keys(item, mapping)
                 count += item_count
+            # Collision: a merge_id key renamed onto a key that already exists
+            # (the canonical keep_id). Keep the canonical entry; drop the
+            # merged-in duplicate. The keep_id's own (non-renamed) key always
+            # writes, so destination wins regardless of iteration order.
+            if renamed and new_key in new_dict:
+                continue
+            new_dict[new_key] = value_out
         return new_dict, count
     return value, count
 
@@ -332,7 +349,7 @@ def _files_to_backup(root: Path, merge_ids: set[str]) -> list[Path]:
         for path in sorted({*annotations_dir.glob("*.json"), *annotations_dir.glob("*.parse.json")}):
             if _references_any_json(path, merge_ids):
                 files.append(path)
-    for name in ("parse-tags.json", "parse-enrichments.json"):
+    for name in ("parse-tags.json", "parse-enrichments.json", _COMPARE_NOTES_FILENAME):
         path = root / name
         if path.exists() and _references_any_json(path, merge_ids):
             files.append(path)
@@ -343,6 +360,38 @@ def _files_to_backup(root: Path, merge_ids: set[str]) -> list[Path]:
             unique.append(path)
             seen.add(path)
     return unique
+
+
+def _assert_no_merged_refs(root: Path, merge_ids: set[str]) -> None:
+    """Fail loudly if any merged-away concept id still has a structural reference.
+
+    Catches incomplete rewrites (e.g. a field-name variant the rewriter missed)
+    before the migration is declared successful. Raised errors propagate to the
+    apply rollback. Only structural references are checked — quoted id tokens
+    (``"635"``), key prefixes (``"635::``), and concepts.csv id rows — not
+    free-text prose that merely mentions an old id.
+    """
+
+    if not merge_ids:
+        return
+    offenders: list[str] = []
+    try:
+        for row in read_concepts_csv_rows(root / "concepts.csv"):
+            if _row_id(row) in merge_ids:
+                offenders.append(f"concepts.csv:id={_row_id(row)}")
+    except (OSError, ValueError, UnicodeDecodeError):
+        pass
+    json_targets: list[Path] = []
+    annotations_dir = root / "annotations"
+    if annotations_dir.is_dir():
+        json_targets.extend(sorted({*annotations_dir.glob("*.json"), *annotations_dir.glob("*.parse.json")}))
+    for name in ("parse-tags.json", "parse-enrichments.json", _COMPARE_NOTES_FILENAME):
+        json_targets.append(root / name)
+    for path in json_targets:
+        if path.exists() and _references_any_json(path, merge_ids):
+            offenders.append(_relative(path, root))
+    if offenders:
+        raise ConceptRelinkError(500, "post_apply_dangling_refs:" + ",".join(offenders))
 
 
 def _apply_one_group(root: Path, group: Mapping[str, Any], rows: list[dict[str, str]], state: dict[str, Any]) -> dict[str, Any]:
@@ -449,12 +498,24 @@ def apply_relink_by_gloss(project_root: Path, accepted_groups: Sequence[Mapping[
                 _json_save(enrichments_path, rewritten)
                 mutated_paths.append(enrichments_path)
 
+        compare_notes_path = root / _COMPARE_NOTES_FILENAME
+        if compare_notes_path.exists():
+            payload = _json_load(compare_notes_path)
+            rewritten, count = _rewrite_concept_keys(payload, mapping)
+            if count:
+                _json_save(compare_notes_path, rewritten)
+                mutated_paths.append(compare_notes_path)
+
         concepts_path = root / "concepts.csv"
         write_concepts_csv_rows(concepts_path, rows, atomic=True)
         mutated_paths.append(concepts_path)
         overlap_path = survey_overlap_path(root)
         save_survey_overlap_state(root, state)
         mutated_paths.append(overlap_path)
+
+        # Post-apply integrity gate: no merged-away id may retain a structural
+        # reference. A failure here rolls back via the except clause below.
+        _assert_no_merged_refs(root, merge_ids)
         return {
             "ok": True,
             "applied": True,

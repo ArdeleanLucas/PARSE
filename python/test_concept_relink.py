@@ -5,9 +5,16 @@ import json
 import pathlib
 import sys
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from concept_relink import apply_relink_by_gloss, build_relink_by_gloss_plan
+from concept_relink import (
+    ConceptRelinkError,
+    _assert_no_merged_refs,
+    apply_relink_by_gloss,
+    build_relink_by_gloss_plan,
+)
 
 
 _FIELDNAMES = ["id", "concept_en", "source_item", "source_survey", "custom_order"]
@@ -188,3 +195,75 @@ def test_apply_rejects_fuzzy_candidate_shape(tmp_path: pathlib.Path) -> None:
     )
 
     assert response == {"error": "fuzzy_candidates_require_manual_relabel"}
+
+
+def _seed_two_to_fly(tmp_path: pathlib.Path) -> None:
+    """Seed a duplicate same-gloss pair: keep 122 (KLQ), merge 635 (OXFORD)."""
+    _seed_concepts(
+        tmp_path,
+        [
+            {"id": "122", "concept_en": "to fly", "source_item": "7.12", "source_survey": "KLQ"},
+            {"id": "635", "concept_en": "to fly", "source_item": "", "source_survey": "OXFORD-COGNATE-125"},
+        ],
+    )
+    _seed_overlap(
+        tmp_path,
+        {"version": 1, "color_coding_enabled": False, "surveys": {}, "concept_survey_links": {}, "speaker_choices": {}},
+    )
+
+
+def test_apply_rewrites_camelcase_conceptid_in_annotation_tiers(tmp_path: pathlib.Path) -> None:
+    # PARSE tier intervals carry camelCase ``conceptId`` (not snake_case). The
+    # merge must rewrite these or the actual lexemes keep pointing at the
+    # merged-away id (the bug that left 4 speakers' fly under 635).
+    _seed_two_to_fly(tmp_path)
+    annotation_path = _seed_annotation(
+        tmp_path,
+        "Qorv01",
+        {
+            "speaker": "Qorv01",
+            "tiers": {
+                "ipa": {"name": "ipa", "intervals": [{"start": 0.0, "end": 1.0, "text": "pařīn", "conceptId": "635"}]},
+                "ortho": {"name": "ortho", "intervals": [{"start": 0.0, "end": 1.0, "text": "pařīn", "conceptId": "635"}]},
+            },
+        },
+    )
+
+    response = apply_relink_by_gloss(tmp_path, accepted_groups=[{"keep_concept_id": "122", "merge_concept_ids": ["635"]}])
+
+    assert response["ok"] is True and response["applied"] is True
+    rewritten = _read_json(annotation_path)
+    assert rewritten["tiers"]["ipa"]["intervals"][0]["conceptId"] == "122"
+    assert rewritten["tiers"]["ortho"]["intervals"][0]["conceptId"] == "122"
+    assert '"635"' not in annotation_path.read_text(encoding="utf-8")
+
+
+def test_apply_rewrites_and_dedupes_compare_notes_sidecar(tmp_path: pathlib.Path) -> None:
+    # parseui-compare-notes-v1.json is concept-keyed; the merge must rewrite it
+    # and, on key collision, keep the canonical keep_id note (destination wins).
+    _seed_two_to_fly(tmp_path)
+    (tmp_path / "parseui-compare-notes-v1.json").write_text(
+        json.dumps({"122": "FLY note (canonical)", "635": "FLY note (merged)", "3": "other"}),
+        encoding="utf-8",
+    )
+
+    response = apply_relink_by_gloss(tmp_path, accepted_groups=[{"keep_concept_id": "122", "merge_concept_ids": ["635"]}])
+
+    notes = _read_json(tmp_path / "parseui-compare-notes-v1.json")
+    assert "635" not in notes
+    assert notes["122"] == "FLY note (canonical)"
+    assert notes["3"] == "other"
+    assert any(path.endswith("/parseui-compare-notes-v1.json") for path in response["backup_paths"])
+
+
+def test_assert_no_merged_refs_raises_on_dangling_reference(tmp_path: pathlib.Path) -> None:
+    # Safety gate: an incomplete rewrite (a stray reference to a merged id) must
+    # fail loudly so the apply rolls back, rather than declaring success.
+    _seed_concepts(tmp_path, [{"id": "122", "concept_en": "to fly"}])  # 635 already removed
+    _seed_annotation(tmp_path, "X", {"tiers": {"ipa": {"intervals": [{"conceptId": "635"}]}}})
+
+    with pytest.raises(ConceptRelinkError):
+        _assert_no_merged_refs(tmp_path, {"635"})
+
+    # Clean workspace (no references to the queried id) does not raise.
+    _assert_no_merged_refs(tmp_path, {"999"})
