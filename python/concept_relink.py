@@ -241,6 +241,37 @@ def _rewrite_annotation_payload(value: Any, mapping: Mapping[str, str]) -> tuple
     return value, count
 
 
+def _merge_concept_values(dest: Any, incoming: Any) -> Any:
+    """Merge two concept-keyed values without losing data, used when a merge_id
+    key collides with the canonical keep_id key during relink.
+
+    - dict: recursively merge (union of keys; shared keys merged recursively).
+    - list: order-preserving union (no duplicates).
+    - str: append the incoming text if it is distinct and not already contained
+      (human notes are never discarded; identical notes are not duplicated).
+    - otherwise: keep the destination (canonical) scalar.
+    """
+
+    if isinstance(dest, dict) and isinstance(incoming, dict):
+        merged: dict[Any, Any] = dict(dest)
+        for key, value in incoming.items():
+            merged[key] = _merge_concept_values(merged[key], value) if key in merged else value
+        return merged
+    if isinstance(dest, list) and isinstance(incoming, list):
+        merged_list = list(dest)
+        for item in incoming:
+            if item not in merged_list:
+                merged_list.append(item)
+        return merged_list
+    if isinstance(dest, str) and isinstance(incoming, str):
+        if not dest:
+            return incoming
+        if not incoming or incoming in dest:
+            return dest
+        return dest + "\n\n" + incoming
+    return dest
+
+
 def _rewrite_concept_keys(value: Any, mapping: Mapping[str, str]) -> tuple[Any, int]:
     count = 0
     if isinstance(value, list):
@@ -268,12 +299,13 @@ def _rewrite_concept_keys(value: Any, mapping: Mapping[str, str]) -> tuple[Any, 
                 value_out, item_count = _rewrite_concept_keys(item, mapping)
                 count += item_count
             # Collision: a merge_id key renamed onto a key that already exists
-            # (the canonical keep_id). Keep the canonical entry; drop the
-            # merged-in duplicate. The keep_id's own (non-renamed) key always
-            # writes, so destination wins regardless of iteration order.
-            if renamed and new_key in new_dict:
-                continue
-            new_dict[new_key] = value_out
+            # (the canonical keep_id), or vice versa. Merge the two values so no
+            # data is lost — notes are appended, dicts/lists are unioned — rather
+            # than dropping either side. Order-independent for preservation.
+            if new_key in new_dict:
+                new_dict[new_key] = _merge_concept_values(new_dict[new_key], value_out)
+            else:
+                new_dict[new_key] = value_out
         return new_dict, count
     return value, count
 

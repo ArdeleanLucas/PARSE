@@ -238,9 +238,9 @@ def test_apply_rewrites_camelcase_conceptid_in_annotation_tiers(tmp_path: pathli
     assert '"635"' not in annotation_path.read_text(encoding="utf-8")
 
 
-def test_apply_rewrites_and_dedupes_compare_notes_sidecar(tmp_path: pathlib.Path) -> None:
-    # parseui-compare-notes-v1.json is concept-keyed; the merge must rewrite it
-    # and, on key collision, keep the canonical keep_id note (destination wins).
+def test_apply_merges_compare_notes_appending_distinct_text(tmp_path: pathlib.Path) -> None:
+    # parseui-compare-notes-v1.json is concept-keyed; on key collision the merge
+    # must APPEND distinct note text (never discard a note), not keep just one.
     _seed_two_to_fly(tmp_path)
     (tmp_path / "parseui-compare-notes-v1.json").write_text(
         json.dumps({"122": "FLY note (canonical)", "635": "FLY note (merged)", "3": "other"}),
@@ -251,18 +251,40 @@ def test_apply_rewrites_and_dedupes_compare_notes_sidecar(tmp_path: pathlib.Path
 
     notes = _read_json(tmp_path / "parseui-compare-notes-v1.json")
     assert "635" not in notes
-    assert notes["122"] == "FLY note (canonical)"
+    assert notes["122"] == "FLY note (canonical)\n\nFLY note (merged)"  # both notes preserved
     assert notes["3"] == "other"
     assert any(path.endswith("/parseui-compare-notes-v1.json") for path in response["backup_paths"])
 
 
-def test_apply_concept_keys_collision_keeps_destination_nested_dict(tmp_path: pathlib.Path) -> None:
-    # When keep (122) and merge (635) both hold a nested enrichment value under
-    # the same section, the merge must collapse to the canonical keep_id entry
-    # and drop the merged-in one (keep_id wins), regardless of differing data.
+def test_apply_merges_compare_notes_dedupes_identical_text(tmp_path: pathlib.Path) -> None:
+    # Identical notes (the common case for a true duplicate) collapse to one copy.
+    _seed_two_to_fly(tmp_path)
+    (tmp_path / "parseui-compare-notes-v1.json").write_text(
+        json.dumps({"122": "FLY (VERB) note", "635": "FLY (VERB) note"}),
+        encoding="utf-8",
+    )
+
+    apply_relink_by_gloss(tmp_path, accepted_groups=[{"keep_concept_id": "122", "merge_concept_ids": ["635"]}])
+
+    notes = _read_json(tmp_path / "parseui-compare-notes-v1.json")
+    assert notes == {"122": "FLY (VERB) note"}
+
+
+def test_apply_concept_keys_collision_merges_nested_dict(tmp_path: pathlib.Path) -> None:
+    # When keep (122) and merge (635) both hold a nested enrichment value, the
+    # merge must UNION them — shared sub-keys union their lists, distinct sub-keys
+    # are preserved — so no cognate-set evidence is lost.
     _seed_two_to_fly(tmp_path)
     (tmp_path / "parse-enrichments.json").write_text(
-        json.dumps({"cognate_sets": {"122": {"A": ["S1"]}, "635": {"B": ["S2"]}, "3": {"C": ["S3"]}}}),
+        json.dumps(
+            {
+                "cognate_sets": {
+                    "122": {"A": ["S1"], "B": ["Sb"]},
+                    "635": {"A": ["S2"], "C": ["Sc"]},
+                    "3": {"C": ["S3"]},
+                }
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -270,7 +292,10 @@ def test_apply_concept_keys_collision_keeps_destination_nested_dict(tmp_path: pa
 
     assert response["ok"] is True and response["applied"] is True
     enrichments = _read_json(tmp_path / "parse-enrichments.json")
-    assert enrichments["cognate_sets"] == {"122": {"A": ["S1"]}, "3": {"C": ["S3"]}}
+    assert enrichments["cognate_sets"] == {
+        "122": {"A": ["S1", "S2"], "B": ["Sb"], "C": ["Sc"]},
+        "3": {"C": ["S3"]},
+    }
     assert any(path.endswith("/parse-enrichments.json") for path in response["backup_paths"])
 
 
