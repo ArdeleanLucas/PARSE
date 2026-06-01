@@ -20,7 +20,10 @@ export async function getConceptAppendixExport(
     includeCognates: options.includeCognates ?? true,
   };
   if (options.tagId) body.tagId = options.tagId;
-  const response = await fetch("/api/mcp/tools/export_concept_appendix_md?mode=active", {
+  // mode=default serves the full *safe* MCP surface (read + curated writes), which always
+  // includes this first-party export tool — unlike mode=active, which honors the workspace's
+  // external-client curation (config/mcp_config.json expose_all_tools=false → curated subset).
+  const response = await fetch("/api/mcp/tools/export_concept_appendix_md?mode=default", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

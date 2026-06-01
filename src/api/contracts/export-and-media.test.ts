@@ -35,7 +35,7 @@ describe("export-and-media contracts", () => {
   });
 
   it("posts to the concept-appendix MCP tool and unwraps result.markdown into a Blob", async () => {
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
       new Response(JSON.stringify({ tool: "export_concept_appendix_md", ok: true, result: { markdown: "# Concept Appendix\n" } }), {
         headers: { "Content-Type": "application/json" },
         status: 200,
@@ -45,10 +45,10 @@ describe("export-and-media contracts", () => {
 
     const blob = await getConceptAppendixExport();
 
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/api/mcp/tools/export_concept_appendix_md?mode=active");
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(String(init.body))).toEqual({ includeCognates: true });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/mcp/tools/export_concept_appendix_md?mode=default");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({ includeCognates: true });
     expect(blob.type).toContain("text/markdown");
     expect(await blob.text()).toBe("# Concept Appendix\n");
   });
