@@ -310,6 +310,12 @@ export interface CompareCandidate {
   end_sec?: number | null;
   source_wav?: string;
   realization_index?: number;
+  /**
+   * Every recorded realization (A/B/…) of this row for the speaker, present
+   * only when there are 2+. The top-level fields mirror realizations[0], so
+   * single-realization readers are unaffected.
+   */
+  realizations?: CompareCandidate[];
   warnings?: string[];
 }
 

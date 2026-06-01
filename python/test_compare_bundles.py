@@ -238,3 +238,52 @@ def test_canonical_report_uses_same_effective_rows_and_escapes_tsv_fields(tmp_pa
     assert "lu t" in report
     assert "lu t" in report
     assert "default:single-candidate" in report
+
+
+def test_multiple_realizations_are_all_emitted_start_sorted(tmp_path: pathlib.Path) -> None:
+    """A speaker with 2+ intervals on one concept_id exposes every realization
+    (A/B) under candidate["realizations"], start-sorted, not just the first."""
+    _seed_concepts(
+        tmp_path,
+        [{"id": "122", "concept_en": "to fly", "source_item": "7.12", "source_survey": "KLQ", "custom_order": "122"}],
+    )
+    # B is authored first but starts LATER, so start-sorting must put A (earlier) at index 0.
+    _seed_annotation(
+        tmp_path,
+        "Fail01",
+        [
+            {"text": "to fly", "concept_id": "122", "start": 8381.30, "end": 8382.10, "ipa": "balB", "ortho": "orthoB"},
+            {"text": "to fly", "concept_id": "122", "start": 8381.25, "end": 8382.19, "ipa": "balA", "ortho": "orthoA"},
+        ],
+    )
+
+    payload = build_compare_bundles(tmp_path, speakers=["Fail01"])
+    candidate = payload["bundles"][0]["candidates"]["Fail01"]["122"]
+
+    realizations = candidate["realizations"]
+    assert len(realizations) == 2
+    # Start-sorted: A (earlier start) is index 0, B is index 1.
+    assert [r["ipa"] for r in realizations] == ["balA", "balB"]
+    assert [r["realization_index"] for r in realizations] == [0, 1]
+    # Primary top-level mirrors realization 0 (back-compat).
+    assert candidate["ipa"] == "balA"
+    assert candidate["start_sec"] == 8381.25
+
+
+def test_single_realization_candidate_has_no_realizations_key(tmp_path: pathlib.Path) -> None:
+    """Single-realization rows stay byte-identical: no realizations key added."""
+    _seed_concepts(
+        tmp_path,
+        [{"id": "122", "concept_en": "to fly", "source_item": "7.12", "source_survey": "KLQ", "custom_order": "122"}],
+    )
+    _seed_annotation(
+        tmp_path,
+        "Fail01",
+        [{"text": "to fly", "concept_id": "122", "start": 1.0, "end": 2.0, "ipa": "bal", "ortho": "o"}],
+    )
+
+    payload = build_compare_bundles(tmp_path, speakers=["Fail01"])
+    candidate = payload["bundles"][0]["candidates"]["Fail01"]["122"]
+
+    assert "realizations" not in candidate
+    assert "realization_index" not in candidate
