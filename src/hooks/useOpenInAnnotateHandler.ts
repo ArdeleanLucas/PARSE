@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 
+import { buildRealizationKey } from "../lib/conceptGrouping";
 import { usePlaybackStore } from "../stores/playbackStore";
 import { useCompareReturnStore } from "../stores/compareReturnStore";
 
@@ -22,6 +23,11 @@ type AppMode = "annotate" | "compare" | "tags";
 export interface OpenInAnnotateVariant {
   start_sec: number | null;
   csv_row_id: string;
+  /** Which recorded realization (A/B/…) of csv_row_id this card represents.
+   * When set, the handler selects exactly that interval in annotate so the
+   * user lands on the form they clicked, ready to edit. Undefined for
+   * single-realization rows (the row's only interval, index 0). */
+  realizationIndex?: number;
 }
 
 export interface UseOpenInAnnotateHandlerParams {
@@ -44,6 +50,14 @@ export interface UseOpenInAnnotateHandlerParams {
    * the setter through — we cannot import it.
    */
   setCurrentMode: (mode: AppMode) => void;
+  /**
+   * Optional. ParseUI's `setSelectedRealizationKey` setter. When provided, the
+   * handler selects the clicked variant's exact interval
+   * (`<csv_row_id>:<realizationIndex>`) so annotate opens on that A/B/… form
+   * rather than the row's first realization. Optional so the hook stays
+   * unit-testable without wiring every consumer.
+   */
+  setSelectedRealizationKey?: (key: string | null) => void;
 }
 
 /**
@@ -69,7 +83,7 @@ export interface UseOpenInAnnotateHandlerParams {
 export function useOpenInAnnotateHandler(
   params: UseOpenInAnnotateHandlerParams,
 ) {
-  const { conceptId, conceptKey, setCurrentMode } = params;
+  const { conceptId, conceptKey, setCurrentMode, setSelectedRealizationKey } = params;
   return useCallback(
     (speaker: string, variant: OpenInAnnotateVariant) => {
       useCompareReturnStore.getState().save({
@@ -80,8 +94,15 @@ export function useOpenInAnnotateHandler(
       const playback = usePlaybackStore.getState();
       playback.setActiveSpeaker(speaker);
       playback.requestSeek(variant.start_sec ?? 0);
+      // Select the exact interval the user clicked so annotate opens on that
+      // realization's IPA/ortho, not the row's first. The realization key is
+      // keyed by the underlying concept_id (= csv_row_id) and the start-rank
+      // index, matching annotate's own realization ordering.
+      setSelectedRealizationKey?.(
+        buildRealizationKey(variant.csv_row_id, variant.realizationIndex ?? 0),
+      );
       setCurrentMode("annotate");
     },
-    [conceptId, conceptKey, setCurrentMode],
+    [conceptId, conceptKey, setCurrentMode, setSelectedRealizationKey],
   );
 }
