@@ -1510,15 +1510,19 @@ export function ParseUI() {
     return null;
   }, [compareBundles, compareBundlesError, concept, fallbackCompareBundle]);
   const selectedCompareSpeakers = useMemo(() => selectedSpeakers.filter((speaker) => speakers.includes(speaker)), [selectedSpeakers, speakers]);
+  // Seed the mode-switch resolver with the clicked row so it navigates to that
+  // concept and keeps the chosen realization index (mirrors the post-delete
+  // navigation seeding below). Memoized so the open-in-annotate handler keeps a
+  // stable identity across renders.
+  const seedActiveConceptKey = useCallback((key: string) => {
+    previousActiveRawKeyRef.current = key;
+  }, []);
   const handleOpenInAnnotate = useOpenInAnnotateHandler({
     conceptId,
     conceptKey: concept.key,
     setCurrentMode,
     setSelectedRealizationKey,
-    // Seed the mode-switch resolver with the clicked row so it navigates to that
-    // concept and keeps the chosen realization index (mirrors the post-delete
-    // navigation seeding below).
-    seedActiveConceptKey: (key: string) => { previousActiveRawKeyRef.current = key; },
+    seedActiveConceptKey,
   });
   const handleCompareBundleUpdated = useCallback((nextBundle: CompareBundle) => {
     setCompareBundles((current) => current.map((bundle) => bundle.bundle_id === nextBundle.bundle_id ? nextBundle : bundle));
