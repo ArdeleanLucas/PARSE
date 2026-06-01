@@ -170,7 +170,17 @@ the stdio MCP server, or the agent chat path). **No scripts are required.**
 |---|---|---|
 | `export_lingpy_tsv` | `wordlist.tsv` | `outputPath`, `conceptTag`, `consolidate`, `dryRun` |
 | `export_nexus` | `dataset.nex` | `outputPath`, `conceptTag`, `consolidate`, `dryRun` |
+| `export_beast2_xml` | `analysis.xml` | `outputPath`, `conceptTag`, `consolidate`, `chainLength`, `dryRun` |
 | `export_complete_lingpy_dataset` | both (a bundle) | `outputDir`, `conceptTag`, `consolidate`, `with_contact_lexemes`, `dryRun` |
+
+`export_beast2_xml` wraps the same character matrix as `export_nexus` into a
+self-contained BEAST 2.7 analysis (binary substitution model, Yule tree prior,
+strict clock), so the chain reaches a runnable analysis without a BEAUti step:
+
+```
+beast analysis.xml      ->  analysis.log + analysis.trees
+treeannotator -burnin 10 analysis.trees analysis.mcc.tree
+```
 
 Parameter semantics:
 
