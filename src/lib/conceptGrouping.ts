@@ -150,6 +150,44 @@ export function findConceptByUnderlyingKey(concepts: readonly Concept[], underly
   });
 }
 
+/** Outcome of reconciling the active concept/realization across a mode switch. */
+export interface ModeSwitchSelection {
+  /** Navigate to this concept id (absent = leave conceptId unchanged). */
+  conceptId?: number;
+  /** Reset the selected realization to this key (absent = leave it intact). */
+  realizationKey?: string;
+}
+
+/**
+ * On a mode switch the concept rows collapse/expand, so the previously-active
+ * underlying key (`rawKeyToResolve`) is reconciled back to whichever concept now
+ * owns it. Behaviour:
+ *  - navigate `conceptId` to the owning concept when it differs;
+ *  - reset the realization to that concept's first interval ONLY when the
+ *    current selection (`selectedConceptKey`) points somewhere else.
+ *
+ * The reset condition is what makes "Open in annotate" work for grouped
+ * concepts: seed `rawKeyToResolve` with the clicked row's key so it equals
+ * `selectedConceptKey`, and the realization index is left intact (no reset to 0)
+ * while still navigating to the right concept. Without seeding, the resolver
+ * runs with the prior concept's key and clobbers a non-primary selection back to
+ * variant/realization A.
+ */
+export function resolveModeSwitchSelection(
+  concepts: readonly Concept[],
+  rawKeyToResolve: string | null,
+  currentConceptId: number,
+  selectedConceptKey: string | null,
+): ModeSwitchSelection {
+  if (!rawKeyToResolve) return {};
+  const next = findConceptByUnderlyingKey(concepts, rawKeyToResolve);
+  if (!next) return {};
+  const out: ModeSwitchSelection = {};
+  if (next.id !== currentConceptId) out.conceptId = next.id;
+  if (selectedConceptKey !== rawKeyToResolve) out.realizationKey = buildRealizationKey(rawKeyToResolve, 0);
+  return out;
+}
+
 export function groupConceptEntries(
   rawConcepts: readonly ConceptEntry[],
   resolveTag: ResolveConceptTag,
