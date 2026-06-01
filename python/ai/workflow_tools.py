@@ -207,6 +207,13 @@ class WorkflowTools:
                             "maxLength": 512,
                             "description": "Project-relative output directory for the bundle (default exports/lingpy). Use a date-stamped path to avoid clobbering prior evidence.",
                         },
+                        "conceptTag": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "description": "If set, restrict the bundle to this concept tag (e.g. custom-sk-concept-list, the thesis tag) and consolidate survey-overlap duplicate concept ids into one canonical character.",
+                        },
+                        "consolidate": {"type": "boolean", "description": "Fold survey-overlap duplicate concept ids into one canonical character (implied when conceptTag is set)."},
                         "dryRun": {"type": "boolean", "description": "Preview the export bundle and planned artifacts without writing files."},
                     },
                 },
@@ -1247,6 +1254,9 @@ class WorkflowTools:
         export_dir = (str(args.get("outputDir") or "").strip().rstrip("/\\")) or "exports/lingpy"
         lingpy_path = "{0}/wordlist.tsv".format(export_dir)
         nexus_path = "{0}/dataset.nex".format(export_dir)
+        concept_tag = str(args.get("conceptTag") or "").strip()
+        consolidate = bool(args.get("consolidate")) or bool(concept_tag)
+        matrix_args = {"conceptTag": concept_tag, "consolidate": consolidate} if consolidate else {}
 
         stages: List[Dict[str, Any]] = []
         artifacts = {
@@ -1263,7 +1273,7 @@ class WorkflowTools:
                 "payload": contact_payload,
             })
 
-        lingpy_payload = self._parse_tools._tool_export_lingpy_tsv({"outputPath": lingpy_path, "dryRun": dry_run})
+        lingpy_payload = self._parse_tools._tool_export_lingpy_tsv({"outputPath": lingpy_path, "dryRun": dry_run, **matrix_args})
         stages.append({
             "stage": "lingpy_tsv",
             "tool": "export_lingpy_tsv",
@@ -1271,7 +1281,7 @@ class WorkflowTools:
             "payload": lingpy_payload,
         })
 
-        nexus_payload = self._parse_tools._tool_export_nexus({"outputPath": nexus_path, "dryRun": dry_run})
+        nexus_payload = self._parse_tools._tool_export_nexus({"outputPath": nexus_path, "dryRun": dry_run, **matrix_args})
         stages.append({
             "stage": "nexus",
             "tool": "export_nexus",
@@ -1293,6 +1303,8 @@ class WorkflowTools:
             "previewOnly": dry_run,
             "with_contact_lexemes": with_contact_lexemes,
             "outputDir": export_dir,
+            "consolidated": consolidate,
+            "conceptTag": concept_tag or None,
             "artifacts": artifacts,
             "stages": stages,
             "warnings": warnings,

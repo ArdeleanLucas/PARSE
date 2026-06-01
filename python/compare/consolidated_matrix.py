@@ -33,7 +33,6 @@ from compare.cognate_compute import (
     _build_cogid_lookup,
     _concept_sort_key,
     _normalize_ipa,
-    _normalize_space,
     _speaker_lookup_key,
     _tokenize_ipa_for_wordlist,
     load_annotations,
@@ -274,9 +273,11 @@ def build_wordlist_rows(
             speaker_key = _speaker_lookup_key(record.speaker)
             group_label = concept_groups.get(speaker_key, "")
             cogid = cogid_lookup.get((key, group_label), 0) if group_label else 0
-            concept_value = _normalize_space(record.concept_label) or key
+            # Use the canonical gloss as the CONCEPT value: LingPy groups by this
+            # column, so a single canonical concept must carry one consistent
+            # label (not the per-form annotation text, which varies by variant).
             rows.append(
-                (row_id, concept_value, record.speaker, ipa, int(cogid), " ".join(tokens), 0)
+                (row_id, key, record.speaker, ipa, int(cogid), " ".join(tokens), 0)
             )
             row_id += 1
     return rows
