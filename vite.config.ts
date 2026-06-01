@@ -64,6 +64,11 @@ export default defineConfig({
   test: {
     exclude: [
       '**/node_modules/**',
+      // Background-agent git worktrees the harness checks out under
+      // .claude/worktrees/<name>/ contain full copies of src/, so an
+      // unscoped `vitest run` would otherwise re-collect every test N times
+      // (and fail with React-null errors against each worktree's own deps).
+      '**/.claude/**',
       'src/__tests__/apiRegression*.test.ts',  // live integration tests — run with: npx vitest run --config vitest.integration.ts
     ],
   },
