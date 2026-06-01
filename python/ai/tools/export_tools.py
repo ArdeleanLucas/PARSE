@@ -735,8 +735,9 @@ def export_beast2_xml(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str
 
         output_path_str = str(args.get("outputPath") or "").strip()
         dry_run = bool(args.get("dryRun", False))
+        raw_chain = args.get("chainLength")
         try:
-            chain_length = int(args.get("chainLength") or DEFAULT_CHAIN_LENGTH)
+            chain_length = DEFAULT_CHAIN_LENGTH if raw_chain in (None, "") else int(raw_chain)
         except (TypeError, ValueError):
             raise ChatToolExecutionError("chainLength must be an integer.")
         if chain_length < 1:
