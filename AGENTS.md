@@ -270,6 +270,16 @@ When `parse-coordinator` reviews a `port: oracle #N` PR, the agent's claim that 
 
 This rule applies specifically to `port: oracle #N` PRs. It does not apply to feature PRs (where the agent is writing new code from scratch) or refactor PRs (where parity harness is the gate).
 
+## PR review rules — language, readability & docs (added 2026-06-01)
+
+Every PR review must check these, and **apply the fixes during the review — do not ask first, and do not merely list them as suggestions.** This is the repo-side codification of Section 8 of the mandatory PR review checklist.
+
+1. **Language/data-agnostic text.** The PR title, description, and review comments describe the *generic mechanism first* — the behavior, code path, or invariant — not one natural language, speaker, or corpus. Real data may appear only as a demoted example (e.g. "...the Persian/Farsi reference row, as one case"); the text must still read as general if the example were removed. Rewrite dataset-bound framing ("fixes the Kurdish hair concept") into the mechanism it changes ("fixes per-speaker flag state for any concept; hair was the observed case").
+2. **Human-readable language.** Plain, simple, clear prose. Short sentences, lead with what changed and why. No filler or jargon stacks. A non-author engineer should understand the PR from the description alone.
+3. **Docs assessment.** State explicitly whether the change warrants docs: *present* / *missing-but-warranted* / *not needed*. Any docs touched by the diff (README, `docs/`, in-repo guides, doc comments) must also satisfy rules 1 and 2. If docs are missing but warranted and the addition is small, add them in the PR.
+
+When the PR body or a comment violates rule 1 or 2, edit it in the same pass: `gh pr edit <N> --repo <repo> --body "<rewritten>"` for the description, an edited/follow-up comment for review text, and direct file edits for docs in the diff. Record what was changed in the review's final verdict.
+
 ## Standard validation commands (added 2026-04-27)
 
 Use these exact invocations in PR validation. Paraphrasing breaks in subtle ways — the wrong wrapper can wedge in fresh worktree configs.
