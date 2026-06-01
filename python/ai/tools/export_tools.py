@@ -201,7 +201,7 @@ EXPORT_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                                 "type": "integer",
                                 "minimum": 1000,
                                 "maximum": 1000000000,
-                                "description": "MCMC chain length (default 200000). Loggers sample ~200 times across the chain.",
+                                "description": "MCMC chain length (default 10000000). Loggers sample ~200 times across the chain.",
                             },
                             "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
                         },

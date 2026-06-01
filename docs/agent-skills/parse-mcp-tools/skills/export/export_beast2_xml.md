@@ -24,7 +24,7 @@ Export a runnable BEAST2 (v2.7) XML analysis from the cognate-character matrix, 
 | outputPath  | string  | No  | Project-relative or absolute path inside project root. Omit for preview. | (preview only) | `"exports/beast2/analysis.xml"` |
 | conceptTag  | string  | No  | Restrict to a concept tag and fold survey-overlap duplicate concept ids into one canonical character. | (none) | `"custom-sk-concept-list"` |
 | consolidate | boolean | No  | Fold survey-overlap duplicate concept ids (implied when `conceptTag` is set). | `false` | `true` |
-| chainLength | integer | No  | MCMC chain length; loggers sample ~200 times across the chain. | `200000` | `1000000` |
+| chainLength | integer | No  | MCMC chain length; loggers sample ~200 times across the chain. | `10000000` | `20000000` |
 | dryRun      | boolean | No  | Preview only — never writes. | `false` | `true` |
 
 ## Expected Output

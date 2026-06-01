@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Tuple
 
-DEFAULT_CHAIN_LENGTH = 200000
+DEFAULT_CHAIN_LENGTH = 10000000
 
 # Element-name aliases BEAST's parser needs to resolve <prior>, <Uniform>, etc.
 _MAPS = [
