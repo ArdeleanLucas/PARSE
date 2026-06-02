@@ -251,6 +251,29 @@ def test_cross_gloss_link_warns_but_still_merges(tmp_path: pathlib.Path) -> None
     assert any("glosses differ" in w and "fog" in w and "rain" in w for w in warnings), warnings
 
 
+def test_cross_gloss_link_warns_once_for_bidirectional_link(tmp_path: pathlib.Path) -> None:
+    # Two mismatched-gloss rows that link to EACH OTHER's survey items share two
+    # (survey, item) pairs, so the mismatch is encountered twice. It must warn
+    # exactly once per row pair — not duplicate the message.
+    _seed_concepts(
+        tmp_path,
+        [
+            {"id": "142", "concept_en": "rain", "source_item": "125", "source_survey": "JBIL"},
+            {"id": "537", "concept_en": "fog", "source_item": "3.9", "source_survey": "KLQ"},
+        ],
+    )
+    (tmp_path / "survey-overlap.json").write_text(
+        json.dumps({"concept_survey_links": {"142": {"klq": "3.9"}, "537": {"jbil": "125"}}}),
+        encoding="utf-8",
+    )
+
+    bundles = build_compare_bundles(tmp_path, speakers=[])["bundles"]
+    merged = [bundle for bundle in bundles if set(bundle["row_ids"]) == {"142", "537"}]
+    assert len(merged) == 1
+    gloss_warnings = [w for w in merged[0]["warnings"] if "glosses differ" in w]
+    assert len(gloss_warnings) == 1, gloss_warnings
+
+
 def test_clarifier_variant_link_does_not_warn(tmp_path: pathlib.Path) -> None:
     # "salt" and "salt (eating)" are the same concept across two surveys — a
     # clarifier difference, not a different concept. They must merge WITHOUT a

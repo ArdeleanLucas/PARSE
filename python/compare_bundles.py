@@ -388,8 +388,10 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
     # glosses look like different concepts. The merge still happens (behavior is
     # unchanged); the message is surfaced in the affected bundle's warnings so a
     # reviewer can spot a bad link (e.g. "fog" linked to "rain") instead of it
-    # silently fabricating a phantom variant.
+    # silently fabricating a phantom variant. Recorded once per unordered row
+    # pair so a bidirectional or multi-item link does not warn twice.
     link_mismatch_warnings: list[tuple[str, str, str]] = []
+    link_mismatch_seen: set[frozenset[str]] = set()
     for row in rows:
         rid = str(row.get("id"))
         row_by_id[rid] = row
@@ -410,14 +412,17 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
                 other_gloss = str(row_by_id[other].get("concept_en", ""))
                 this_gloss = str(row.get("concept_en", ""))
                 if other != rid and _gloss_mismatch(other_gloss, this_gloss):
-                    link_mismatch_warnings.append(
-                        (
-                            other,
-                            rid,
-                            f"cross-survey link {pair[0]}:{pair[1]} joins '{other_gloss}' (row {other}) "
-                            f"with '{this_gloss}' (row {rid}); their glosses differ — verify the link",
+                    pair_key = frozenset((other, rid))
+                    if pair_key not in link_mismatch_seen:
+                        link_mismatch_seen.add(pair_key)
+                        link_mismatch_warnings.append(
+                            (
+                                other,
+                                rid,
+                                f"cross-survey link {pair[0]}:{pair[1]} joins '{other_gloss}' (row {other}) "
+                                f"with '{this_gloss}' (row {rid}); their glosses differ — verify the link",
+                            )
                         )
-                    )
                 _union(other, rid)
             else:
                 pair_rep[pair] = rid
