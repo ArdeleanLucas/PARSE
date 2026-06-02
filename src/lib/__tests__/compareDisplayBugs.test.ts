@@ -5,8 +5,8 @@
 // docs/reports/2026-05-19-compare-display-bugs.md and the fix plan at
 // docs/reports/2026-05-19-compare-display-bugs-fix-plan.md.
 //
-// Bug 3 (findBundleForConcept namespace collision) is fixed in this PR
-// (MC-414-A). Bugs 1 and 2 ride issue #529 — their tests are currently
+// Bug 3 now routes by concept identity uid instead of a sourceItem/csv-row bridge.
+// Bugs 1 and 2 ride issue #529 — their tests are currently
 // skipped with TODO references and a one-line reproduction summary so
 // they go green automatically once the data-model migration lands.
 
@@ -14,9 +14,8 @@ import { describe, expect, it } from 'vitest';
 import type {
   AnnotationInterval,
   AnnotationRecord,
-  CompareBundle,
 } from '../../api/types';
-import { findBundleForConcept } from '../compareBundles';
+import { normalizeBundles } from '../compareBundles';
 import { buildSpeakerForm } from '../speakerForm';
 import type { Concept } from '../speakerForm';
 
@@ -159,149 +158,43 @@ describe('Bug 2 — empty form.ipa when only a non-zero variant has data (Fail01
 
 });
 
-describe('Bug 3 — findBundleForConcept collides sourceItem with csv row id', () => {
-  // Fixed in MC-414-A. The frontend's conceptGrouping uses sourceItem as
-  // the grouped-concept key (e.g. "92" for "bird" rows that share JBIL
-  // 92), while bundle.row_ids are csv row ids (e.g. "92" for the "yellow"
-  // row). findBundleForConcept conflated the two namespaces.
 
-  it('routes the bird concept to bundle:bird, not bundle:yellow', () => {
-    // concepts.csv (anchored to /home/lucas/parse-workspace 2026-05-19):
-    //   id=92  yellow      KLQ 5.5
-    //   id=167 yellow (A)  JBIL 178
-    //   id=311 bird (A)    JBIL 92
-    //   id=651 bird (B)    JBIL 92
-    const bundleYellow: CompareBundle = {
-      bundle_id: 'bundle:yellow',
-      label: 'yellow',
-      row_ids: ['92', '167'],
-      buckets: [
+describe('Bug 3 — concept identity uid routing replaces sourceItem/csv-row bridge', () => {
+  it('routes the bird concept to c-bird by uid, not to the yellow row whose csv id equals source_item 92', () => {
+    const payload = normalizeBundles({
+      bundles: [
         {
-          bucket_key: 'klq 5.5',
-          survey_id: 'klq',
-          source_item: '5.5',
-          variants: [{ csv_row_id: '92', variant_label: '', label: 'yellow' }],
-        },
-        {
-          bucket_key: 'jbil 178',
-          survey_id: 'jbil',
-          source_item: '178',
-          variants: [{ csv_row_id: '167', variant_label: 'A', label: 'yellow (A)' }],
-        },
-      ],
-    };
-    const bundleBird: CompareBundle = {
-      bundle_id: 'bundle:bird',
-      label: 'bird',
-      row_ids: ['311', '651'],
-      buckets: [
-        {
-          bucket_key: 'jbil 92',
-          survey_id: 'jbil',
-          source_item: '92',
-          variants: [
-            { csv_row_id: '311', variant_label: 'A', label: 'bird (A)' },
-            { csv_row_id: '651', variant_label: 'B', label: 'bird (B)' },
+          bundle_id: 'bundle:c-yellow',
+          uid: 'c-yellow',
+          label: 'yellow',
+          row_ids: ['92', '167'],
+          buckets: [
+            { bucket_key: 'klq 5.5', survey_id: 'klq', source_item: '5.5', variants: [{ csv_row_id: '92', variant_label: '', label: 'yellow' }] },
+            { bucket_key: 'jbil 178', survey_id: 'jbil', source_item: '178', variants: [{ csv_row_id: '167', variant_label: 'A', label: 'yellow (A)' }] },
           ],
         },
+        {
+          bundle_id: 'bundle:c-bird',
+          uid: 'c-bird',
+          label: 'bird',
+          row_ids: ['311', '651'],
+          buckets: [{
+            bucket_key: 'jbil 92',
+            survey_id: 'jbil',
+            source_item: '92',
+            variants: [
+              { csv_row_id: '311', variant_label: 'A', label: 'bird (A)' },
+              { csv_row_id: '651', variant_label: 'B', label: 'bird (B)' },
+            ],
+          }],
+        },
       ],
-    };
+    });
 
-    // Grouped concept key is the sourceItem "92" (from JBIL 92). It must
-    // not be interpreted as a csv row id when the same string appears as
-    // a row id in an unrelated bundle.
-    const birdConcept = {
-      key: '92',
-      name: 'bird',
-      variants: [{ conceptKey: '311' }, { conceptKey: '651' }],
-    };
+    const concept = { key: 'c-bird', name: 'bird', variants: [{ conceptKey: '311' }, { conceptKey: '651' }] };
+    const activeBundle = payload.bundles.find((bundle) => bundle.uid === concept.key);
 
-    expect(findBundleForConcept([bundleYellow, bundleBird], birdConcept)?.bundle_id).toBe('bundle:bird');
-  });
-
-  it('routes a residual post-#529 clarifier-suffix grouped concept to its own bundle', () => {
-    // Post-#529 simulation against /home/lucas/parse-workspace finds 14
-    // grouped buckets where sourceItem is also a csv row id. Sample:
-    //   bucket=(JBIL,123)  siblings=[(45,'ice'),(144,'snow')]
-    //   sourceItem '123' is csv row id for an unrelated 'to jump' row.
-    // Without the fix, findBundleForConcept routes the ice concept to
-    // bundle:to-jump because "123" appears as a row id there.
-    const bundleToJump: CompareBundle = {
-      bundle_id: 'bundle:to-jump',
-      label: 'to jump',
-      row_ids: ['123'],
-      buckets: [{
-        bucket_key: 'klq 6.7',
-        survey_id: 'klq',
-        source_item: '6.7',
-        variants: [{ csv_row_id: '123', variant_label: '', label: 'to jump' }],
-      }],
-    };
-    const bundleIce: CompareBundle = {
-      bundle_id: 'bundle:ice',
-      label: 'ice',
-      row_ids: ['45'],
-      buckets: [{
-        bucket_key: 'jbil 123',
-        survey_id: 'jbil',
-        source_item: '123',
-        variants: [{ csv_row_id: '45', variant_label: '', label: 'ice' }],
-      }],
-    };
-    const bundleSnow: CompareBundle = {
-      bundle_id: 'bundle:snow',
-      label: 'snow',
-      row_ids: ['144'],
-      buckets: [{
-        bucket_key: 'jbil 123',
-        survey_id: 'jbil',
-        source_item: '123',
-        variants: [{ csv_row_id: '144', variant_label: '', label: 'snow' }],
-      }],
-    };
-
-    const iceGrouped = {
-      key: '123',
-      name: 'ice',
-      variants: [{ conceptKey: '45' }, { conceptKey: '144' }],
-    };
-    expect(findBundleForConcept([bundleToJump, bundleIce, bundleSnow], iceGrouped)?.bundle_id).toBe('bundle:ice');
-  });
-
-  it('still matches a singleton concept by its csv row id (no variants, no mergedKeys)', () => {
-    // Singleton concepts have concept.key = csv row id directly. The fix
-    // must not break that path.
-    const bundleHair: CompareBundle = {
-      bundle_id: 'bundle:hair',
-      label: 'hair',
-      row_ids: ['1'],
-      buckets: [{
-        bucket_key: 'klq 1.1',
-        survey_id: 'klq',
-        source_item: '1.1',
-        variants: [{ csv_row_id: '1', variant_label: '', label: 'hair' }],
-      }],
-    };
-    const hairSingleton = { key: '1', name: 'hair' };
-    expect(findBundleForConcept([bundleHair], hairSingleton)?.bundle_id).toBe('bundle:hair');
-  });
-
-  it('uses mergedKeys (user-merged concepts) before falling back to concept.key', () => {
-    // User-merged concepts keep concept.key as the primary's csv row id
-    // and expose every underlying csv row id via mergedKeys.
-    const bundleA: CompareBundle = {
-      bundle_id: 'bundle:alpha',
-      label: 'alpha',
-      row_ids: ['10'],
-      buckets: [{ bucket_key: 'klq 1', survey_id: 'klq', source_item: '1', variants: [{ csv_row_id: '10', variant_label: '', label: 'alpha' }] }],
-    };
-    const bundleB: CompareBundle = {
-      bundle_id: 'bundle:beta',
-      label: 'beta',
-      row_ids: ['20'],
-      buckets: [{ bucket_key: 'klq 2', survey_id: 'klq', source_item: '2', variants: [{ csv_row_id: '20', variant_label: '', label: 'beta' }] }],
-    };
-    const merged = { key: '10', name: 'alpha', mergedKeys: ['10', '20'] };
-    expect(findBundleForConcept([bundleA, bundleB], merged)?.bundle_id).toBe('bundle:alpha');
+    expect(activeBundle?.bundle_id).toBe('bundle:c-bird');
+    expect(activeBundle?.row_ids).toEqual(['311', '651']);
   });
 });

@@ -89,6 +89,7 @@ const mockSaveEnrichments = vi.fn();
 const mockReplaceEnrichments = vi.fn();
 const mockPatchCanonicalLexeme = vi.fn();
 const mockGetCompareBundles = vi.fn().mockResolvedValue({ bundles: [] });
+const mockGetConceptIdentity = vi.fn();
 let mockEnrichmentData: Record<string, unknown> = {};
 let mockEnrichmentSaveUsesDeepMerge = false;
 
@@ -377,6 +378,7 @@ vi.mock("./api/client", () => ({
   getLingPyExport: vi.fn().mockResolvedValue(''),
   getConceptAppendixExport: vi.fn().mockResolvedValue(new Blob(['# Concept Appendix\n'], { type: 'text/markdown' })),
   getCompareBundles: (...args: unknown[]) => mockGetCompareBundles(...args),
+  getConceptIdentity: (...args: unknown[]) => mockGetConceptIdentity(...args),
   putCanonicalLexeme: vi.fn().mockResolvedValue({ bundle: { bundle_id: 'water', label: 'water', row_ids: [], buckets: [] } }),
   deleteCanonicalLexeme: vi.fn().mockResolvedValue({ bundle: { bundle_id: 'water', label: 'water', row_ids: [], buckets: [] } }),
   importTagCsv: vi.fn().mockResolvedValue({
@@ -428,6 +430,7 @@ import { ParseUI } from "./ParseUI";
 import * as apiClient from "./api/client";
 import { ApiError } from "./api/contracts/shared";
 
+
 function makeFakeBundleMatchingConceptKey() {
   const firstConcept = mockConfig?.concepts?.[0];
   if (!firstConcept) return { bundles: [] };
@@ -445,6 +448,7 @@ function makeFakeBundleMatchingConceptKey() {
   return {
     bundles: [{
       bundle_id: rowId,
+      uid: `c-${rowId}`,
       label,
       row_ids: [rowId],
       buckets: [{ bucket_key: `default\u0000${rowId}`, survey_id: 'default', source_item: rowId, variants: [{ csv_row_id: rowId, concept_en: label, variant_label: 'A' }] }],
@@ -458,6 +462,7 @@ function makeBeShapedBigCompareBundles() {
   return {
     bundles: [{
       bundle_id: "bundle:big",
+      uid: "c-53",
       label: "big",
       row_ids: ["53", "619", "150"],
       buckets: [
@@ -711,6 +716,8 @@ beforeEach(() => {
   mockEnrichmentSaveUsesDeepMerge = false;
   mockGetCompareBundles.mockReset();
   mockGetCompareBundles.mockImplementation(() => Promise.resolve(makeFakeBundleMatchingConceptKey()));
+  mockGetConceptIdentity.mockReset();
+  mockGetConceptIdentity.mockImplementation(() => Promise.resolve({ version: 1, concepts: [], uid_by_row: {}, warnings: [] }));
   mockPatchCanonicalLexeme.mockClear();
   mockSelectedRegion = { start: 1.25, end: 2.5 };
   mockPlaybackActiveSpeaker = null;

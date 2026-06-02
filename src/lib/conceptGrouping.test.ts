@@ -275,6 +275,52 @@ describe('groupConceptEntries', () => {
     expect(grouped.map((concept) => concept.key)).toEqual(['primary', 'absorbed']);
   });
 
+
+  it('uses backend concept identity uids as displayed concept keys and keeps row ids as variants', () => {
+    const grouped = groupConceptEntries([
+      { id: '92', label: 'yellow', source_item: '5.5', source_survey: 'KLQ' },
+      { id: '167', label: 'yellow (A)', source_item: '178', source_survey: 'JBIL' },
+      { id: '311', label: 'bird (A)', source_item: '92', source_survey: 'JBIL' },
+      { id: '651', label: 'bird (B)', source_item: '92', source_survey: 'JBIL' },
+    ], untagged, undefined, undefined, {
+      version: 1,
+      concepts: [
+        { uid: 'c-bird', label: 'bird', members: ['311', '651'], origin: 'auto' },
+        { uid: 'c-yellow', label: 'yellow', members: ['92', '167'], origin: 'auto' },
+      ],
+      uid_by_row: { '311': 'c-bird', '651': 'c-bird', '92': 'c-yellow', '167': 'c-yellow' },
+      warnings: [],
+    });
+
+    expect(grouped).toHaveLength(2);
+    expect(grouped.map((concept) => concept.key)).toEqual(['c-bird', 'c-yellow']);
+    expect(grouped[0]).toMatchObject({ id: 1, key: 'c-bird', name: 'bird', sourceItem: '92', sourceSurvey: 'JBIL' });
+    expect(grouped[0].variants?.map((variant) => [variant.conceptKey, variant.conceptEn, variant.variantLabel])).toEqual([
+      ['311', 'bird (A)', 'A'],
+      ['651', 'bird (B)', 'B'],
+    ]);
+  });
+
+  it('uses identity membership rather than frontend source-item buckets', () => {
+    const grouped = groupConceptEntries([
+      { id: '45', label: 'ice', source_item: '123', source_survey: 'JBIL' },
+      { id: '144', label: 'snow', source_item: '123', source_survey: 'JBIL' },
+      { id: '123', label: 'to jump', source_item: '6.7', source_survey: 'KLQ' },
+    ], untagged, undefined, undefined, {
+      version: 1,
+      concepts: [
+        { uid: 'c-45', label: 'ice', members: ['45'], origin: 'manual:split' },
+        { uid: 'c-144', label: 'snow', members: ['144'], origin: 'manual:split' },
+        { uid: 'c-123', label: 'to jump', members: ['123'], origin: 'auto' },
+      ],
+      uid_by_row: { '45': 'c-45', '144': 'c-144', '123': 'c-123' },
+      warnings: [],
+    });
+
+    expect(grouped.map((concept) => concept.key)).toEqual(['c-45', 'c-144', 'c-123']);
+    expect(grouped.map((concept) => concept.variants?.map((variant) => variant.conceptKey))).toEqual([['45'], ['144'], ['123']]);
+  });
+
 });
 
 describe('findConceptByUnderlyingKey', () => {
