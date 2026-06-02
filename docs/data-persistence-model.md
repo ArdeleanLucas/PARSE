@@ -2,7 +2,7 @@
 
 **Audience:** Technical users, corpus managers, power users running their own workspaces, and developers.
 
-**Last updated:** 2026-06-02 (post PR #634 / MC-456-A)
+**Last updated:** 2026-06-02 (post PR #634 / MC-456-A; runtime read path + block-map + troubleshooting added in MC-456-B)
 
 > This is the primary reference for *how data actually lives on disk*, how keys work, why migrations exist, and how to stay safe when managing or moving PARSE workspaces.
 
@@ -15,7 +15,7 @@ A PARSE workspace (the directory you point the app or scripts at) typically cont
 | File / Dir                  | Purpose                                      | Keyed by?                          | Mutable?     | Notes |
 |-----------------------------|----------------------------------------------|------------------------------------|--------------|-------|
 | `concepts.csv`              | Master list of all concept rows (the "concepts table") | `id` (stable primary key)         | Low (append mostly) | Source of truth for identity. `source_item` + `source_survey` are for grouping/display only. |
-| `parse-enrichments.json`    | All comparative + review state (flags, cognates, borrowings, merges, canonical choices, notes, etc.) | `Concept.key` (see below)         | High        | The main file affected by keying changes and migrations. |
+| `parse-enrichments.json`    | All comparative + review state (flags, cognates, borrowings, merges, canonical choices, notes, etc.) | `Concept.key` (see below)         | High        | The main file affected by keying changes and migrations. See **The `parse-enrichments.json` Block Map** below for every block's shape and the manual-vs-automatic precedence. |
 | `annotations/<Speaker>.json` (or `.parse.json`) | Per-speaker time-aligned tiers (ipa, ortho, concept, ...) | `concept_id` = raw csv `id`       | High        | The "source recording" of fieldwork. Concept tier uses underlying ids. |
 | `parse-tags.json`           | Shared tag vocabulary + per-concept tag assignments | csv `id`s (never source keys)     | Medium      | Already id-namespaced. |
 | `survey-overlap.json`, `source_index.json`, peaks, coarse transcripts, etc. | Supporting survey linking, search, visualization | Various                           | Varies      | Not decision state. |
@@ -43,6 +43,46 @@ This matches the backend identity model introduced in #529 (`canonical_id = min(
 - Individual realizations inside a group still carry their original csv `id` in `variants[].conceptKey`.
 
 This is implemented in `src/lib/conceptGrouping.ts` (`canonicalConceptKey`, `groupConceptEntries`) and mirrored in the Python migration logic (`_canonical_key`, `build_remap`).
+
+## The `parse-enrichments.json` Block Map (shapes + precedence)
+
+`parse-enrichments.json` holds two layers in one file: an **automatic** layer (computed by the enrichment / similarity pass) at the top level, and a **manual** layer (human adjudication) under `manual_overrides`. **For any decision type present in both layers, the manual layer wins** — readers resolve `manual_overrides.<block>[key]` first and fall back to the top-level block only if the manual entry is absent.
+
+> **Consequence — a common source of "it looks empty":** in a workspace whose decisions are authored entirely by hand, the **top-level** `cognate_sets` / `borrowing_flags` are empty and all the real data lives under `manual_overrides`. Any report or tool that inspects the *top-level* block (for example, a summary that reports `len(cognate_sets)`) will read **0** even though the manual block is full. Always inspect `manual_overrides` to judge human decisions.
+
+### Top-level (automatic layer + file metadata)
+
+| Key | Shape | Meaning |
+|---|---|---|
+| `computed_at` | `string \| null` | When the automatic enrichment pass last ran. |
+| `config` | `{ contact_languages, speakers_included, concepts_included, lexstat_threshold }` | Parameters of that automatic run. |
+| `cognate_sets` | `{ conceptKey: { GROUP: [speakerId, …] } }` | **Auto-computed** cognate sets. Empty when cognates are authored by hand. |
+| `similarity` | `{ conceptKey: { speakerId: { langCode: { score, has_reference_data } } } }` | Auto contact-language similarity scores. |
+| `borrowing_flags` | `{ conceptKey: { speakerId: <value> } }` | Auto / legacy borrowing flags. |
+| `manual_overrides` | object | The human-decision layer (below). |
+
+Other top-level keys may be written by tools or pipelines (notes blocks, `*_applied_at` timestamps, source hashes, …). Treat any key your build does not recognise as **opaque metadata** — do not assume the keys above are the only ones, and preserve unknown keys on rewrite.
+
+### `manual_overrides` (human layer — wins over the automatic layer)
+
+| Block | Shape | Notes |
+|---|---|---|
+| `cognate_sets` | `{ conceptKey: { GROUP: [speakerId, …] } }` | `GROUP` is a single uppercase letter (`A`, `B`, `C`, …). A speaker listed under a letter is assigned to that cognate class for that concept. The displayed letter for a cell is the group whose speaker list contains that speaker. |
+| `cognate_decisions` | `{ conceptKey: { decision: "accepted" \| "split" \| "merge", ts: <epoch_ms> } }` | Adjudication status of a concept's grouping. (Falls back to a legacy top-level `cognate_decisions` if the manual one is absent.) |
+| `speaker_flags` | `{ conceptKey: { speakerId: true } }` | Per-speaker review flag; presence / `true` = flagged. |
+| `borrowing_flags` | `{ conceptKey: { speakerId: { … } } }` | Per-speaker borrowing annotation (the value is an object describing the call). |
+| `discarded_forms` | `{ conceptKey: … }` | Forms removed from comparison. |
+| `concept_merges` | `{ primaryConceptKey: [absorbedConceptKey, …] }` | Analyst-declared "these concepts are one." **Both** the map keys and the array values are concept keys — migrations re-key both. |
+| `canonical_lexemes` | `{ bundleKey: { speakerId: { csv_row_id, survey_id, source_item, bucket_key, variant_label, realization_index, source } } }` | Which realization a speaker selected as canonical. **Keyed by a bundle key (`bundle:<slug>`), not a concept key.** |
+
+### Key namespaces used in this file
+
+- **`conceptKey`** — a `concepts.csv` `id`, minted per the keying invariant above (singleton → its own id; group → `min(member_ids)`). Used by every block except `canonical_lexemes`.
+- **`bundleKey`** — `bundle:<slug>`; used only by `canonical_lexemes`.
+- **`speakerId`** — the speaker identifier exactly as it appears in the annotations / speaker tier (and in annotation filenames). The inner maps and the `GROUP` membership lists key on this verbatim.
+- **`GROUP`** — a single uppercase cognate-class letter, local to one concept.
+
+All **concept-keyed** blocks are subject to the SAFE / AMBIGUOUS legacy-key promotion described below. `canonical_lexemes` (bundle-keyed) and tags (already id-namespaced) are not.
 
 ## How Data Flows at Runtime (Load + Promotion)
 
@@ -88,6 +128,31 @@ flowchart TD
 - After promotion, runs `scan_legacy_keys` and emits a warning *only* for remaining AMBIGUOUS entries, telling the user exactly what command to run.
 
 This gives resilience: you can deploy new code that only understands canonical keys, and most of your old decision data will "just work" for the safe cases.
+
+## How the Running App Reads This Data (Request Path)
+
+The file on disk is the source of truth, but a running PARSE instance reaches it through the backend HTTP API. When "the file is correct but the screen is empty," the explanation is almost always on this path — so it is documented explicitly here.
+
+- **Port.** The backend HTTP server listens on a configurable port (default `8766`; override with the `PARSE_PORT` environment variable). A deployment may bind something else — confirm the port the client is actually talking to.
+- **No long-lived cache (server side).** The backend reads `parse-enrichments.json` **per request** and runs the in-memory SAFE-key promotion on each read before responding. A fresh API request therefore always reflects the current on-disk bytes.
+- **Two endpoints feed the Compare view, and they carry different parts of the model:**
+  - `GET /api/enrichments` → the whole enrichments file, **wrapped** as `{ "enrichments": { … } }`. The decision blocks (`manual_overrides.cognate_sets`, etc.) sit one level **inside** the `enrichments` key, not at the top of the response — consumers must unwrap.
+  - `GET /api/compare/bundles` → `{ "bundles": [ … ], "identity_warnings": [ … ] }`. Each bundle carries grouping / identity / forms: `bundle_id`, `uid`, `label`, `row_ids` (underlying csv ids), `buckets` / `candidates` / `canonical` (per-speaker realization data), `speaker_choices`, `warnings`. It does **not** carry cognate letters, per-speaker flags, or borrowings.
+- **The UI joins the two.** Grouping and forms come from `/api/compare/bundles`; the cognate letter / flag / similarity for each cell come from the enrichments blocks, looked up by concept key. The UI resolves that key as the **selected realization's** concept id (`variants[selectedIdx].conceptKey`, falling back to the group's canonical `key`); for a singleton concept this is simply the row's own csv id. The displayed cognate letter is the `GROUP` whose speaker list contains that speaker (manual layer first, automatic layer as fallback).
+- **Clients hold an in-memory snapshot.** A loaded app does not poll the file or the API for changes. Any **out-of-band** rewrite of `parse-enrichments.json` — a migration `--execute`, an external authoring or batch-merge tool, a hand edit, or a restore-from-backup — is invisible to an already-open client until it reloads. The disk and the API can be entirely correct while a stale tab still shows the pre-write state.
+
+> **Authoring outside the app.** Decision blocks may also be written by tooling that runs outside the PARSE process (batch authoring, import / merge, scripted back-fills). Such tools write the **same blocks under the same keys** and are bound by the same keying invariant; they should target `manual_overrides` for human decisions, and their writes are subject to the stale-client caveat above (reload to see them).
+
+## Troubleshooting: the file is correct but the UI or a report disagrees
+
+When a concept shows blank or wrong in Compare (or a count looks too low) yet the on-disk file looks right, work this list in order:
+
+1. **Stale client snapshot — check this first.** The most common cause after any migration, restore, or out-of-band write. Reload the app fully. To localise the fault, query `GET /api/enrichments` directly: if the API returns the value but the screen does not, it is the client (reload); if the API also lacks it, continue below.
+2. **Right layer / precedence.** Human decisions live under `manual_overrides.<block>`; the identically-named top-level block is the *automatic* layer and is often empty. A tool or report that reads the top-level block will under-count. Inspect `manual_overrides`.
+3. **Right key.** Singleton → the row's own csv id; group → the canonical `min(member_ids)`. If the data sits under a legacy `source_item` or `source:<survey>:<item>` key, determine whether it is **SAFE** (auto-promoted at read time, so it still shows) or **AMBIGUOUS** (left in place on purpose — run the migrator dry-run; ambiguous keys read blank until manually triaged and re-keyed).
+4. **Right speaker id.** The `GROUP` membership lists and the per-speaker maps key on the speaker id exactly as it appears in the annotations. A mismatch (case, suffix, a renamed speaker) reads as "no decision for this speaker."
+5. **Right surface / right workspace.** Confirm the client is pointed at the backend port **and** the workspace directory you actually edited. A second instance on another port, or a backend rooted at a different workspace, reads a different file.
+6. **Endpoint shape.** Querying the API by hand: `/api/enrichments` nests everything under the `enrichments` key, and cognate letters are **not** in `/api/compare/bundles`.
 
 ## The Migration Script (for cleaning the file + handling real ambiguity)
 
