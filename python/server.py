@@ -1431,6 +1431,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         if request_path == "/api/exports/canonical-lexemes-report": self._api_get_canonical_lexemes_report(); return
+        if request_path == "/api/concept-identity": self._api_get_concept_identity(); return
         if request_path == "/api/compare/bundles": self._api_get_compare_bundles(); return
 
         if request_path == "/api/contact-lexemes/coverage":

@@ -1,10 +1,11 @@
 """Build Compare bundle payloads for variants, survey buckets, and canonical lexemes.
 
 Bundle ids are deterministic for a workspace: rows are read in ``concepts.csv``
-order, grouped by a normalized stem (variant suffixes such as ``(A)`` removed),
-then assigned ``bundle:<stem-slug>``. If two distinct stems slugify to the same
-value, later first-encountered stems receive ``-2``, ``-3`` suffixes. Every
-payload includes ``row_ids`` so callers can repair choices if labels change.
+order, grouped by ``concept_identity`` uid, labelled from that materialised
+identity, then assigned ``bundle:<label-slug>``. If two distinct identity labels
+slugify to the same value, later first-encountered identities receive ``-2``,
+``-3`` suffixes. Every payload includes ``uid`` and ``row_ids`` so callers can
+repair choices if labels change.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from typing import Any, Mapping, Sequence
 
 from canonical_lexemes import load_canonical_lexemes, load_enrichments
 from concept_canonical import variant_stem, variant_suffix
+from concept_identity import load_concept_identity
 from concept_source_item import read_concepts_csv_rows, row_value
 from survey_overlap import concept_survey_links_for_row, load_survey_overlap_state, normalize_survey_id
 
@@ -372,120 +374,83 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
             "ipa_by_concept": ipa_by_concept,
         }
 
-    # Group rows into bundles by union-find. Two rows merge when they share a
-    # normalized stem (variant suffixes such as "(A)") OR a cross-survey identity
-    # declared in the overlap sidecar. The latter is essential: e.g. "salt"
-    # (KLQ 3.14) and "salt (eating)" (JBIL 139) cross-reference each other, so
-    # they are one concept — but their English stems differ ("salt" vs
-    # "salt (eating)"), so a stem-only grouping splits them and a speaker's
-    # candidates get read from only one of the linked concept ids.
-    parent: dict[str, str] = {}
-
-    def _find(node: str) -> str:
-        parent.setdefault(node, node)
-        root = node
-        while parent[root] != root:
-            root = parent[root]
-        while parent[node] != root:
-            parent[node], node = root, parent[node]
-        return root
-
-    def _union(a: str, b: str) -> None:
-        ra, rb = _find(a), _find(b)
-        if ra != rb:
-            parent[rb] = ra
-
     def _id_sort_key(value: object) -> tuple[int, object]:
         text = str(value or "").strip()
         return (0, int(text)) if text.isdigit() else (1, text)
 
     row_by_id: dict[str, Mapping[str, Any]] = {}
     row_order: list[str] = []
-    stem_rep: dict[str, str] = {}
-    # pair -> (first row to claim it, whether that claim came from the cross-
-    # survey sidecar). The bool is what lets us tell a declared cross-survey link
-    # apart from two intra-survey variants that merely share a legacy item.
-    pair_rep: dict[tuple[str, str], tuple[str, bool]] = {}
-    sidecar_root = overlap.get("concept_survey_links") if isinstance(overlap, Mapping) else None
-    # (row_a, row_b, message) for cross-survey links that join two rows whose
-    # glosses look like different concepts. The merge still happens (behavior is
-    # unchanged); the message is surfaced in the affected bundle's warnings so a
-    # reviewer can spot a bad link (e.g. "fog" linked to "rain") instead of it
-    # silently fabricating a phantom variant. Recorded once per unordered row
-    # pair so a bidirectional or multi-item link does not warn twice.
-    link_mismatch_warnings: list[tuple[str, str, str]] = []
-    link_mismatch_seen: set[frozenset[str]] = set()
     for row in rows:
         rid = str(row.get("id"))
         row_by_id[rid] = row
         row_order.append(rid)
-        _find(rid)
-        stem = _stem_key(row.get("concept_en", ""))
-        if stem:
-            if stem in stem_rep:
-                _union(stem_rep[stem], rid)
-            else:
-                stem_rep[stem] = rid
-        # Build this row's (survey, item) pairs exactly as concept_survey_links_for_row
-        # does (sidecar overwrites legacy per survey) while remembering which came
-        # from the sidecar, so the gloss check fires ONLY on a declared cross-survey
-        # link — never on two same-survey variants sharing a legacy item (e.g.
-        # "big (A)" / "big (B)" both on KLQ 4.1).
-        survey_pairs: dict[str, tuple[str, bool]] = {}
-        legacy_survey = normalize_survey_id(row_value(row, "source_survey"))
-        legacy_item = str(row_value(row, "source_item", "survey_item") or "").strip()
-        if legacy_survey and legacy_item:
-            survey_pairs[legacy_survey] = (legacy_item, False)
-        row_sidecar = sidecar_root.get(rid) if isinstance(sidecar_root, Mapping) else None
-        if isinstance(row_sidecar, Mapping):
-            for survey_id, source_item in row_sidecar.items():
+
+    identity = load_concept_identity(project_root, state=overlap)
+    concept_by_uid = {concept.uid: concept for concept in identity.concepts}
+
+    # Preserve MC-458-B's advisory warning signal while retiring Compare's stem /
+    # pair union-find. The identity model is the structural grouping authority;
+    # this pass only reports suspicious explicit sidecar links inside whichever
+    # uid the identity closure/overrides materialise.
+    legacy_identity_to_rows: dict[tuple[str, str], list[str]] = {}
+    for row in rows:
+        survey_id = normalize_survey_id(row_value(row, "source_survey"))
+        source_item = str(row_value(row, "source_item", "survey_item") or "").strip()
+        if survey_id and source_item:
+            legacy_identity_to_rows.setdefault((survey_id, source_item), []).append(str(row.get("id")))
+
+    sidecar_root = overlap.get("concept_survey_links") if isinstance(overlap, Mapping) else None
+    link_mismatch_warnings: list[tuple[str, str, str]] = []
+    link_mismatch_seen: set[frozenset[str]] = set()
+    if isinstance(sidecar_root, Mapping):
+        for raw_rid, raw_links in sidecar_root.items():
+            rid = str(raw_rid)
+            row = row_by_id.get(rid)
+            if row is None or not isinstance(raw_links, Mapping):
+                continue
+            for survey_id, source_item in raw_links.items():
                 sid = normalize_survey_id(survey_id)
                 item = str(source_item or "").strip()
-                if sid and item:
-                    survey_pairs[sid] = (item, True)
-        for survey_id, (source_item, is_sidecar) in survey_pairs.items():
-            pair = (survey_id, source_item)
-            if pair in pair_rep:
-                other, other_is_sidecar = pair_rep[pair]
-                # Only a sidecar-declared cross-survey link is worth verifying;
-                # two rows natively at the same item are ordinary variants.
-                if (is_sidecar or other_is_sidecar) and other != rid:
-                    other_gloss = str(row_by_id[other].get("concept_en", ""))
+                if not sid or not item:
+                    continue
+                for other in legacy_identity_to_rows.get((sid, item), []):
+                    if other == rid:
+                        continue
+                    other_row = row_by_id.get(other)
+                    if other_row is None:
+                        continue
+                    pair_key = frozenset((rid, other))
+                    if pair_key in link_mismatch_seen:
+                        continue
+                    other_gloss = str(other_row.get("concept_en", ""))
                     this_gloss = str(row.get("concept_en", ""))
                     if _gloss_mismatch(other_gloss, this_gloss):
-                        pair_key = frozenset((other, rid))
-                        if pair_key not in link_mismatch_seen:
-                            link_mismatch_seen.add(pair_key)
-                            link_mismatch_warnings.append(
-                                (
-                                    other,
-                                    rid,
-                                    f"cross-survey link {pair[0]}:{pair[1]} joins "
-                                    f"'{_gloss_short(other_gloss)}' (row {other}) with "
-                                    f"'{_gloss_short(this_gloss)}' (row {rid}); their glosses differ — verify the link",
-                                )
+                        link_mismatch_seen.add(pair_key)
+                        link_mismatch_warnings.append(
+                            (
+                                other,
+                                rid,
+                                f"cross-survey link {sid}:{item} joins "
+                                f"'{_gloss_short(other_gloss)}' (row {other}) with "
+                                f"'{_gloss_short(this_gloss)}' (row {rid}); their glosses differ — verify the link",
                             )
-                _union(other, rid)
-            else:
-                pair_rep[pair] = (rid, is_sidecar)
+                        )
 
     groups: dict[str, dict[str, Any]] = {}
     ordered_keys: list[str] = []
     for rid in row_order:
-        root = _find(rid)
-        if root not in groups:
-            groups[root] = {"label": "", "rows": []}
-            ordered_keys.append(root)
-        groups[root]["rows"].append(row_by_id[rid])
-    # Bundle label: prefer a clean gloss (no parenthetical clarifier), then the
-    # shortest, then the lowest concept id — so a merged group shows "salt", not
-    # "salt (eating)".
-    for root in ordered_keys:
-        rep = sorted(
-            groups[root]["rows"],
-            key=lambda r: ("(" in str(r.get("concept_en", "")), len(str(r.get("concept_en", ""))), _id_sort_key(r.get("id"))),
-        )[0]
-        groups[root]["label"] = _stem(rep.get("concept_en", "")) or rep.get("concept_en", "")
+        uid = identity.uid_for_row(rid) or f"row:{rid}"
+        if uid in groups:
+            continue
+        member_ids = identity.members_for_uid(uid) if identity.uid_for_row(rid) else [rid]
+        group_rows = [row_by_id[mid] for mid in member_ids if mid in row_by_id]
+        if not group_rows:
+            group_rows = [row_by_id[rid]]
+            member_ids = [rid]
+        concept = concept_by_uid.get(uid)
+        label = (concept.label if concept is not None else "") or _stem(group_rows[0].get("concept_en", "")) or str(group_rows[0].get("concept_en", ""))
+        groups[uid] = {"uid": uid, "label": label, "rows": group_rows, "member_ids": list(member_ids)}
+        ordered_keys.append(uid)
 
     used_slugs: dict[str, int] = {}
     built: list[dict[str, Any]] = []
@@ -512,7 +477,7 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
         for row_a, row_b, message in link_mismatch_warnings:
             if row_a in row_id_set or row_b in row_id_set:
                 warnings.append(message)
-        bundle = {"bundle_id": bid, "label": group["label"], "row_ids": row_ids, "buckets": list(bucket_map.values()), "candidates": {}, "canonical": {}, "warnings": warnings}
+        bundle = {"bundle_id": bid, "uid": group["uid"], "label": group["label"], "row_ids": row_ids, "buckets": list(bucket_map.values()), "candidates": {}, "canonical": {}, "warnings": warnings}
         concept_links = overlap.get("concept_survey_links") if isinstance(overlap, Mapping) else None
         bundle["concept_survey_links"] = {
             row_id: dict(concept_links.get(row_id, {}))
@@ -625,7 +590,7 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
 
     if bundle_id:
         built = [bundle for bundle in built if bundle["bundle_id"] == bundle_id]
-    return {"bundles": built}
+    return {"bundles": built, "identity_warnings": list(identity.warnings)}
 
 
 def effective_canonical_for_bundle(bundle: Mapping[str, Any], speaker: str) -> dict[str, Any] | None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import server as _server
 from canonical_lexemes import CanonicalLexemeError, delete_canonical_selection, store_canonical_selection
 from compare_bundles import build_canonical_lexemes_report_tsv, build_compare_bundles
+from concept_identity import identity_payload, load_concept_identity
 
 def _compute_cognates(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     if _server.cognate_compute_module is None:
@@ -122,6 +123,11 @@ def _api_post_tags_merge(self) -> None:
         raise _server.ApiError(exc.status, exc.message) from exc
     self._send_json(response.status, response.payload)
 
+def _api_get_concept_identity(self) -> None:
+    identity = load_concept_identity(_server._project_root())
+    self._send_json(_server.HTTPStatus.OK, identity_payload(identity))
+
+
 def _api_get_compare_bundles(self) -> None:
     params = _server._app_request_query_params(getattr(self, 'path', '/api/compare/bundles'))
     speakers = None
@@ -234,5 +240,5 @@ def _api_get_canonical_lexemes_report(self) -> None:
     self.wfile.write(body)
 
 
-__all__ = ['_compute_cognates', '_api_get_enrichments', '_api_post_enrichments', '_api_post_lexeme_note', '_api_post_lexeme_notes_import', '_api_get_lexeme_search', '_api_get_tags', '_api_post_tags_merge', '_api_get_compare_bundles', '_api_put_compare_canonical_lexeme', '_api_delete_compare_canonical_lexeme', '_api_get_canonical_lexemes_report']
+__all__ = ['_compute_cognates', '_api_get_enrichments', '_api_post_enrichments', '_api_post_lexeme_note', '_api_post_lexeme_notes_import', '_api_get_lexeme_search', '_api_get_tags', '_api_post_tags_merge', '_api_get_concept_identity', '_api_get_compare_bundles', '_api_put_compare_canonical_lexeme', '_api_delete_compare_canonical_lexeme', '_api_get_canonical_lexemes_report']
 

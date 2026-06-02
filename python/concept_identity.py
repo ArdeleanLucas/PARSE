@@ -353,8 +353,12 @@ def load_concept_identity(
 
 
 def identity_payload(identity: ConceptIdentity) -> dict[str, Any]:
-    """Serialise the full materialised identity (auto + manual) for the sidecar
-    or API. Round-trips through ``_load_overrides``."""
+    """Serialise the materialised identity for HTTP clients and sidecar tools.
+
+    ``concepts`` remains the round-trippable override shape. ``uid_by_row`` and
+    ``warnings`` are read-only materialised context so clients can stop
+    recomputing grouping and can surface non-fatal reconciliation problems.
+    """
 
     return {
         "version": 1,
@@ -367,7 +371,41 @@ def identity_payload(identity: ConceptIdentity) -> dict[str, Any]:
             }
             for concept in identity.concepts
         ],
+        "uid_by_row": dict(identity.uid_by_row),
+        "warnings": list(identity.warnings),
     }
+
+
+def same_stem_unlinked_clusters(project_root: Path) -> list[dict[str, Any]]:
+    """Dry-run proposer for manual merges: same-stem rows split across uids.
+
+    This intentionally reports only; it never writes ``concept-identity.json``.
+    The output helps a linguist find old same-stem cases that were previously
+    joined by Compare's stem heuristic but are not identity-linked.
+    """
+
+    project_root = Path(project_root)
+    rows = _concept_rows(project_root)
+    identity = load_concept_identity(project_root)
+    by_stem: dict[str, list[ConceptRow]] = {}
+    for row in rows:
+        stem = variant_stem(row.label) or row.label
+        key = " ".join(stem.casefold().split()).strip()
+        if key:
+            by_stem.setdefault(key, []).append(row)
+
+    clusters: list[dict[str, Any]] = []
+    for key in sorted(by_stem):
+        members = by_stem[key]
+        uids = sorted({uid for row in members if (uid := identity.uid_for_row(row.id))})
+        if len(members) < 2 or len(uids) < 2:
+            continue
+        rows_payload = [
+            {"id": row.id, "label": row.label, "uid": identity.uid_for_row(row.id) or ""}
+            for row in sorted(members, key=lambda r: _id_sort_key(r.id))
+        ]
+        clusters.append({"stem": variant_stem(members[0].label) or members[0].label, "rows": rows_payload, "uids": uids})
+    return clusters
 
 
 # --------------------------------------------------------------------------- #

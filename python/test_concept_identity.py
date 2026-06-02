@@ -281,3 +281,40 @@ def test_orphan_member_ids_warn(tmp_path):
     identity = load_concept_identity(tmp_path)
 
     assert any("9999" in warning and "unknown" in warning for warning in identity.warnings)
+
+
+def test_identity_payload_includes_uid_lookup_and_warnings(tmp_path):
+    _seed_concepts(tmp_path, [{"id": "91", "concept_en": "green", "source_item": "5.4", "source_survey": "KLQ"}])
+    _seed_overlap(tmp_path, {})
+    _seed_identity_overrides(tmp_path, [{"uid": "c-green", "label": "green", "members": ["91", "9999"], "origin": "manual:merge"}])
+
+    payload = identity_payload(load_concept_identity(tmp_path))
+
+    assert payload["uid_by_row"] == {"91": "c-green"}
+    assert payload["warnings"]
+    assert "9999" in payload["warnings"][0]
+
+
+def test_same_stem_clusters_without_identity_link_are_reported_dry_run(tmp_path):
+    _seed_concepts(
+        tmp_path,
+        [
+            {"id": "1", "concept_en": "rain", "source_item": "1", "source_survey": "KLQ"},
+            {"id": "2", "concept_en": "rain", "source_item": "2", "source_survey": "JBIL"},
+            {"id": "3", "concept_en": "fog", "source_item": "3", "source_survey": "KLQ"},
+        ],
+    )
+    _seed_overlap(tmp_path, {})
+
+    from concept_identity import same_stem_unlinked_clusters
+
+    assert same_stem_unlinked_clusters(tmp_path) == [
+        {
+            "stem": "rain",
+            "rows": [
+                {"id": "1", "label": "rain", "uid": "c-1"},
+                {"id": "2", "label": "rain", "uid": "c-2"},
+            ],
+            "uids": ["c-1", "c-2"],
+        }
+    ]
