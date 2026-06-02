@@ -48,14 +48,39 @@ function sourceBucketKey(sourceItem: string, sourceSurvey: string | undefined): 
   return `${survey}\u0000${sourceItem}`;
 }
 
-function groupedConceptKey(
-  sourceItem: string,
-  sourceSurvey: string | undefined,
-  sourceItemsWithMultipleGroupedBuckets: ReadonlySet<string>,
-): string {
-  if (!sourceItemsWithMultipleGroupedBuckets.has(sourceItem)) return sourceItem;
-  const survey = normalizeSourceSurvey(sourceSurvey) ?? 'unspecified';
-  return `source:${survey}:${sourceItem}`;
+/**
+ * A grouped concept's storage key is the canonical csv id of its members — the
+ * minimum numeric id, mirroring the backend #529 identity migration
+ * (`canonical_id = min(ids)`).
+ *
+ * This is load-bearing: a concept's `key` is the persistence key for every
+ * per-concept decision (speaker_flags, cognate_sets, concept tags,
+ * borrowing_flags, canonical selections). It MUST live in a single,
+ * collision-free namespace. csv `id`s are unique by construction (the concepts
+ * table primary key); `source_item` is a survey-local coordinate that shares a
+ * string namespace with csv ids and silently collides — e.g. JBIL
+ * `source_item "123"` equals csv id `123` ("to jump"), so keying the
+ * `ice`+`snow` group on "123" made it share a flag slot with "to jump". Keying
+ * on a member id can never collide with another concept: the member rows belong
+ * to this group and to no other concept.
+ */
+function canonicalConceptKey(memberIds: readonly string[]): string {
+  let best: string | null = null;
+  let bestNum = Number.POSITIVE_INFINITY;
+  for (const id of memberIds) {
+    const n = Number(id);
+    if (Number.isFinite(n)) {
+      if (n < bestNum) {
+        bestNum = n;
+        best = id;
+      }
+    } else if (best === null) {
+      // Non-numeric ids are not expected in the live corpus; fall back to the
+      // first member in declaration order so the key is still deterministic.
+      best = id;
+    }
+  }
+  return best ?? memberIds[0] ?? '';
 }
 
 function fallbackVariantLabel(index: number): string {
@@ -195,7 +220,6 @@ export function groupConceptEntries(
   resolveVariantTag?: ResolveVariantTag,
 ): Concept[] {
   const sourceBuckets = new Map<string, number[]>();
-  const sourceBucketKeysByItem = new Map<string, Set<string>>();
   rawConcepts.forEach((entry, index) => {
     const sourceItem = normalizeSourceItem(entry.source_item);
     if (!sourceItem) return;
@@ -203,16 +227,7 @@ export function groupConceptEntries(
     const bucket = sourceBuckets.get(bucketKey) ?? [];
     bucket.push(index);
     sourceBuckets.set(bucketKey, bucket);
-    const bucketKeys = sourceBucketKeysByItem.get(sourceItem) ?? new Set<string>();
-    bucketKeys.add(bucketKey);
-    sourceBucketKeysByItem.set(sourceItem, bucketKeys);
   });
-
-  const sourceItemsWithMultipleGroupedBuckets = new Set<string>();
-  for (const [sourceItem, bucketKeys] of sourceBucketKeysByItem.entries()) {
-    const groupedBucketCount = Array.from(bucketKeys).filter((bucketKey) => (sourceBuckets.get(bucketKey)?.length ?? 0) >= 2).length;
-    if (groupedBucketCount >= 2) sourceItemsWithMultipleGroupedBuckets.add(sourceItem);
-  }
 
   const grouped: Concept[] = [];
   const emittedSourceItems = new Set<string>();
@@ -246,7 +261,7 @@ export function groupConceptEntries(
 
     grouped.push({
       id: emittedId,
-      key: groupedConceptKey(sourceItem, entry.source_survey, sourceItemsWithMultipleGroupedBuckets),
+      key: canonicalConceptKey(conceptKeys),
       name: variantStemFor(siblingEntries.map((sibling) => sibling.label)),
       tag: resolveTag(conceptKeys),
       sourceItem,

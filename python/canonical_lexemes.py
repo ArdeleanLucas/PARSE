@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -47,7 +48,45 @@ def load_enrichments(project_root: Path) -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return {"manual_overrides": {}}
-    return payload if isinstance(payload, dict) else {"manual_overrides": {}}
+    if not isinstance(payload, dict):
+        return {"manual_overrides": {}}
+    _promote_safe_legacy_concept_keys(project_root, payload)
+    return payload
+
+
+def _promote_safe_legacy_concept_keys(project_root: Path, payload: dict[str, Any]) -> None:
+    """Read-time safety net: promote decision data from SAFE legacy concept keys
+    (grouped concepts' old ``source_item`` keys) to their canonical csv-id keys,
+    so safe data stays visible even if the on-disk migration has not run. Never
+    touches the 9 ambiguous/collided keys, and never raises — a failure here must
+    not break enrichment loading. See python/migration/concept_key_namespace.py.
+    """
+    try:
+        try:
+            from migration.concept_key_namespace import (
+                build_remap_for_workspace,
+                promote_safe_legacy_keys,
+                scan_legacy_keys,
+            )
+        except ImportError:
+            from python.migration.concept_key_namespace import (  # type: ignore
+                build_remap_for_workspace,
+                promote_safe_legacy_keys,
+                scan_legacy_keys,
+            )
+        remap = build_remap_for_workspace(project_root)
+        if not remap:
+            return
+        promote_safe_legacy_keys(payload, remap)
+        pending = [e for e in scan_legacy_keys(payload, remap) if e["classification"] == "AMBIGUOUS"]
+        if pending:
+            logging.getLogger(__name__).warning(
+                "parse-enrichments.json has %d ambiguous legacy concept key(s) needing "
+                "migration triage (run python/scripts/migrate_concept_key_namespace.py): %s",
+                len(pending), pending,
+            )
+    except Exception:  # pragma: no cover - defensive: loading must never fail here
+        return
 
 
 def save_enrichments_atomic(project_root: Path, payload: Mapping[str, Any]) -> None:

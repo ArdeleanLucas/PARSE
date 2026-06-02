@@ -65,6 +65,8 @@ parity/harness/                  -- oracle-vs-rebuild diff harness + tests
 
 For the canonical "where does code live now?" reference, use [Post-decomp File Map](./architecture/post-decomp-file-map.md).
 
+For how workspace data is stored and how review decisions are keyed (and the keying/migration model behind `parse-enrichments.json`), see [Data Persistence & Keying Model](./data-persistence-model.md).
+
 ## Tech stack summary
 
 ### Frontend

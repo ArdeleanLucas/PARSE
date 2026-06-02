@@ -38,7 +38,9 @@ describe('groupConceptEntries', () => {
     expect(grouped).toHaveLength(3);
     expect(grouped[0]).toMatchObject({
       id: 1,
-      key: '2.15',
+      // Key is the canonical member id (first in declaration order for
+      // non-numeric ids), never the survey-local source_item "2.15".
+      key: 'concept-a',
       name: 'brother of husband',
       sourceItem: '2.15',
       sourceSurvey: 'KLQ',
@@ -94,7 +96,7 @@ describe('groupConceptEntries', () => {
 
     const grouped = groupConceptEntries(entries, untagged);
 
-    expect(grouped[0]).toMatchObject({ key: 'KLQ_1.10', surveys: { klq: 'KLQ_1.10', jbil: 'JBIL_100' } });
+    expect(grouped[0]).toMatchObject({ key: 'concept-a', surveys: { klq: 'KLQ_1.10', jbil: 'JBIL_100' } });
     expect(grouped[1]).toMatchObject({ key: 'concept-c', surveys: { klq: 'KLQ_2.1' } });
   });
 
@@ -110,7 +112,7 @@ describe('groupConceptEntries', () => {
     expect(grouped).toHaveLength(2);
     expect(grouped[0]).toMatchObject({ key: '88', name: 'white', sourceSurvey: 'KLQ', sourceItem: '5.1' });
     expect(grouped[0].variants).toBeUndefined();
-    expect(grouped[1]).toMatchObject({ key: '5.1', sourceSurvey: 'EXT', sourceItem: '5.1' });
+    expect(grouped[1]).toMatchObject({ key: '563', sourceSurvey: 'EXT', sourceItem: '5.1' });
     expect(grouped[1].variants?.map((variant) => variant.conceptKey)).toEqual(['563', '596']);
   });
 
@@ -125,7 +127,10 @@ describe('groupConceptEntries', () => {
     const grouped = groupConceptEntries(entries, untagged);
 
     expect(grouped).toHaveLength(2);
-    expect(grouped.map((concept) => concept.key)).toEqual(['source:KLQ:5.1', 'source:EXT:5.1']);
+    // Distinct canonical member ids disambiguate the two same-item buckets
+    // naturally — no synthetic `source:` prefix needed, and never the shared
+    // source_item "5.1".
+    expect(grouped.map((concept) => concept.key)).toEqual(['88a', '563']);
     expect(grouped.map((concept) => concept.sourceItem)).toEqual(['5.1', '5.1']);
     expect(grouped.map((concept) => concept.sourceSurvey)).toEqual(['KLQ', 'EXT']);
   });
@@ -236,10 +241,12 @@ describe('groupConceptEntries', () => {
       { id: '527', label: 'head' },
     ];
 
-    const grouped = groupConceptEntries(entries, untagged, { '2.47': ['527'] });
+    // The merge is keyed by the group's canonical key ('247'), as the UI now
+    // emits it — not the legacy source_item key '2.47'.
+    const grouped = groupConceptEntries(entries, untagged, { '247': ['527'] });
 
     expect(grouped).toHaveLength(1);
-    expect(grouped[0].key).toBe('2.47');
+    expect(grouped[0].key).toBe('247');
     expect(grouped[0].mergedKeys).toEqual(['247', '248', '527']);
     expect(grouped[0].mergeAbsorbedNames).toEqual(['head']);
     expect(grouped[0].variants?.map((variant) => variant.conceptKey)).toEqual(['247', '248']);
@@ -287,7 +294,7 @@ describe('findConceptByUnderlyingKey', () => {
       { id: '600', label: 'water' },
     ], untagged);
 
-    expect(findConceptByUnderlyingKey(concepts, '248')?.key).toBe('2.47');
+    expect(findConceptByUnderlyingKey(concepts, '248')?.key).toBe('247');
   });
 
   it('returns the merged primary when key matches any mergedKey', () => {

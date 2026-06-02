@@ -124,6 +124,7 @@ For setup and the full automation reference, see the [MCP Guide](docs/mcp-guide.
 
 **Core Concepts**
 - [Architecture Overview](docs/architecture/compute.md) — Includes diagrams of the worker system
+- [Data Persistence &amp; Keying Model](docs/data-persistence-model.md) — how review decisions are keyed/stored, and the migration model
 - [How Long-File Processing Works](docs/architecture/long-file-processing.md)
 - [Chunking &amp; Subprocess Isolation](docs/architecture/chunking.md)
 - [Device Selection (CPU/GPU)](docs/architecture/device-selection.md)
