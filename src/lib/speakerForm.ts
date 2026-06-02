@@ -41,8 +41,10 @@ export interface SpeakerForm {
   variantCount: number;
   similarityByLang: Record<string, number | null>;
   cognate: string;
-  /** Raw concept id used for cognate, similarity, and per-speaker flag round-trip. */
+  /** Raw concept id used for cognate and similarity reads. */
   cognateKey?: string;
+  /** UID key used for per-speaker flag round-trip; v1 is concept+speaker and can later add a stable realization qualifier. */
+  flagKey?: string;
   flagged: boolean;
   startSec: number | null;
   endSec: number | null;
@@ -179,7 +181,7 @@ function readCompareDecisionFields(
   cognateKey: string,
   speaker: string,
   primaryContactCodes: readonly string[],
-): Pick<SpeakerForm, 'similarityByLang' | 'cognate' | 'flagged'> {
+): Pick<SpeakerForm, 'similarityByLang' | 'cognate'> {
   const similarityRoot = isRecord(enrichments.similarity) ? enrichments.similarity : null;
   const conceptSimilarity = similarityRoot && isRecord(similarityRoot[cognateKey]) ? similarityRoot[cognateKey] as Record<string, unknown> : null;
   const speakerSimilarity = conceptSimilarity && isRecord(conceptSimilarity[speaker]) ? conceptSimilarity[speaker] as Record<string, unknown> : null;
@@ -216,12 +218,21 @@ function readCompareDecisionFields(
     }
   }
 
-  // Per-speaker flag: overrides.speaker_flags[conceptKey][speaker] = true.
-  const flagsBlock = overrides && isRecord(overrides.speaker_flags) ? overrides.speaker_flags as Record<string, unknown> : null;
-  const conceptFlags = flagsBlock && isRecord(flagsBlock[cognateKey]) ? flagsBlock[cognateKey] as Record<string, unknown> : null;
-  const flagged = !!(conceptFlags && conceptFlags[speaker]);
+  return { similarityByLang, cognate };
+}
 
-  return { similarityByLang, cognate, flagged };
+function readSpeakerFlag(
+  enrichments: Record<string, unknown>,
+  flagKey: string,
+  speaker: string,
+): boolean {
+  const overrides = isRecord(enrichments.manual_overrides) ? enrichments.manual_overrides as Record<string, unknown> : null;
+  // Per-speaker flag v1: overrides.speaker_flags[conceptUid][speaker] = true.
+  // Keep this concept+speaker key centralized so a future stable realization
+  // qualifier can be added without changing component call sites.
+  const flagsBlock = overrides && isRecord(overrides.speaker_flags) ? overrides.speaker_flags as Record<string, unknown> : null;
+  const conceptFlags = flagsBlock && isRecord(flagsBlock[flagKey]) ? flagsBlock[flagKey] as Record<string, unknown> : null;
+  return !!(conceptFlags && conceptFlags[speaker]);
 }
 
 export function buildSpeakerForm(
@@ -260,6 +271,7 @@ export function buildSpeakerForm(
       : readCanonicalOverride(canonicalOverrides, concept.key, speaker, realizations.length);
     const canonical = realizations[selectedIdx];
     const cognateKey = concept.mergedKeys[selectedIdx] ?? concept.key;
+    const flagKey = concept.key;
     const decision = readCompareDecisionFields(enrichments, cognateKey, speaker, primaryContactCodes);
     return {
       speaker,
@@ -269,8 +281,9 @@ export function buildSpeakerForm(
       variantCount: realizations.length,
       similarityByLang: decision.similarityByLang,
       cognateKey,
+      flagKey,
       cognate: decision.cognate,
-      flagged: decision.flagged,
+      flagged: readSpeakerFlag(enrichments, flagKey, speaker),
       startSec: canonical?.startSec ?? null,
       endSec: canonical?.endSec ?? null,
       realizations,
@@ -288,6 +301,7 @@ export function buildSpeakerForm(
       : readCanonicalOverride(canonicalOverrides, concept.key, speaker, realizations.length);
     const canonical = realizations[selectedIdx];
     const cognateKey = concept.variants[selectedIdx]?.conceptKey ?? concept.key;
+    const flagKey = concept.key;
     const decision = readCompareDecisionFields(enrichments, cognateKey, speaker, primaryContactCodes);
     return {
       speaker,
@@ -297,8 +311,9 @@ export function buildSpeakerForm(
       variantCount: realizations.length,
       similarityByLang: decision.similarityByLang,
       cognateKey,
+      flagKey,
       cognate: decision.cognate,
-      flagged: decision.flagged,
+      flagged: readSpeakerFlag(enrichments, flagKey, speaker),
       startSec: canonical?.startSec ?? null,
       endSec: canonical?.endSec ?? null,
       realizations,
@@ -325,6 +340,7 @@ export function buildSpeakerForm(
   const canonical = realizations[selectedIdx];
   const variantCount = realizations.length;
   const cognateKey = concept.key;
+  const flagKey = concept.key;
   const decision = readCompareDecisionFields(enrichments, cognateKey, speaker, primaryContactCodes);
 
   return {
@@ -335,8 +351,9 @@ export function buildSpeakerForm(
     variantCount,
     similarityByLang: decision.similarityByLang,
     cognateKey,
+    flagKey,
     cognate: decision.cognate,
-    flagged: decision.flagged,
+    flagged: readSpeakerFlag(enrichments, flagKey, speaker),
     startSec: canonical?.startSec ?? null,
     endSec: canonical?.endSec ?? null,
     realizations,

@@ -1152,7 +1152,7 @@ export function SpeakerFormsTable({
                         title={`Toggle flag for ${speaker}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onToggleSpeakerFlag?.(speaker, Boolean(form?.flagged), form?.cognateKey ?? conceptKey);
+                          onToggleSpeakerFlag?.(speaker, Boolean(form?.flagged), form?.flagKey ?? conceptKey);
                         }}
                         className={`inline-grid h-6 w-6 place-items-center rounded-md ${
                           form?.flagged

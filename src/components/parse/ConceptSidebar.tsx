@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Search, X } from 'lucide-react';
+import { Flag, Search, X } from 'lucide-react';
 
 import { deleteConceptSurveyLink, setConceptSurveyLink } from '../../api/client';
 import { useConfigStore } from '../../stores/configStore';
@@ -80,6 +80,7 @@ interface ConceptSidebarProps {
   onSourceSubChange: (sub: ConceptSortSourceSub) => void;
   sourceDisabled: boolean;
   filteredConcepts: SidebarConcept[];
+  flaggedConceptKeys?: ReadonlySet<string>;
   statusFilter: ConceptStatusFilter;
   onStatusFilterChange: (filter: ConceptStatusFilter) => void;
   selectedTagIds: Set<string>;
@@ -203,6 +204,7 @@ export function ConceptSidebar({
   onSourceSubChange,
   sourceDisabled,
   filteredConcepts,
+  flaggedConceptKeys = new Set<string>(),
   statusFilter,
   onStatusFilterChange,
   selectedTagIds,
@@ -632,6 +634,7 @@ export function ConceptSidebar({
             && !(hasVariants && visibleVariants.some((variant) => variant.conceptKey === activeConceptKey));
           const parentActive = !!(concept.id === activeConceptId && (!activeConceptKey || activeConceptKey === concept.key || concept.mergedKeys?.includes(activeConceptKey) || activeIsHiddenVariant));
           const parentName = concept.name;
+          const conceptFlagged = flaggedConceptKeys.has(concept.key ?? String(concept.id));
           const noDataSuffix = !isElicited && !scopedToSpeaker && hasElicitedScope ? ' no data' : '';
           const mergeCountSuffix = concept.mergedKeys && concept.mergedKeys.length > 1 ? ` +${concept.mergedKeys.length - 1}` : '';
           const variantSuffix = hasVariants
@@ -657,10 +660,17 @@ export function ConceptSidebar({
                   }}
                   className={`group flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition ${parentActive ? 'bg-indigo-50 text-indigo-900' : inactiveRowClass}`}
                 >
-                  <span className={`h-1.5 w-1.5 rounded-full ${tagDot[concept.tag]}`} />
+                  <span data-testid={`concept-status-dot-${concept.id}`} className={`h-1.5 w-1.5 rounded-full ${tagDot[concept.tag]}`} />
                   <span className={`flex-1 text-[13px] ${parentActive ? 'font-semibold' : 'font-medium'}`}>{parentName}{!isElicited && !scopedToSpeaker && hasElicitedScope && (
                     <span className="ml-1 text-[10px] italic text-slate-400">no data</span>
                   )}</span>
+                  {conceptFlagged && (
+                    <Flag
+                      aria-label={`${parentName} flagged`}
+                      data-testid={`concept-flag-rollup-${concept.id}`}
+                      className="h-3 w-3 shrink-0 text-rose-500"
+                    />
+                  )}
                   {concept.mergedKeys && concept.mergedKeys.length > 1 && (
                     <span
                       title={(concept.mergeAbsorbedNames ?? []).join(', ')}

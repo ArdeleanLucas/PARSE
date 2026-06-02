@@ -19,6 +19,35 @@ afterEach(() => {
 
 describe('ConceptSidebar', () => {
 
+  it('renders speaker-flag roll-up marker without replacing the concept status dot', () => {
+    render(
+      <ConceptSidebar
+        query=""
+        onQueryChange={vi.fn()}
+        sortParent="concept"
+        conceptSub="az"
+        sourceSub="time"
+        onSortParentChange={vi.fn()}
+        onConceptSubChange={vi.fn()}
+        onSourceSubChange={vi.fn()}
+        sourceDisabled={false}
+        filteredConcepts={[{ id: 2, key: 'uid:fire', name: 'fire', tag: 'confirmed' as const, sourceItem: '2.1' }]}
+        flaggedConceptKeys={new Set(['uid:fire'])}
+        statusFilter="all"
+        onStatusFilterChange={vi.fn()}
+        selectedTagIds={new Set()}
+        onTagSelectionChange={vi.fn()}
+        tags={[]}
+        activeConceptId={2}
+        activeRealizationKey="uid:fire:0"
+        onConceptSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('concept-status-dot-2').className).toContain('bg-emerald-500');
+    expect(screen.getByTestId('concept-flag-rollup-2').getAttribute('class')).toContain('text-rose-500');
+  });
+
 
   it('Path 1: variant chip click emits realization key with interval_index 0', () => {
     const onConceptSelect = vi.fn();
