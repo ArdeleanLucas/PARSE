@@ -21,6 +21,11 @@ from survey_overlap import concept_survey_links_for_row, load_survey_overlap_sta
 
 _WS_RE = re.compile(r"\s+")
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+_ALNUM_RE = re.compile(r"[^a-z0-9]")
+_TOKEN_RE = re.compile(r"[^a-z0-9]+")
+# Below this token-overlap ratio, two glosses joined by a shared (survey, item)
+# are treated as genuinely different concepts and the merge is flagged.
+_GLOSS_MISMATCH_JACCARD = 0.34
 BUCKET_SEP = "\u0000"
 
 
@@ -34,6 +39,41 @@ def _variant_label(label: str) -> str:
 
 def _stem_key(label: str) -> str:
     return _WS_RE.sub(" ", _stem(label).casefold()).strip()
+
+
+def _gloss_canon(label: str) -> str:
+    return _ALNUM_RE.sub("", str(label or "").casefold())
+
+
+def _gloss_tokens(label: str) -> set[str]:
+    return {token for token in _TOKEN_RE.split(str(label or "").casefold()) if token}
+
+
+def _gloss_mismatch(label_a: str, label_b: str) -> bool:
+    """Heuristic: do two glosses joined by a shared (survey, item) look like
+    genuinely different concepts?
+
+    Conservative on purpose — it must NOT fire on the many legitimate cosmetic
+    variants in survey data: a clarifier ("salt (eating)" vs "salt"), punctuation
+    or hyphenation ("twenty-one" vs "twenty one", "hill ?" vs "hill"), or a
+    sentence that contains the bare word. Those are caught by the
+    identical/substring check on the alphanumeric forms. Only when the canonical
+    forms diverge AND token overlap is low do we flag it — which is what a bad
+    cross-survey link looks like (e.g. "fog" joined to "rain", "snow" to "ice").
+
+    Flagging is advisory: the merge still happens. The signal is surfaced in the
+    bundle's warnings for human review, never used to silently re-shape grouping.
+    """
+    canon_a, canon_b = _gloss_canon(label_a), _gloss_canon(label_b)
+    if not canon_a or not canon_b:
+        return False
+    if canon_a == canon_b or canon_a in canon_b or canon_b in canon_a:
+        return False
+    tokens_a, tokens_b = _gloss_tokens(label_a), _gloss_tokens(label_b)
+    if not tokens_a or not tokens_b:
+        return False
+    jaccard = len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
+    return jaccard < _GLOSS_MISMATCH_JACCARD
 
 
 def _slug(stem: str) -> str:
@@ -344,6 +384,12 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
     row_order: list[str] = []
     stem_rep: dict[str, str] = {}
     pair_rep: dict[tuple[str, str], str] = {}
+    # (row_a, row_b, message) for cross-survey links that join two rows whose
+    # glosses look like different concepts. The merge still happens (behavior is
+    # unchanged); the message is surfaced in the affected bundle's warnings so a
+    # reviewer can spot a bad link (e.g. "fog" linked to "rain") instead of it
+    # silently fabricating a phantom variant.
+    link_mismatch_warnings: list[tuple[str, str, str]] = []
     for row in rows:
         rid = str(row.get("id"))
         row_by_id[rid] = row
@@ -360,7 +406,19 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
             if not pair[0] or not pair[1]:
                 continue
             if pair in pair_rep:
-                _union(pair_rep[pair], rid)
+                other = pair_rep[pair]
+                other_gloss = str(row_by_id[other].get("concept_en", ""))
+                this_gloss = str(row.get("concept_en", ""))
+                if other != rid and _gloss_mismatch(other_gloss, this_gloss):
+                    link_mismatch_warnings.append(
+                        (
+                            other,
+                            rid,
+                            f"cross-survey link {pair[0]}:{pair[1]} joins '{other_gloss}' (row {other}) "
+                            f"with '{this_gloss}' (row {rid}); their glosses differ — verify the link",
+                        )
+                    )
+                _union(other, rid)
             else:
                 pair_rep[pair] = rid
 
@@ -403,6 +461,10 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
                 key2 = _bucket_key(survey_id, source_item)
                 bucket = bucket_map.setdefault(key2, {"bucket_key": key2, "survey_id": survey_id, "source_item": source_item, "variants": []})
                 bucket["variants"].append({"csv_row_id": row_id, "variant_label": _variant_label(row.get("concept_en", "")), "concept_en": row.get("concept_en", "")})
+        row_id_set = set(row_ids)
+        for row_a, row_b, message in link_mismatch_warnings:
+            if row_a in row_id_set or row_b in row_id_set:
+                warnings.append(message)
         bundle = {"bundle_id": bid, "label": group["label"], "row_ids": row_ids, "buckets": list(bucket_map.values()), "candidates": {}, "canonical": {}, "warnings": warnings}
         concept_links = overlap.get("concept_survey_links") if isinstance(overlap, Mapping) else None
         bundle["concept_survey_links"] = {

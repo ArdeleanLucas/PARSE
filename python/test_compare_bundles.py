@@ -226,6 +226,53 @@ def test_speaker_concept_survey_links_take_precedence_over_legacy_bucket(tmp_pat
     assert any(variant["csv_row_id"] == "53" for variant in bucket_by_key["jbil\u0000169"]["variants"])
 
 
+def test_cross_gloss_link_warns_but_still_merges(tmp_path: pathlib.Path) -> None:
+    # A bad cross-survey link joins two genuinely different concepts (a "fog" row
+    # and a "rain" row that share a survey item only because the link is wrong).
+    # Grouping is unchanged — the rows still merge into one bundle — but the
+    # bundle must surface a gloss-mismatch warning so the bad link is visible
+    # instead of silently fabricating a phantom A/B variant.
+    _seed_concepts(
+        tmp_path,
+        [
+            {"id": "142", "concept_en": "rain", "source_item": "125", "source_survey": "JBIL"},
+            {"id": "537", "concept_en": "fog", "source_item": "3.9", "source_survey": "KLQ"},
+        ],
+    )
+    (tmp_path / "survey-overlap.json").write_text(
+        json.dumps({"concept_survey_links": {"537": {"jbil": "125"}}}),
+        encoding="utf-8",
+    )
+
+    bundles = build_compare_bundles(tmp_path, speakers=[])["bundles"]
+    merged = [bundle for bundle in bundles if set(bundle["row_ids"]) == {"142", "537"}]
+    assert len(merged) == 1, "behavior preserved: the rows still merge into one bundle"
+    warnings = merged[0]["warnings"]
+    assert any("glosses differ" in w and "fog" in w and "rain" in w for w in warnings), warnings
+
+
+def test_clarifier_variant_link_does_not_warn(tmp_path: pathlib.Path) -> None:
+    # "salt" and "salt (eating)" are the same concept across two surveys — a
+    # clarifier difference, not a different concept. They must merge WITHOUT a
+    # gloss-mismatch warning (the heuristic ignores substring/clarifier glosses).
+    _seed_concepts(
+        tmp_path,
+        [
+            {"id": "52", "concept_en": "salt", "source_item": "3.14", "source_survey": "KLQ"},
+            {"id": "352", "concept_en": "salt (eating)", "source_item": "139", "source_survey": "JBIL"},
+        ],
+    )
+    (tmp_path / "survey-overlap.json").write_text(
+        json.dumps({"concept_survey_links": {"52": {"jbil": "139"}, "352": {"klq": "3.14"}}}),
+        encoding="utf-8",
+    )
+
+    bundles = build_compare_bundles(tmp_path, speakers=[])["bundles"]
+    merged = [bundle for bundle in bundles if set(bundle["row_ids"]) == {"52", "352"}]
+    assert len(merged) == 1
+    assert merged[0]["warnings"] == [], merged[0]["warnings"]
+
+
 def test_bundle_emits_scoped_survey_overlap_snapshot(tmp_path: pathlib.Path) -> None:
     _seed_concepts(tmp_path, _big_rows())
     (tmp_path / "survey-overlap.json").write_text(
