@@ -296,6 +296,41 @@ def test_clarifier_variant_link_does_not_warn(tmp_path: pathlib.Path) -> None:
     assert merged[0]["warnings"] == [], merged[0]["warnings"]
 
 
+def test_same_survey_variants_sharing_item_do_not_warn(tmp_path: pathlib.Path) -> None:
+    # Two A/B variants of one concept in the SAME survey share their native
+    # (survey, item) — they are not a cross-survey link and must NOT produce a
+    # gloss-mismatch warning, even though their glosses differ by "(A)"/"(B)".
+    _seed_concepts(tmp_path, _big_rows())  # "big (A)" / "big (B)" both on KLQ 4.1
+
+    bundles = build_compare_bundles(tmp_path, speakers=[])["bundles"]
+    all_warnings = [w for bundle in bundles for w in bundle["warnings"]]
+    assert not any(
+        ("glosses differ" in w) or ("cross-survey link" in w) or ("verify the link" in w)
+        for w in all_warnings
+    ), all_warnings
+
+
+def test_diacritic_only_difference_does_not_warn(tmp_path: pathlib.Path) -> None:
+    # A cross-survey link between glosses that differ only by diacritics must not
+    # warn: NFKD folds "naïve" to "naive".
+    _seed_concepts(
+        tmp_path,
+        [
+            {"id": "1", "concept_en": "naïve", "source_item": "1.1", "source_survey": "KLQ"},
+            {"id": "2", "concept_en": "naive", "source_item": "5", "source_survey": "JBIL"},
+        ],
+    )
+    (tmp_path / "survey-overlap.json").write_text(
+        json.dumps({"concept_survey_links": {"1": {"jbil": "5"}}}),
+        encoding="utf-8",
+    )
+
+    bundles = build_compare_bundles(tmp_path, speakers=[])["bundles"]
+    merged = [bundle for bundle in bundles if set(bundle["row_ids"]) == {"1", "2"}]
+    assert len(merged) == 1
+    assert merged[0]["warnings"] == [], merged[0]["warnings"]
+
+
 def test_bundle_emits_scoped_survey_overlap_snapshot(tmp_path: pathlib.Path) -> None:
     _seed_concepts(tmp_path, _big_rows())
     (tmp_path / "survey-overlap.json").write_text(
