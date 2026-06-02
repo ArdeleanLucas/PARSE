@@ -29,8 +29,22 @@ import csv
 import json
 import sys
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
+
+# Reuse the backend's canonical writer so re-keyed files stay byte-compatible
+# with how the server persists enrichments (ensure_ascii=False, sort_keys,
+# trailing newline). Falls back to an inline writer if run outside the tree.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+try:
+    from canonical_lexemes import save_enrichments_atomic  # type: ignore
+except Exception:  # pragma: no cover - standalone fallback
+    save_enrichments_atomic = None
+
+
+def _dump_enrichments(payload: Mapping[str, Any]) -> str:
+    return json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 CONCEPT_KEYED_BLOCKS = (
     "speaker_flags",
@@ -137,11 +151,21 @@ def migrate(workspace: Path, execute: bool) -> dict[str, Any]:
     touched: list[dict] = []
     ambiguous: list[dict] = []
 
+    def _safe_new(key: str) -> str:
+        entry = remap.get(key)
+        return entry["new_key"] if entry and entry["classification"] == "SAFE" else key
+
     def migrate_container(container: dict):
         for name in CONCEPT_KEYED_BLOCKS:
             block = container.get(name)
-            if isinstance(block, dict):
-                container[name] = _remap_dict_keys(block, remap, touched, ambiguous, name)
+            if not isinstance(block, dict):
+                continue
+            container[name] = _remap_dict_keys(block, remap, touched, ambiguous, name)
+            # concept_merges values are absorbed concept keys — re-key them too.
+            if name == "concept_merges":
+                for k, arr in container[name].items():
+                    if isinstance(arr, list):
+                        container[name][k] = [_safe_new(_norm(x)) for x in arr]
 
     if isinstance(enr.get("manual_overrides"), dict):
         migrate_container(enr["manual_overrides"])
@@ -171,10 +195,17 @@ def migrate(workspace: Path, execute: bool) -> dict[str, Any]:
 
     if execute:
         if touched:
-            backup = enr_path.with_suffix(".json.bak-pre-key-namespace")
-            backup.write_text(json.dumps(json.loads(enr_path.read_text()), indent=2))
-            enr_path.write_text(json.dumps(enr, indent=2))
-        report["backup_written"] = bool(touched)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            backup = enr_path.with_name(f"{enr_path.name}.bak-{stamp}-pre-key-namespace")
+            # Backup the original bytes verbatim — do not reformat what we preserve.
+            backup.write_text(enr_path.read_text(encoding="utf-8"), encoding="utf-8")
+            if save_enrichments_atomic is not None:
+                save_enrichments_atomic(workspace, enr)
+            else:  # pragma: no cover
+                enr_path.write_text(_dump_enrichments(enr), encoding="utf-8")
+            report["backup_written"] = str(backup.name)
+        else:
+            report["backup_written"] = None
     return report
 
 
