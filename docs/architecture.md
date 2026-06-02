@@ -6,6 +6,8 @@
 
 PARSE is a research workstation rather than a single-purpose annotator. Its architecture is designed to keep per-speaker timing work, cross-speaker comparison, AI-assisted workflows, and export pipelines in one coherent system.
 
+> For how data lives on disk — workspace files, how review decisions are keyed, and the keying/migration model — see [Data Persistence & Keying Model](./data-persistence-model.md).
+
 ## System overview
 
 ```mermaid

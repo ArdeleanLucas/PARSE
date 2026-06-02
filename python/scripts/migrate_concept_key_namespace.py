@@ -7,6 +7,9 @@ Usage:
 Dry-run by default (reports planned changes, writes nothing). Pass ``--execute``
 to apply. Stop the PARSE server before ``--execute`` so parse-enrichments.json
 cannot be written concurrently by the server.
+
+See docs/data-persistence-model.md for the overall persistence/keying model and
+docs/reports/2026-06-02-concept-key-namespace-collision.md for the rationale.
 """
 from __future__ import annotations
 

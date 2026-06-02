@@ -20,6 +20,10 @@ Concept-key-keyed blocks migrated:
   ``bundle:<slug>``, not a concept key) and ``parse-tags.json`` (tag.concepts
   hold csv ids, already id-namespaced).
 
+User-facing overview of the persistence/keying model and this migration:
+``docs/data-persistence-model.md``. Full historical rationale:
+``docs/reports/2026-06-02-concept-key-namespace-collision.md``.
+
 Operational note: stop the PARSE server before running with ``execute=True`` so
 ``parse-enrichments.json`` cannot be written concurrently by the server. The
 writer is atomic (temp+rename) and this module re-reads the file immediately
