@@ -40,10 +40,10 @@ import {
   resolveReferenceFormLists,
 } from './lib/referenceFormParsing';
 import { buildSpeakerForm } from './lib/speakerForm';
-import { normalizeBundles } from './lib/compareBundles';
+import { findCompareBundleForConcept, normalizeBundles } from './lib/compareBundles';
 import { conceptMatchesElicitedKeys, conceptUnderlyingKeys, speakerElicitedConceptKeys } from './lib/speakerElicitedConcepts';
 import { buildSpeakerSortKeys } from './lib/speakerSortKeys';
-import { buildRealizationKey, findConceptByUnderlyingKey, groupConceptEntries, parseRealizationKey, resolveModeSwitchSelection } from './lib/conceptGrouping';
+import { buildRealizationKey, classifyConceptIdentity, findConceptByUnderlyingKey, groupConceptEntries, parseRealizationKey, resolveModeSwitchSelection } from './lib/conceptGrouping';
 import { buildElicitationDetailsByConceptKey } from './lib/elicitationDetails';
 import { isConceptVariantVisibleInSidebar as evaluateConceptVariantVisibleInSidebar } from './lib/sidebarVisibility';
 import type { Concept, SpeakerForm } from './lib/speakerForm';
@@ -383,6 +383,16 @@ export function ParseUI() {
   const [compareBundlesError, setCompareBundlesError] = useState<string | null>(null);
   const [conceptIdentity, setConceptIdentity] = useState<ConceptIdentityResponse | null>(null);
   const [conceptIdentityError, setConceptIdentityError] = useState<string | null>(null);
+  // Distinguish "identity failed to load" from "identity legitimately empty":
+  // both leave `conceptIdentity` falsy, but only a legitimately-empty identity
+  // may use the legacy `(survey, source_item)` grouping + collision-prone
+  // `row_ids.includes` bundle routing. A load failure must not silently take
+  // that path (see findCompareBundleForConcept / classifyConceptIdentity).
+  const conceptIdentityStatus = useMemo(
+    () => classifyConceptIdentity(conceptIdentity, conceptIdentityError),
+    [conceptIdentity, conceptIdentityError],
+  );
+  const conceptIdentityUnavailable = conceptIdentityStatus === 'unavailable';
 
 
   const writeSpeakerCognate = (conceptKey: string, speaker: string, nextGroup: string | null) => {
@@ -1580,12 +1590,16 @@ export function ParseUI() {
     };
   }, [annotationRecords, concept, speakerForms]);
   const activeCompareBundle = useMemo(() => {
-    const conceptUid = concept.key;
-    const matchedBundle = compareBundles.find((bundle) => bundle.uid === conceptUid || (!conceptIdentity?.concepts.length && bundle.row_ids.includes(conceptUid)));
+    // Allow the legacy row_ids fallback ONLY when identity is legitimately empty.
+    // On a load failure (`unavailable`) route by uid alone so a colliding row id
+    // can never silently attach this concept to the wrong bundle.
+    const matchedBundle = findCompareBundleForConcept(compareBundles, concept.key, {
+      allowRowIdFallback: conceptIdentityStatus === 'empty',
+    });
     if (matchedBundle) return matchedBundle;
     if (compareBundlesError !== null && compareBundles.length === 0) return fallbackCompareBundle;
     return null;
-  }, [compareBundles, compareBundlesError, concept.key, conceptIdentity, fallbackCompareBundle]);
+  }, [compareBundles, compareBundlesError, concept.key, conceptIdentityStatus, fallbackCompareBundle]);
   const selectedCompareSpeakers = useMemo(() => selectedSpeakers.filter((speaker) => speakers.includes(speaker)), [selectedSpeakers, speakers]);
   // Seed the mode-switch resolver with the clicked row so it navigates to that
   // concept and keeps the chosen realization index (mirrors the post-delete
@@ -2430,7 +2444,9 @@ export function ParseUI() {
               <SectionCard title={`Speaker forms · ${selectedSpeakers.length} selected`}
                 aside={<button className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-slate-800"><ArrowUpDown className="h-3 w-3"/> Sort by similarity</button>}>
                 {conceptIdentityError && (
-                  <div className="mb-3 rounded-lg border border-amber-100 bg-amber-50 p-4 text-xs text-amber-800" data-testid="concept-identity-error">{conceptIdentityError}</div>
+                  <div className="mb-3 rounded-lg border border-amber-100 bg-amber-50 p-4 text-xs text-amber-800" data-testid="concept-identity-error">
+                    <span className="font-semibold">Concept identity unavailable.</span> Compare bundle linkage is degraded — only exact identity matches are shown, to avoid mis-routing. {conceptIdentityError}
+                  </div>
                 )}
                 {compareBundlesError && (
                   <div className="mb-3 rounded-lg border border-rose-100 bg-rose-50 p-4 text-xs text-rose-700" data-testid="compare-bundle-error">{compareBundlesError}</div>
@@ -2452,7 +2468,11 @@ export function ParseUI() {
                     onToggleSpeakerFlag={(speaker, current, cognateKey) => toggleSpeakerFlag(cognateKey, speaker, current)}
                     onOpenInAnnotate={handleOpenInAnnotate}
                   />
-                ) : compareBundlesError ? null : compareBundles.length === 0 ? (
+                ) : compareBundlesError ? null : conceptIdentityUnavailable ? (
+                  <div className="rounded-lg border border-amber-100 bg-amber-50 p-4 text-xs text-amber-800" data-testid="compare-bundle-identity-unavailable">
+                    No identity-matched Compare bundle for &quot;{concept.name}&quot;. Concept identity failed to load, so legacy row-id routing is disabled to avoid attaching this concept to the wrong bundle. Reload to retry.
+                  </div>
+                ) : compareBundles.length === 0 ? (
                   <div className="rounded-lg border border-slate-100 bg-white p-4 text-xs text-slate-500" data-testid="compare-bundle-empty">
                     No Compare bundle is available for this concept yet.
                   </div>
