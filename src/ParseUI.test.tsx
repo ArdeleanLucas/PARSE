@@ -826,6 +826,74 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function makeIdentityCollisionBundle() {
+  return {
+    bundles: [{
+      bundle_id: "bundle:wrong-row-id-collision",
+      uid: "uid-for-something-else",
+      label: "wrong collision bundle",
+      row_ids: ["1"],
+      buckets: [{
+        bucket_key: "klq\u0000999",
+        survey_id: "klq",
+        source_item: "999",
+        variants: [{ csv_row_id: "1", concept_en: "wrong collision bundle", variant_label: "A" }],
+      }],
+      candidates: {
+        Fail01: {
+          "1": { csv_row_id: "1", ipa: "wrong-route", ortho: "wrong route", start_sec: 1, end_sec: 2, realization_index: 0 },
+        },
+      },
+      canonical: { Fail01: null },
+    }],
+  };
+}
+
+describe("MC-458-I concept identity load hardening", () => {
+  beforeEach(() => {
+    window.localStorage.setItem("parse.currentMode", "compare");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = {
+      Fail01: makeRecord("Fail01", [
+        { conceptText: "water", conceptId: "1", ipa: "ava", ortho: "ئاڤا", start: 1, end: 2 },
+      ]),
+    };
+    mockGetCompareBundles.mockResolvedValue(makeIdentityCollisionBundle());
+  });
+
+  it("keeps the legitimately empty identity fallback routing by row ids", async () => {
+    mockGetConceptIdentity.mockResolvedValue({ version: 1, concepts: [], uid_by_row: {}, warnings: [] });
+
+    render(<ParseUI />);
+
+    expect(await screen.findByTestId("speaker-forms-table")).toBeTruthy();
+    expect(screen.getByTestId("ipa-cell-Fail01").textContent).toContain("wrong-route");
+    expect(screen.queryByTestId("concept-identity-error")).toBeNull();
+  });
+
+  it("does not route by row ids when concept identity fails to load", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockGetConceptIdentity.mockRejectedValue(new Error("identity endpoint down"));
+
+    try {
+      render(<ParseUI />);
+
+      expect((await screen.findByTestId("concept-identity-error")).textContent).toContain("identity endpoint down");
+      await waitFor(() => expect(screen.getByTestId("compare-bundle-identity-unavailable").textContent).toContain('No identity-matched Compare bundle for "water".'));
+      expect(screen.queryByTestId("speaker-forms-table")).toBeNull();
+      expect(document.body.textContent).not.toContain("wrong-route");
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+});
 
 
 describe("MC-418-B add elicitation", () => {
