@@ -74,6 +74,7 @@ def test_api_post_survey_overlap_persists_labels_toggle_and_speaker_choices(tmp_
                 "concept_survey_links": {"salt": {"klq": "3.14", "jbil": "139"}},
                 "speaker_choices": {"Saha01": {"salt": "jbil"}},
                 "speaker_concept_survey_links": {},
+                "link_warnings": [],
             },
         )
     ]
@@ -115,7 +116,7 @@ def test_api_survey_overlap_returns_bare_state_without_envelope_keys(tmp_path: p
     either side, update both tests.
     """
     monkeypatch.chdir(tmp_path)
-    expected_keys = {
+    expected_state_keys = {
         "version",
         "color_coding_enabled",
         "surveys",
@@ -123,12 +124,13 @@ def test_api_survey_overlap_returns_bare_state_without_envelope_keys(tmp_path: p
         "speaker_choices",
         "speaker_concept_survey_links",
     }
+    expected_post_keys = expected_state_keys | {"link_warnings"}
 
     get_handler = _HandlerHarness()
     get_handler._api_get_survey_overlap()
     assert get_handler.sent[0][0] == HTTPStatus.OK
     get_payload = get_handler.sent[0][1]
-    assert set(get_payload.keys()) == expected_keys, get_payload
+    assert set(get_payload.keys()) == expected_state_keys, get_payload
     assert "survey_overlap" not in get_payload
     assert "success" not in get_payload
 
@@ -136,7 +138,7 @@ def test_api_survey_overlap_returns_bare_state_without_envelope_keys(tmp_path: p
     post_handler._api_post_survey_overlap()
     assert post_handler.sent[0][0] == HTTPStatus.OK
     post_payload = post_handler.sent[0][1]
-    assert set(post_payload.keys()) == expected_keys, post_payload
+    assert set(post_payload.keys()) == expected_post_keys, post_payload
     assert "survey_overlap" not in post_payload
     assert "success" not in post_payload
     assert post_payload["color_coding_enabled"] is True

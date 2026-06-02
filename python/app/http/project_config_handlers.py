@@ -20,6 +20,7 @@ from survey_overlap import (
     speaker_concept_survey_links_for_id,
     update_survey_overlap_state,
 )
+from survey_overlap_integrity import survey_overlap_link_warnings
 
 from .job_observability_handlers import JsonResponseSpec
 
@@ -718,7 +719,13 @@ def build_concept_survey_link_post_response(
             project_root,
             {"concept_survey_links": {str(first_row["id"]): {survey_id: source_item}}},
         )
-        return JsonResponseSpec(status=HTTPStatus.OK, payload=_build_concept_entry(first_row, state))
+        payload = _build_concept_entry(first_row, state)
+        payload["link_warnings"] = survey_overlap_link_warnings(
+            project_root,
+            state=state,
+            only_links={str(first_row["id"]): {survey_id: source_item}},
+        )
+        return JsonResponseSpec(status=HTTPStatus.OK, payload=payload)
 
     state = update_survey_overlap_state(
         project_root,
@@ -728,7 +735,9 @@ def build_concept_survey_link_post_response(
             }
         },
     )
-    return JsonResponseSpec(status=HTTPStatus.OK, payload=_build_concept_entry(first_row, state, speaker=speaker))
+    payload = _build_concept_entry(first_row, state, speaker=speaker)
+    payload["link_warnings"] = []
+    return JsonResponseSpec(status=HTTPStatus.OK, payload=payload)
 
 
 def build_concept_survey_link_delete_response(

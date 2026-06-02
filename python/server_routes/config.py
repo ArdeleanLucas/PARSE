@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import server as _server
-from survey_overlap import load_survey_overlap_state, update_survey_overlap_state
+from survey_overlap import load_survey_overlap_state, normalize_survey_overlap_state, update_survey_overlap_state
+from survey_overlap_integrity import survey_overlap_link_warnings
 
 def _workspace_frontend_config(base_config: _server.Optional[_server.Dict[str, _server.Any]]=None) -> _server.Dict[str, _server.Any]:
     return _server._app_build_workspace_frontend_config(_server._project_root(), base_config, schema_version=_server.CONFIG_SCHEMA_VERSION)
@@ -25,8 +26,14 @@ def _api_get_survey_overlap(self) -> None:
 def _api_post_survey_overlap(self) -> None:
     body = self._expect_object(self._read_json_body(), 'survey overlap payload')
     patch = self._expect_object(body.get('survey_overlap', body), 'survey_overlap')
-    state = update_survey_overlap_state(_server._project_root(), patch)
-    self._send_json(_server.HTTPStatus.OK, state)
+    project_root = _server._project_root()
+    state = update_survey_overlap_state(project_root, patch)
+    only_links = None
+    if isinstance(patch.get('concept_survey_links'), dict):
+        only_links = normalize_survey_overlap_state({'concept_survey_links': patch.get('concept_survey_links')})['concept_survey_links']
+    payload = dict(state)
+    payload['link_warnings'] = survey_overlap_link_warnings(project_root, state=state, only_links=only_links)
+    self._send_json(_server.HTTPStatus.OK, payload)
 
 def _api_auth_key(self) -> None:
     """POST /api/auth/key — store a direct API key."""
