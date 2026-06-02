@@ -71,7 +71,7 @@ Other top-level keys may be written by tools or pipelines (notes blocks, `*_appl
 | `cognate_decisions` | `{ conceptKey: { decision: "accepted" \| "split" \| "merge", ts: <epoch_ms> } }` | Adjudication status of a concept's grouping. (Falls back to a legacy top-level `cognate_decisions` if the manual one is absent.) |
 | `speaker_flags` | `{ conceptKey: { speakerId: true } }` | Per-speaker review flag; presence / `true` = flagged. |
 | `borrowing_flags` | `{ conceptKey: { speakerId: { … } } }` | Per-speaker borrowing annotation (the value is an object describing the call). |
-| `discarded_forms` | `{ conceptKey: … }` | Forms removed from comparison. |
+| `discarded_forms` | `{ conceptKey: { speakerId: <reason> } }` | A speaker's form excluded from comparison for that concept; the value is a short free-text reason. |
 | `concept_merges` | `{ primaryConceptKey: [absorbedConceptKey, …] }` | Analyst-declared "these concepts are one." **Both** the map keys and the array values are concept keys — migrations re-key both. |
 | `canonical_lexemes` | `{ bundleKey: { speakerId: { csv_row_id, survey_id, source_item, bucket_key, variant_label, realization_index, source } } }` | Which realization a speaker selected as canonical. **Keyed by a bundle key (`bundle:<slug>`), not a concept key.** |
 
