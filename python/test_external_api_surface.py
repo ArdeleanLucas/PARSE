@@ -586,6 +586,7 @@ def test_build_openapi_document_covers_compare_bundle_contract() -> None:
     components = spec["components"]["schemas"]
     for name in [
         "ConceptIdentityConcept",
+        "ConceptIdentityOverrideRequest",
         "ConceptIdentityResponse",
         "CompareBundle",
         "CompareBucket",
@@ -597,9 +598,15 @@ def test_build_openapi_document_covers_compare_bundle_contract() -> None:
     ]:
         assert name in components
 
-    assert spec["paths"]["/api/concept-identity"]["get"]["operationId"] == "getConceptIdentity"
-    assert spec["paths"]["/api/concept-identity"]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+    concept_identity_path = spec["paths"]["/api/concept-identity"]
+    assert set(concept_identity_path) == {"get", "post"}
+    assert concept_identity_path["get"]["operationId"] == "getConceptIdentity"
+    assert concept_identity_path["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ConceptIdentityResponse"
+    }
+    assert concept_identity_path["post"]["operationId"] == "writeConceptIdentityOverride"
+    assert concept_identity_path["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ConceptIdentityOverrideRequest"
     }
     assert spec["paths"]["/api/compare/bundles"]["get"]["operationId"] == "getCompareBundles"
     canonical_path = spec["paths"]["/api/compare/canonical-lexemes/{bundleId}/{speaker}"]

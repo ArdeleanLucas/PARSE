@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import server as _server
-from canonical_lexemes import CanonicalLexemeError, delete_canonical_selection, store_canonical_selection
+from canonical_lexemes import CanonicalLexemeError, delete_canonical_selection, load_enrichments, store_canonical_selection
 from compare_bundles import build_canonical_lexemes_report_tsv, build_compare_bundles
-from concept_identity import identity_payload, load_concept_identity
+from concept_identity import identity_payload, load_concept_identity, write_concept_identity_override
 
 def _compute_cognates(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     if _server.cognate_compute_module is None:
@@ -63,7 +63,14 @@ def _compute_cognates(job_id: str, payload: _server.Dict[str, _server.Any]) -> _
     return {'type': 'cognates', 'outputPath': str(output_path), 'computedAt': enrichments_payload['computed_at'], 'conceptCount': len(enrichments_payload['config']['concepts_included']), 'speakerCount': len(enrichments_payload['config']['speakers_included'])}
 
 def _api_get_enrichments(self) -> None:
-    payload = _server._read_json_file(_server._enrichments_path(), _server._default_enrichments_payload())
+    project_root = _server._project_root()
+    payload = load_enrichments(project_root)
+    try:
+        from migration.concept_uid_enrichments import promote_legacy_uid_keys
+
+        promote_legacy_uid_keys(project_root, payload)
+    except Exception:
+        pass
     self._send_json(_server.HTTPStatus.OK, {'enrichments': payload})
 
 def _api_post_enrichments(self) -> None:
@@ -125,6 +132,15 @@ def _api_post_tags_merge(self) -> None:
 
 def _api_get_concept_identity(self) -> None:
     identity = load_concept_identity(_server._project_root())
+    self._send_json(_server.HTTPStatus.OK, identity_payload(identity))
+
+
+def _api_post_concept_identity(self) -> None:
+    body = self._expect_object(self._read_json_body(required=True), 'Request body')
+    try:
+        identity = write_concept_identity_override(_server._project_root(), body)
+    except ValueError as exc:
+        raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, str(exc)) from exc
     self._send_json(_server.HTTPStatus.OK, identity_payload(identity))
 
 
@@ -240,5 +256,5 @@ def _api_get_canonical_lexemes_report(self) -> None:
     self.wfile.write(body)
 
 
-__all__ = ['_compute_cognates', '_api_get_enrichments', '_api_post_enrichments', '_api_post_lexeme_note', '_api_post_lexeme_notes_import', '_api_get_lexeme_search', '_api_get_tags', '_api_post_tags_merge', '_api_get_concept_identity', '_api_get_compare_bundles', '_api_put_compare_canonical_lexeme', '_api_delete_compare_canonical_lexeme', '_api_get_canonical_lexemes_report']
+__all__ = ['_compute_cognates', '_api_get_enrichments', '_api_post_enrichments', '_api_post_lexeme_note', '_api_post_lexeme_notes_import', '_api_get_lexeme_search', '_api_get_tags', '_api_post_tags_merge', '_api_get_concept_identity', '_api_post_concept_identity', '_api_get_compare_bundles', '_api_put_compare_canonical_lexeme', '_api_delete_compare_canonical_lexeme', '_api_get_canonical_lexemes_report']
 

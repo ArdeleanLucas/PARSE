@@ -568,7 +568,9 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
                 else:
                     speaker_candidates[row_id] = None
             bundle["candidates"][speaker] = speaker_candidates
-            manual = stored_canonical.get(bid, {}).get(speaker)
+            manual = stored_canonical.get(group["uid"], {}).get(speaker)
+            if not manual:
+                manual = stored_canonical.get(bid, {}).get(speaker)
             effective = None
             if manual:
                 effective = _selection_for_row(bundle, str(manual.get("csv_row_id") or ""), source=str(manual.get("source") or "manual"), realization_index=manual.get("realization_index"))
@@ -589,7 +591,7 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
         built.append(bundle)
 
     if bundle_id:
-        built = [bundle for bundle in built if bundle["bundle_id"] == bundle_id]
+        built = [bundle for bundle in built if bundle["bundle_id"] == bundle_id or bundle.get("uid") == bundle_id]
     return {"bundles": built, "identity_warnings": list(identity.warnings)}
 
 

@@ -30,11 +30,11 @@ class _FakeWfile:
 
 
 class _Handler(server.RangeRequestHandler):
-    def __init__(self, path: str = "/api/concept-identity") -> None:
+    def __init__(self, body: bytes = b"", path: str = "/api/concept-identity") -> None:
         self.path = path
-        self.rfile = io.BytesIO(b"")
+        self.rfile = io.BytesIO(body)
         self.wfile = _FakeWfile()
-        self.headers = {}
+        self.headers = {"Content-Type": "application/json", "Content-Length": str(len(body))}
         self.status: int | None = None
         self.sent_headers: dict[str, str] = {}
 
@@ -86,6 +86,90 @@ def test_get_concept_identity_dispatcher(tmp_path: pathlib.Path, monkeypatch: py
     handler = _Handler()
 
     assert handler._handle_api("GET") is True
+
+    assert handler.status == HTTPStatus.OK
+    assert handler.wfile.payload()["uid_by_row"]["52"] == "c-52"
+
+
+def test_get_enrichments_route_promotes_legacy_keys_to_uid(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_concepts(tmp_path)
+    (tmp_path / "parse-enrichments.json").write_text(
+        json.dumps({"cognate_decisions": {"52": {"decision": "accepted"}}}),
+        encoding="utf-8",
+    )
+    handler = _Handler(path="/api/enrichments")
+
+    handler._api_get_enrichments()
+
+    payload = handler.wfile.payload()["enrichments"]
+    assert handler.status == HTTPStatus.OK
+    assert payload["cognate_decisions"] == {"c-52": {"decision": "accepted"}}
+
+
+def _post(body: dict) -> _Handler:
+    encoded = json.dumps(body).encode("utf-8")
+    handler = _Handler(encoded)
+    handler._api_post_concept_identity()
+    return handler
+
+
+def test_post_concept_identity_writes_manual_override_and_round_trips(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_concepts(tmp_path)
+
+    handler = _post(
+        {
+            "uid": "c-salt-manual",
+            "label": "salt reviewed",
+            "members": ["52", "352"],
+            "origin": "manual:merge",
+        }
+    )
+
+    payload = handler.wfile.payload()
+    assert handler.status == HTTPStatus.OK
+    assert payload["uid_by_row"] == {"52": "c-salt-manual", "352": "c-salt-manual"}
+    written = json.loads((tmp_path / "concept-identity.json").read_text(encoding="utf-8"))
+    assert written == {
+        "version": 1,
+        "concepts": [
+            {
+                "uid": "c-salt-manual",
+                "label": "salt reviewed",
+                "members": ["52", "352"],
+                "origin": "manual:merge",
+            }
+        ],
+    }
+
+
+def test_post_concept_identity_rejects_invalid_origin_and_member(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_concepts(tmp_path)
+
+    with pytest.raises(server.ApiError) as origin_error:
+        _post({"members": ["52"], "origin": "auto"})
+    assert origin_error.value.status == HTTPStatus.BAD_REQUEST
+
+    with pytest.raises(server.ApiError) as member_error:
+        _post({"members": ["999"], "origin": "manual:split"})
+    assert member_error.value.status == HTTPStatus.BAD_REQUEST
+    assert not (tmp_path / "concept-identity.json").exists()
+
+
+def test_post_concept_identity_dispatcher(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_concepts(tmp_path)
+    server._install_route_bindings()
+    body = json.dumps({"members": ["52"], "origin": "manual:split"}).encode("utf-8")
+    handler = _Handler(body)
+
+    assert handler._handle_api("POST") is True
 
     assert handler.status == HTTPStatus.OK
     assert handler.wfile.payload()["uid_by_row"]["52"] == "c-52"

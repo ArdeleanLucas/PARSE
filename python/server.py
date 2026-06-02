@@ -1511,6 +1511,9 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if request_path == "/api/enrichments":
             self._api_post_enrichments()
             return
+        if request_path == "/api/concept-identity":
+            self._api_post_concept_identity()
+            return
 
         if request_path == "/api/config": self._api_update_config(); return
         if request_path == "/api/survey-overlap": self._api_post_survey_overlap(); return
