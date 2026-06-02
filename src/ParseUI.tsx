@@ -2279,7 +2279,7 @@ export function ParseUI() {
                       concept.key,
                       getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'confirmed'),
                     )}
-                    className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold shadow-sm transition ${getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'confirmed') ? 'bg-emerald-700 text-white' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition ${getTagsForConcept(concept.key, activeTagScope).some((tag) => tag.id === 'confirmed') ? 'bg-emerald-700 text-white shadow-sm ring-1 ring-emerald-800' : 'border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50'}`}
                   >
                     <Check className="h-3.5 w-3.5"/> Accept concept
                   </button>

@@ -2194,6 +2194,17 @@ describe("ParseUI", () => {
     expect(screen.getByRole("button", { name: /Accept concept/i }).className).toContain("bg-emerald-700");
   });
 
+  it("Accept concept shows a distinct ghost OFF state when the concept is not confirmed (MC-449-C)", () => {
+    // Default config has no concept tags, so the concept is unconfirmed.
+    render(<ParseUI />);
+    const accept = screen.getByRole("button", { name: /Accept concept/i });
+    // OFF: outlined/ghost, clearly different from the solid engaged style.
+    expect(accept.getAttribute("aria-pressed")).toBe("false");
+    expect(accept.className).toContain("border");
+    expect(accept.className).toContain("bg-white");
+    expect(accept.className).not.toContain("bg-emerald-700");
+  });
+
 
   it("waits for the newly selected speaker audio to become ready before seeking and drawing a region", async () => {
     mockConfig = {
