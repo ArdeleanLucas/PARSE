@@ -9,7 +9,7 @@ import {
   Download,
   Sun, Moon,
 } from 'lucide-react';
-import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, pollOffsetDetectJob, getCompareBundles, getConceptIdentity } from './api/client';
+import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, pollOffsetDetectJob, getCompareBundles, getConceptIdentity, postConceptIdentityOverride } from './api/client';
 import { useChatSession } from './hooks/useChatSession';
 import { useCompareReturnRestore } from './hooks/useCompareReturnRestore';
 import { useOpenInAnnotateHandler } from './hooks/useOpenInAnnotateHandler';
@@ -100,7 +100,7 @@ import {
 import { OffsetAdjustmentModal } from './components/parse/modals/OffsetAdjustmentModal';
 import { AIChat } from './components/shared/AIChat';
 import { getClefConfig, getContactLexemeCoverage, saveClefFormSelections } from './api/client';
-import type { ClefConfigStatus, CompareBundle, ConceptIdentityResponse, ContactLexemePopulateResult, SurveyOverlapPatch, Tag } from './api/types';
+import type { ClefConfigStatus, CompareBundle, ConceptIdentityOverrideRequest, ConceptIdentityResponse, ContactLexemePopulateResult, SurveyOverlapPatch, Tag } from './api/types';
 
 type AppMode = 'annotate' | 'compare' | 'tags';
 
@@ -1617,6 +1617,17 @@ export function ParseUI() {
   const handleCompareBundleUpdated = useCallback((nextBundle: CompareBundle) => {
     setCompareBundles((current) => current.map((bundle) => bundle.bundle_id === nextBundle.bundle_id ? nextBundle : bundle));
   }, []);
+
+  const handleConceptIdentityOverride = useCallback(async (request: ConceptIdentityOverrideRequest) => {
+    const identity = await postConceptIdentityOverride(request);
+    setConceptIdentity(identity);
+    setConceptIdentityError(null);
+    const refreshed = normalizeBundles(await getCompareBundles({}));
+    setCompareBundles(refreshed.bundles);
+    setCompareBundlesError(null);
+    return { identity, bundles: refreshed.bundles };
+  }, []);
+
   useEffect(() => {
     if (currentMode !== 'compare') return;
     let cancelled = false;
@@ -2461,6 +2472,8 @@ export function ParseUI() {
                     conceptKey={concept.key}
                     initialExpandedSpeaker={compareReturn.initialExpandedSpeaker ?? undefined}
                     onBundleUpdated={handleCompareBundleUpdated}
+                    identityWarnings={conceptIdentity?.warnings ?? []}
+                    onConceptIdentityOverride={handleConceptIdentityOverride}
                     onCycleCognate={(speaker, current, cognateKey) => cycleSpeakerCognate(cognateKey, speaker, current)}
                     onResetCognate={(speaker, cognateKey) => resetSpeakerCognate(cognateKey, speaker)}
                     onToggleSpeakerFlag={(speaker, current, cognateKey) => toggleSpeakerFlag(cognateKey, speaker, current)}

@@ -242,6 +242,95 @@ describe('SpeakerFormsTable cognate/flag callback keys', () => {
   });
 });
 
+
+describe('SpeakerFormsTable concept identity override controls', () => {
+  it('posts a manual split override from a flagged bundle and reports refreshed grouping', async () => {
+    const onConceptIdentityOverride = vi.fn().mockResolvedValue({
+      identity: {
+        version: 1,
+        concepts: [
+          { uid: 'c-53', label: 'big (A)', members: ['53'], origin: 'manual:split' },
+          { uid: 'c-619', label: 'big (B)', members: ['619'], origin: 'auto' },
+        ],
+        uid_by_row: { '53': 'c-53', '619': 'c-619' },
+        warnings: [],
+      },
+      bundles: [
+        makeBundle({ bundle_id: 'c-53', uid: 'c-53', row_ids: ['53'], warnings: [] }),
+        makeBundle({ bundle_id: 'c-619', uid: 'c-619', row_ids: ['619'], warnings: [] }),
+      ],
+    });
+
+    render(
+      <SpeakerFormsTable
+        bundle={makeBundle({ uid: 'c-53', row_ids: ['53', '619'], warnings: ['verify this cross-survey link'] })}
+        speakers={['Fail01']}
+        speakerForms={[makeForm({ speaker: 'Fail01' })]}
+        primaryContactCodes={PRIMARY_CODES}
+        contactLanguageNames={CONTACT_NAMES}
+        conceptKey="c-53"
+        initialExpandedSpeaker="Fail01"
+        identityWarnings={[]}
+        onConceptIdentityOverride={onConceptIdentityOverride}
+      />,
+    );
+
+    const panel = screen.getByTestId('concept-identity-override-panel');
+    expect(panel.textContent).toContain('verify this cross-survey link');
+    fireEvent.click(within(panel).getByLabelText('Include row 53 in concept identity override'));
+    fireEvent.click(within(panel).getByRole('button', { name: /Split into separate concepts/i }));
+
+    await waitFor(() => expect(onConceptIdentityOverride).toHaveBeenCalledWith({
+      uid: 'c-53',
+      label: 'big',
+      members: ['619'],
+      origin: 'manual:split',
+    }));
+    await waitFor(() => expect(screen.getByTestId('concept-identity-override-status').textContent).toContain('Override saved'));
+    expect(screen.getByTestId('concept-identity-override-result').textContent).toContain('c-53');
+    expect(screen.getByTestId('concept-identity-override-result').textContent).toContain('c-619');
+  });
+
+  it('posts a manual merge override for selected bundle members and surfaces identity warnings', async () => {
+    const onConceptIdentityOverride = vi.fn().mockResolvedValue({
+      identity: {
+        version: 1,
+        concepts: [
+          { uid: 'c-big', label: 'big', members: ['53', '619'], origin: 'manual:merge' },
+        ],
+        uid_by_row: { '53': 'c-big', '619': 'c-big' },
+        warnings: ['concept c-old referenced 1 unknown row id(s); they were dropped.'],
+      },
+      bundles: [makeBundle({ uid: 'c-big', bundle_id: 'c-big', row_ids: ['53', '619'], warnings: [] })],
+    });
+
+    render(
+      <SpeakerFormsTable
+        bundle={makeBundle({ uid: 'c-53', row_ids: ['53', '619'] })}
+        speakers={['Fail01']}
+        speakerForms={[makeForm({ speaker: 'Fail01' })]}
+        primaryContactCodes={PRIMARY_CODES}
+        contactLanguageNames={CONTACT_NAMES}
+        conceptKey="c-53"
+        initialExpandedSpeaker="Fail01"
+        identityWarnings={['concept c-old referenced 1 unknown row id(s); they were dropped.']}
+        onConceptIdentityOverride={onConceptIdentityOverride}
+      />,
+    );
+
+    const panel = screen.getByTestId('concept-identity-override-panel');
+    fireEvent.click(within(panel).getByRole('button', { name: /Merge selected rows/i }));
+
+    await waitFor(() => expect(onConceptIdentityOverride).toHaveBeenCalledWith({
+      uid: 'c-53',
+      label: 'big',
+      members: ['53', '619'],
+      origin: 'manual:merge',
+    }));
+    expect(screen.getByTestId('concept-identity-warnings').textContent).toContain('unknown row id');
+  });
+});
+
 describe('SpeakerFormsTable IPA column has NO audio chrome', () => {
   it('IPA cell contains plain text only — no play button, no timestamp, no spectrogram', () => {
     render(

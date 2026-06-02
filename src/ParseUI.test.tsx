@@ -379,6 +379,7 @@ vi.mock("./api/client", () => ({
   getConceptAppendixExport: vi.fn().mockResolvedValue(new Blob(['# Concept Appendix\n'], { type: 'text/markdown' })),
   getCompareBundles: (...args: unknown[]) => mockGetCompareBundles(...args),
   getConceptIdentity: (...args: unknown[]) => mockGetConceptIdentity(...args),
+  postConceptIdentityOverride: vi.fn().mockResolvedValue({ version: 1, concepts: [], uid_by_row: {}, warnings: [] }),
   putCanonicalLexeme: vi.fn().mockResolvedValue({ bundle: { bundle_id: 'water', label: 'water', row_ids: [], buckets: [] } }),
   deleteCanonicalLexeme: vi.fn().mockResolvedValue({ bundle: { bundle_id: 'water', label: 'water', row_ids: [], buckets: [] } }),
   importTagCsv: vi.fn().mockResolvedValue({
