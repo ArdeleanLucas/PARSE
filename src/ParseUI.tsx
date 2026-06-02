@@ -1017,7 +1017,8 @@ export function ParseUI() {
   );
   const concepts = useMemo<Concept[]>(() => {
     if (rawConcepts.length === 0) return [];
-    const mergesForCurrentMode = conceptIdentity?.concepts.length ? undefined : (currentMode === 'compare' ? conceptMerges : undefined);
+    const conceptIdentityLoadedEmpty = conceptIdentityStatus === 'empty';
+    const mergesForCurrentMode = conceptIdentityLoadedEmpty ? (currentMode === 'compare' ? conceptMerges : undefined) : undefined;
     const resolveParentTag = (conceptKeys: readonly string[]) => {
       const visibleKeys = scopedToSpeaker && elicitedConceptKeys.size > 0
         ? conceptKeys.filter((key) => elicitedConceptKeys.has(key))
@@ -1026,8 +1027,10 @@ export function ParseUI() {
       return getConceptStatus(tags);
     };
     const resolveVariantTag = (conceptKey: string) => getConceptStatus(getTagsForConcept(conceptKey, activeTagScope));
-    return groupConceptEntries(rawConcepts, resolveParentTag, mergesForCurrentMode, resolveVariantTag, conceptIdentity);
-  }, [rawConcepts, getTagsForConcept, activeTagScopeKey, conceptMerges, conceptIdentity, currentMode, scopedToSpeaker, elicitedConceptKeys]);
+    return groupConceptEntries(rawConcepts, resolveParentTag, mergesForCurrentMode, resolveVariantTag, conceptIdentity, {
+      identityUnavailable: conceptIdentityUnavailable,
+    });
+  }, [rawConcepts, getTagsForConcept, activeTagScopeKey, conceptMerges, conceptIdentity, conceptIdentityStatus, conceptIdentityUnavailable, currentMode, scopedToSpeaker, elicitedConceptKeys]);
 
   const flaggedConceptKeys = useMemo(() => {
     const keys = new Set<string>();

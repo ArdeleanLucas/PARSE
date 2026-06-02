@@ -304,9 +304,14 @@ export function groupConceptEntries(
   conceptMerges?: Record<string, readonly string[]>,
   resolveVariantTag?: ResolveVariantTag,
   conceptIdentity?: ConceptIdentityResponse | null,
+  options?: { identityUnavailable?: boolean },
 ): Concept[] {
   if (isUsableConceptIdentity(conceptIdentity)) {
     return groupConceptEntriesFromIdentity(rawConcepts, resolveTag, resolveVariantTag, conceptIdentity);
+  }
+
+  if (options?.identityUnavailable) {
+    return rawConcepts.map((entry, index) => singletonConcept(entry, index + 1, resolveTag));
   }
 
   const sourceBuckets = new Map<string, number[]>();
