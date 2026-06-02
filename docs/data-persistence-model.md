@@ -196,6 +196,7 @@ The script is the **only** thing that rewrites the on-disk `parse-enrichments.js
 
 ## Related Reading
 
+- Operational runbook for updating cognate / decision data and verifying it persists: `docs/skills/parse-update-cognate-data/SKILL.md`
 - The full story of this particular keying fix: `docs/reports/2026-06-02-concept-key-namespace-collision.md`
 - Broader architecture: `docs/architecture.md`
 - Developer onboarding: `docs/developer-guide.md`
