@@ -188,8 +188,9 @@ function readCompareDecisionFields(
   // The backend's compute_similarity_scores writes
   //   similarity[concept][speaker][lang] = { score: number|null,
   //                                          has_reference_data: bool }
-  // keyed by raw numeric concept_id. Grouped concepts expose that selected
-  // numeric id as cognateKey; their display key may be only a source_item.
+  // Post MC-458-E the uid migration re-keys both similarity and cognate_sets by
+  // the concept identity uid, so callers pass the concept uid as cognateKey —
+  // for grouped concepts too, not the selected member's row id.
   const rawSim = (code: string): number | null => {
     const cell = speakerSimilarity?.[code];
     if (!isRecord(cell)) return null;
@@ -270,7 +271,10 @@ export function buildSpeakerForm(
       ? focusedIdx
       : readCanonicalOverride(canonicalOverrides, concept.key, speaker, realizations.length);
     const canonical = realizations[selectedIdx];
-    const cognateKey = concept.mergedKeys[selectedIdx] ?? concept.key;
+    // Cognate + similarity key on the concept identity (uid), like flags. The
+    // MC-458-E uid migration re-keyed these blocks to the uid; the selected
+    // member only drives which realization is displayed, not the cognate class.
+    const cognateKey = concept.key;
     const flagKey = concept.key;
     const decision = readCompareDecisionFields(enrichments, cognateKey, speaker, primaryContactCodes);
     return {
@@ -300,7 +304,9 @@ export function buildSpeakerForm(
       ? focusedIdx
       : readCanonicalOverride(canonicalOverrides, concept.key, speaker, realizations.length);
     const canonical = realizations[selectedIdx];
-    const cognateKey = concept.variants[selectedIdx]?.conceptKey ?? concept.key;
+    // Cognate + similarity key on the concept identity (uid), like flags (see
+    // the mergedKeys branch above); the selected variant drives display only.
+    const cognateKey = concept.key;
     const flagKey = concept.key;
     const decision = readCompareDecisionFields(enrichments, cognateKey, speaker, primaryContactCodes);
     return {

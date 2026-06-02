@@ -232,7 +232,11 @@ describe('buildSpeakerForm', () => {
   });
 
 
-  it('reads grouped source-item cognate/similarity from the selected variant but speaker flags from the concept uid', () => {
+  it('reads grouped cognate/similarity from the concept uid (not the selected variant), like speaker flags', () => {
+    // Post MC-458-E the uid migration re-keys cognate_sets + similarity by the
+    // concept identity uid. The selected variant drives display only; cognate
+    // and similarity (and flags) must resolve under the uid. Member-id keys
+    // carry decoy values here and must be ignored.
     const groupedConcept: Concept = {
       id: 32,
       key: 'uid:hair',
@@ -257,12 +261,12 @@ describe('buildSpeakerForm', () => {
 
     const form = buildSpeakerForm(record, groupedConcept, 'Fail02', {
       cognate_sets: {
-        '1.1': { Z: ['Fail02'] },
-        '599': { A: ['Fail02'] },
+        'uid:hair': { B: ['Fail02'] },
+        '599': { A: ['Fail02'] }, // decoy member-id key — must be ignored
       },
       similarity: {
-        '1.1': { Fail02: { ar: { score: 0.01, has_reference_data: true } } },
-        '599': { Fail02: { ar: { score: 0.88, has_reference_data: true } } },
+        'uid:hair': { Fail02: { ar: { score: 0.42, has_reference_data: true } } },
+        '599': { Fail02: { ar: { score: 0.88, has_reference_data: true } } }, // decoy
       },
       manual_overrides: {
         canonical_realizations: { 'uid:hair': { Fail02: 1 } },
@@ -274,11 +278,39 @@ describe('buildSpeakerForm', () => {
     }, ['ar']);
 
     expect(form.selectedIdx).toBe(1);
-    expect(form.cognateKey).toBe('599');
+    expect(form.cognateKey).toBe('uid:hair');
     expect(form.flagKey).toBe('uid:hair');
-    expect(form.cognate).toBe('A');
+    expect(form.cognate).toBe('B'); // from cs['uid:hair'], not the member-id decoy
     expect(form.flagged).toBe(true);
-    expect(form.similarityByLang.ar).toBe(0.88);
+    expect(form.similarityByLang.ar).toBe(0.42); // from similarity['uid:hair'], not the decoy
+  });
+
+  it('resolves a grouped cross-survey concept cognate under the identity uid (MC-458-J)', () => {
+    // The production regression: two survey rows (e.g. ids 89 + 165) unified
+    // under one identity uid (c-89). The uid migration stores cognate under the
+    // uid, so Compare must read it there — not under a member's row id.
+    const grouped: Concept = {
+      id: 89,
+      key: 'c-89',
+      name: 'grouped-concept',
+      tag: 'untagged',
+      sourceItem: '5.2',
+      variants: [
+        { conceptKey: '89', conceptEn: 'grouped-concept', variantLabel: 'A' },
+        { conceptKey: '165', conceptEn: 'grouped-concept', variantLabel: 'B' },
+      ],
+    };
+    const record = makeRecord({
+      concept: [{ start: 1, end: 2, text: 'grouped-concept', concept_id: '89' }],
+      ipa: [{ start: 1.1, end: 1.4, text: 'xxx' }],
+    });
+
+    const form = buildSpeakerForm(record, grouped, 'Sp1', {
+      cognate_sets: { 'c-89': { A: ['Sp1'] } },
+    }, []);
+
+    expect(form.cognateKey).toBe('c-89');
+    expect(form.cognate).toBe('A');
   });
 
   it('keeps grouped speaker flags off when only a selected row-id legacy flag is present', () => {
@@ -305,13 +337,15 @@ describe('buildSpeakerForm', () => {
       },
     }, []);
 
-    expect(form.cognateKey).toBe('599');
+    expect(form.cognateKey).toBe('uid:hair');
     expect(form.flagKey).toBe('uid:hair');
     expect(form.flagged).toBe(false);
   });
 
-  it('reads merged cognate from the selected member but speaker flags from the concept uid', () => {
-    const mergedConcept: Concept = { id: 1, key: '527', name: 'head', tag: 'untagged', mergedKeys: ['527', '247', '248'] };
+  it('reads merged cognate from the concept uid (not the selected member), like speaker flags', () => {
+    // mergedKeys branch: cognate keys on the concept uid (concept.key). The
+    // selected member drives display only; member-id keys are decoys here.
+    const mergedConcept: Concept = { id: 1, key: 'uid:head', name: 'head', tag: 'untagged', mergedKeys: ['527', '247', '248'] };
     const record = makeRecord({
       concept: [
         { start: 1, end: 2, text: 'head', concept_id: '527' },
@@ -327,22 +361,22 @@ describe('buildSpeakerForm', () => {
 
     const form = buildSpeakerForm(record, mergedConcept, 'Fail02', {
       cognate_sets: {
-        '527': { C: ['Fail02'] },
-        '248': { B: ['Fail02'] },
+        'uid:head': { C: ['Fail02'] },
+        '248': { B: ['Fail02'] }, // decoy member-id key — must be ignored
       },
       manual_overrides: {
-        canonical_realizations: { '527': { Fail02: 2 } },
+        canonical_realizations: { 'uid:head': { Fail02: 2 } },
         speaker_flags: {
-          '527': { Fail02: false },
+          'uid:head': { Fail02: false },
           '248': { Fail02: true },
         },
       },
     }, []);
 
     expect(form.selectedIdx).toBe(2);
-    expect(form.cognateKey).toBe('248');
-    expect(form.flagKey).toBe('527');
-    expect(form.cognate).toBe('B');
+    expect(form.cognateKey).toBe('uid:head');
+    expect(form.flagKey).toBe('uid:head');
+    expect(form.cognate).toBe('C'); // from cs['uid:head'], not the member-id decoy
     expect(form.flagged).toBe(false);
   });
 
