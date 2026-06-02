@@ -141,6 +141,12 @@ def normalize_canonical_lexemes(raw: object) -> dict[str, dict[str, dict[str, An
 
 def load_canonical_lexemes(project_root: Path) -> dict[str, dict[str, dict[str, Any]]]:
     payload = load_enrichments(project_root)
+    try:
+        from migration.concept_uid_enrichments import promote_legacy_uid_keys
+
+        promote_legacy_uid_keys(project_root, payload)
+    except Exception:
+        pass
     overrides = payload.get("manual_overrides") if isinstance(payload, Mapping) else None
     raw = overrides.get("canonical_lexemes") if isinstance(overrides, Mapping) else None
     return normalize_canonical_lexemes(raw)
@@ -161,12 +167,18 @@ def store_canonical_selection(
     bid = str(bundle_id or "").strip()
     if not bid or not speaker_id:
         raise CanonicalLexemeError(HTTPStatus.BAD_REQUEST, "bundle_id and speaker are required")
-    clean = normalize_canonical_lexemes({bid: {speaker_id: selection}}).get(bid, {}).get(speaker_id)
+    try:
+        from migration.concept_uid_enrichments import resolve_legacy_key_to_uid
+
+        storage_key = resolve_legacy_key_to_uid(project_root, bid) or bid
+    except Exception:
+        storage_key = bid
+    clean = normalize_canonical_lexemes({storage_key: {speaker_id: selection}}).get(storage_key, {}).get(speaker_id)
     if not clean:
         raise CanonicalLexemeError(HTTPStatus.BAD_REQUEST, "csv_row_id is required")
     clean.setdefault("source", "manual")
     clean.setdefault("selected_at", utc_now_iso())
-    canonical.setdefault(bid, {})[speaker_id] = clean
+    canonical.setdefault(storage_key, {})[speaker_id] = clean
     overrides["canonical_lexemes"] = canonical
     save_enrichments_atomic(project_root, payload)
     return canonical
@@ -179,10 +191,17 @@ def delete_canonical_selection(project_root: Path, *, bundle_id: str, speaker: s
     canonical = normalize_canonical_lexemes(overrides.get("canonical_lexemes"))
     bid = str(bundle_id or "").strip()
     speaker_id = str(speaker or "").strip()
-    if bid in canonical:
-        canonical[bid].pop(speaker_id, None)
-        if not canonical[bid]:
-            canonical.pop(bid, None)
+    try:
+        from migration.concept_uid_enrichments import resolve_legacy_key_to_uid
+
+        storage_key = resolve_legacy_key_to_uid(project_root, bid) or bid
+    except Exception:
+        storage_key = bid
+    for key in {bid, storage_key}:
+        if key in canonical:
+            canonical[key].pop(speaker_id, None)
+            if not canonical[key]:
+                canonical.pop(key, None)
     overrides["canonical_lexemes"] = canonical
     save_enrichments_atomic(project_root, payload)
     return canonical

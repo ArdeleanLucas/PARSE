@@ -143,6 +143,32 @@ def test_appendix_preview_includes_cognate_matrix_decisions(tmp_path: pathlib.Pa
     assert "excluded: SpkB" in md
 
 
+def test_appendix_preview_reads_uid_keyed_cognate_decisions(tmp_path: pathlib.Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    (workspace / "parse-enrichments.json").write_text(
+        json.dumps(
+            {
+                "manual_overrides": {
+                    "cognate_sets": {"c-1": {"A": ["SpkA", "SpkB"], "B": ["SpkC"]}},
+                    "cognate_decisions": {"c-1": {"decision": "split", "ts": 1}},
+                    "borrowing_flags": {"c-1": {"SpkC": "Persian shape"}},
+                    "speaker_flags": {"c-1": {"SpkB": True}},
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = ParseChatTools(project_root=workspace).execute("export_concept_appendix_md", {})
+
+    assert result["ok"] is True
+    md = result["result"]["markdown"]
+    assert "**Cognate:** split" in md
+    assert "B ⟳" in md
+    assert "excluded: SpkB" in md
+
+
 def test_appendix_speaker_subset_limits_matrix_and_forms(tmp_path: pathlib.Path) -> None:
     workspace = _make_workspace(tmp_path)
     result = ParseChatTools(project_root=workspace).execute(

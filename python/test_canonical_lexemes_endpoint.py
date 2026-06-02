@@ -81,6 +81,13 @@ def _seed_annotation(root: pathlib.Path, speaker: str, concept_ids: list[str]) -
     )
 
 
+def _seed_identity(root: pathlib.Path, concepts: list[dict]) -> None:
+    (root / "concept-identity.json").write_text(
+        json.dumps({"version": 1, "concepts": concepts}),
+        encoding="utf-8",
+    )
+
+
 def _put(body: dict, bundle_id: str = "bundle:big", speaker: str = "Saha01") -> _Handler:
     encoded = json.dumps(body).encode("utf-8")
     handler = _Handler(encoded, f"/api/compare/canonical-lexemes/{bundle_id}/{speaker}")
@@ -120,8 +127,47 @@ def test_put_canonical_lexeme_validates_membership_and_writes_atomically(tmp_pat
     payload = handler.wfile.payload()
     assert handler.status == HTTPStatus.OK
     assert payload["bundle"]["canonical"]["Saha01"]["csv_row_id"] == "53"
-    assert load_canonical_lexemes(tmp_path)["bundle:big"]["Saha01"]["source"] == "manual"
+    assert load_canonical_lexemes(tmp_path)["c-53"]["Saha01"]["source"] == "manual"
     assert not (tmp_path / "parse-enrichments.json.tmp").exists()
+
+
+def test_compare_bundle_reads_uid_keyed_canonical_selection(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_concepts(tmp_path)
+    _seed_identity(tmp_path, [{"uid": "c-big", "label": "big", "members": ["53", "619"], "origin": "manual:merge"}])
+    _seed_annotation(tmp_path, "Saha01", ["53", "619"])
+    (tmp_path / "parse-enrichments.json").write_text(
+        json.dumps(
+            {
+                "manual_overrides": {
+                    "canonical_lexemes": {
+                        "c-big": {"Saha01": {"csv_row_id": "619", "source": "manual"}}
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    handler = _Handler(path="/api/compare/bundles?speaker=Saha01&bundle_id=c-big")
+    handler._api_get_compare_bundles()
+
+    bundle = handler.wfile.payload()["bundles"][0]
+    assert handler.status == HTTPStatus.OK
+    assert bundle["uid"] == "c-big"
+    assert bundle["canonical"]["Saha01"]["csv_row_id"] == "619"
+
+
+def test_put_canonical_lexeme_accepts_uid_path_and_stores_under_uid(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    _seed_concepts(tmp_path)
+    _seed_identity(tmp_path, [{"uid": "c-big", "label": "big", "members": ["53", "619"], "origin": "manual:merge"}])
+    _seed_annotation(tmp_path, "Saha01", ["53", "619"])
+
+    handler = _put({"csv_row_id": "619"}, bundle_id="c-big")
+
+    assert handler.status == HTTPStatus.OK
+    assert load_canonical_lexemes(tmp_path)["c-big"]["Saha01"]["csv_row_id"] == "619"
 
 
 def test_put_canonical_lexeme_rejects_row_that_override_moved_out_of_visible_bundle(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:

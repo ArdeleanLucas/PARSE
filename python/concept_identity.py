@@ -34,6 +34,7 @@ well-defined.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -350,6 +351,61 @@ def load_concept_identity(
     overlap = state if state is not None else load_survey_overlap_state(project_root)
     overrides, warnings = _load_overrides(project_root)
     return materialize(rows, overlap, overrides, warnings=warnings)
+
+
+_ALLOWED_MANUAL_ORIGINS = {"manual:split", "manual:merge"}
+
+
+def _normalise_override_request(
+    project_root: Path,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    rows = _concept_rows(project_root)
+    by_id = {row.id: row for row in rows}
+    requested_members = payload.get("members")
+    if not isinstance(requested_members, Sequence) or isinstance(requested_members, (str, bytes)):
+        raise ValueError("members must be a non-empty array of current row ids")
+    members = _sorted_ids(str(member or "").strip() for member in requested_members)
+    if not members:
+        raise ValueError("members must be a non-empty array of current row ids")
+    unknown = [member for member in members if member not in by_id]
+    if unknown:
+        raise ValueError("members contain unknown row id(s): {0}".format(", ".join(unknown)))
+
+    origin = str(payload.get("origin") or "").strip()
+    if origin not in _ALLOWED_MANUAL_ORIGINS:
+        raise ValueError("origin must be manual:split or manual:merge")
+
+    uid = str(payload.get("uid") or "").strip() or _auto_uid(members)
+    label = str(payload.get("label") or "").strip() or _auto_label(members, by_id)
+    return {"uid": uid, "label": label, "members": members, "origin": origin}
+
+
+def write_concept_identity_override(project_root: Path, payload: Mapping[str, Any]) -> ConceptIdentity:
+    """Validate and persist one manual split/merge override, then reload identity."""
+
+    project_root = Path(project_root)
+    path = project_root / CONCEPT_IDENTITY_FILENAME
+    override = _normalise_override_request(project_root, payload)
+    existing, warnings = _load_overrides(project_root)
+    if warnings:
+        raise ValueError("concept-identity.json could not be read; repair it before writing overrides")
+
+    override_members = set(override["members"])
+    next_overrides = [
+        entry
+        for entry in existing
+        if entry.get("uid") != override["uid"] and set(entry.get("members") or []).isdisjoint(override_members)
+    ]
+    next_overrides.append(override)
+    next_overrides.sort(key=lambda entry: _id_sort_key((entry.get("members") or ["999999999"])[0]))
+
+    out = {"version": 1, "concepts": next_overrides}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    return load_concept_identity(project_root)
 
 
 def identity_payload(identity: ConceptIdentity) -> dict[str, Any]:

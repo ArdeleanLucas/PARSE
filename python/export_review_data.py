@@ -398,7 +398,13 @@ def _load_enrichments(workspace: Path) -> dict[str, Any]:
     for key in ("cognate_sets", "similarity", "borrowing_flags"):
         value = data.get(key)
         if isinstance(value, Mapping):
-            out[key] = value
+            out[key] = dict(value)
+    try:
+        from migration.concept_uid_enrichments import expand_uid_keys_for_legacy_read
+
+        out = expand_uid_keys_for_legacy_read(workspace, out)
+    except Exception:
+        pass
     return out
 
 

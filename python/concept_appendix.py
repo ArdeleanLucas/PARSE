@@ -73,7 +73,14 @@ def _load_enrichments_raw(workspace: Path) -> Dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    try:
+        from migration.concept_uid_enrichments import expand_uid_keys_for_legacy_read
+
+        return expand_uid_keys_for_legacy_read(workspace, data)
+    except Exception:
+        return data
 
 
 def _resolved_block(enrichments: Mapping[str, Any], key: str) -> Dict[str, Any]:
