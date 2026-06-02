@@ -411,6 +411,11 @@ EXPORT_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                                 "items": {"type": "string"},
                                 "description": "Optional speaker subset; project.json order is preserved and unknown speakers return invalid_args. Omit or pass an empty list for all speakers.",
                             },
+                            "conceptIds": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Optional concept-id subset (concepts.csv ids), e.g. the caller's currently-filtered concept menu. When provided, the export covers exactly these concepts instead of the whole tag. Omit or pass an empty list to use tagId.",
+                            },
                             "outputPath": {
                                 "type": "string",
                                 "minLength": 1,
@@ -1105,6 +1110,12 @@ def export_concept_appendix_md(tools: "ParseChatTools", args: Dict[str, Any]) ->
         speakers = [str(s).strip() for s in speakers_raw if str(s).strip()]
         if speakers:
             kwargs["speaker_filter"] = speakers
+
+    concept_ids_raw = args.get("conceptIds")
+    if isinstance(concept_ids_raw, list):
+        concept_ids = [str(c).strip() for c in concept_ids_raw if str(c).strip()]
+        if concept_ids:
+            kwargs["concept_ids"] = concept_ids
 
     try:
         result = build_concept_appendix_markdown(**kwargs)

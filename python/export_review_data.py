@@ -1186,6 +1186,7 @@ def build_review_data(
     tag_id: str = DEFAULT_TAG_ID,
     contact_config: Path | None = None,
     speaker_filter: Iterable[str] | None = None,
+    concept_ids: Iterable[str] | None = None,
 ) -> tuple[dict[str, Any], list[tuple[str, dict[str, Any]]]]:
     """Return ``(review_data_payload, clip_plan)``.
 
@@ -1239,15 +1240,27 @@ def build_review_data(
     tagged_union: set[str] = set()
     for ids in thesis_ids_by_speaker.values():
         tagged_union.update(ids)
-    ordered_concept_ids = [
-        str(row.get("id") or "").strip()
-        for row in concept_rows
-        if str(row.get("id") or "").strip() in tagged_union
-    ]
-    # Fallback: if no tags found, exporter still emits an empty schema so the
-    # caller sees a valid output rather than a crash. Stays explicit in logs.
-    if not ordered_concept_ids and tagged_union:
-        ordered_concept_ids = sorted(tagged_union)
+
+    if concept_ids is not None:
+        # Explicit concept selection (e.g. the caller's currently-filtered concept
+        # menu) overrides tag filtering — export exactly these ids, in concepts.csv
+        # order. Unknown ids are silently dropped; the caller owns the visible set.
+        requested_ids = {str(c).strip() for c in concept_ids if str(c).strip()}
+        ordered_concept_ids = [
+            str(row.get("id") or "").strip()
+            for row in concept_rows
+            if str(row.get("id") or "").strip() in requested_ids
+        ]
+    else:
+        ordered_concept_ids = [
+            str(row.get("id") or "").strip()
+            for row in concept_rows
+            if str(row.get("id") or "").strip() in tagged_union
+        ]
+        # Fallback: if no tags found, exporter still emits an empty schema so the
+        # caller sees a valid output rather than a crash. Stays explicit in logs.
+        if not ordered_concept_ids and tagged_union:
+            ordered_concept_ids = sorted(tagged_union)
 
     concept_entries: list[dict[str, Any]] = []
     for concept_index, concept_id in enumerate(ordered_concept_ids):

@@ -200,8 +200,12 @@ def build_concept_appendix_markdown(
     include_cognates: bool = True,
     contact_config: Optional[Path] = None,
     speaker_filter: Optional[Iterable[str]] = None,
+    concept_ids: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:
     """Build the concept-appendix markdown document.
+
+    When ``concept_ids`` is given (e.g. the caller's currently-filtered concept menu),
+    the export covers exactly those concepts instead of the whole ``tag_id`` set.
 
     Returns ``{"markdown": str, "concepts": int, "speakers": int}``.
     """
@@ -211,6 +215,7 @@ def build_concept_appendix_markdown(
         tag_id=tag_id,
         contact_config=contact_config,
         speaker_filter=speaker_filter,
+        concept_ids=concept_ids,
     )
     metadata = review_data.get("metadata", {}) if isinstance(review_data, Mapping) else {}
     concepts = review_data.get("concepts", []) if isinstance(review_data, Mapping) else []

@@ -62,12 +62,13 @@ describe("export-and-media contracts", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await getConceptAppendixExport({ speakers: ["Fail01", "Kalh01"] });
+    await getConceptAppendixExport({ speakers: ["Fail01", "Kalh01"], conceptIds: ["1", "3"] });
 
     const [, init] = fetchMock.mock.calls[0];
     expect(JSON.parse(String(init?.body))).toEqual({
       includeCognates: true,
       speakers: ["Fail01", "Kalh01"],
+      conceptIds: ["1", "3"],
     });
   });
 
