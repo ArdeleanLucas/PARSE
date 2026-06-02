@@ -2443,7 +2443,7 @@ export function ParseUI() {
 
               <SectionCard title={`Speaker forms · ${selectedSpeakers.length} selected`}
                 aside={<button className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-slate-800"><ArrowUpDown className="h-3 w-3"/> Sort by similarity</button>}>
-                {conceptIdentityError && (
+                {conceptIdentityUnavailable && (
                   <div className="mb-3 rounded-lg border border-amber-100 bg-amber-50 p-4 text-xs text-amber-800" data-testid="concept-identity-error">
                     <span className="font-semibold">Concept identity unavailable.</span> Compare bundle linkage is degraded — only exact identity matches are shown, to avoid mis-routing. {conceptIdentityError}
                   </div>
