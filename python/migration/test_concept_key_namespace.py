@@ -3,14 +3,22 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from migration.concept_key_namespace import _canonical_key, build_remap, migrate
+from migration.concept_key_namespace import (
+    _canonical_key,
+    build_remap,
+    build_remap_for_workspace,
+    migrate,
+    promote_safe_legacy_keys,
+    scan_legacy_keys,
+)
 
 
-def _write_workspace(ws: Path, enrichments: dict) -> None:
+def _concepts_csv(ws: Path) -> Path:
     # Faithful slice of the real corpus: a dotted-key SAFE group (step-son,
     # KLQ 2.26), an integer-key AMBIGUOUS group (you (pl.), JBIL 322 == leaf's
     # id), and the colliding singleton (leaf, id 322).
-    (ws / "concepts.csv").write_text(
+    path = ws / "concepts.csv"
+    path.write_text(
         "id,concept_en,source_item,source_survey,custom_order\n"
         "322,leaf,102,JBIL,\n"
         "520,you (pl.),322,JBIL,\n"
@@ -21,6 +29,11 @@ def _write_workspace(ws: Path, enrichments: dict) -> None:
         "54,water,7.4,KLQ,\n",
         encoding="utf-8",
     )
+    return path
+
+
+def _write_workspace(ws: Path, enrichments: dict) -> None:
+    _concepts_csv(ws)
     (ws / "parse-enrichments.json").write_text(
         json.dumps(enrichments, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
@@ -91,3 +104,55 @@ def test_idempotent(tmp_path: Path) -> None:
     second = migrate(tmp_path, execute=True)
     assert second["decision_keys_migrated"] == []
     assert second["verification_ok"] is True
+
+
+def test_promote_safe_legacy_keys_promotes_safe_leaves_ambiguous(tmp_path: Path) -> None:
+    remap = build_remap(_concepts_csv(tmp_path))
+    enr = {"manual_overrides": {
+        "speaker_flags": {"2.26": {"S1": True}, "54": {"S2": True}},  # 2.26 SAFE, 54 singleton
+        "cognate_sets": {"322": {"A": ["S1"]}},                        # 322 AMBIGUOUS (== leaf id)
+        "concept_merges": {"2.26": ["527"]},
+    }}
+    promos = promote_safe_legacy_keys(enr, remap)
+    mo = enr["manual_overrides"]
+    assert sorted(mo["speaker_flags"]) == ["38", "54"]          # 2.26 -> 38; singleton kept
+    assert mo["concept_merges"] == {"38": ["527"]}              # key promoted
+    assert mo["cognate_sets"] == {"322": {"A": ["S1"]}}         # AMBIGUOUS untouched
+    assert {p["old_key"] for p in promos} == {"2.26"}
+
+
+def test_promote_merges_into_existing_new_key(tmp_path: Path) -> None:
+    remap = build_remap(_concepts_csv(tmp_path))
+    enr = {"manual_overrides": {"speaker_flags": {"2.26": {"S1": True}, "38": {"S2": True}}}}
+    promote_safe_legacy_keys(enr, remap)
+    assert enr["manual_overrides"]["speaker_flags"]["38"] == {"S2": True, "S1": True}
+
+
+def test_scan_legacy_keys_reports_pending(tmp_path: Path) -> None:
+    remap = build_remap(_concepts_csv(tmp_path))
+    enr = {"manual_overrides": {"cognate_sets": {"322": {"A": []}, "54": {}}}}
+    found = scan_legacy_keys(enr, remap)
+    assert found == [{"block": "cognate_sets", "key": "322", "classification": "AMBIGUOUS"}]
+
+
+def test_build_remap_for_workspace_caches_and_handles_missing(tmp_path: Path) -> None:
+    assert build_remap_for_workspace(tmp_path) == {}     # no concepts.csv yet
+    _write_workspace(tmp_path, {})
+    first = build_remap_for_workspace(tmp_path)
+    assert build_remap_for_workspace(tmp_path) is first  # cached by mtime
+
+
+def test_load_enrichments_promotes_safe_keys_at_read_time(tmp_path: Path) -> None:
+    # End-to-end: the central loader applies the read-time safety net.
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from canonical_lexemes import load_enrichments
+
+    _write_workspace(tmp_path, {"manual_overrides": {
+        "speaker_flags": {"2.26": {"S1": True}},
+        "cognate_sets": {"322": {"A": ["S1"]}},
+    }})
+    loaded = load_enrichments(tmp_path)
+    mo = loaded["manual_overrides"]
+    assert "38" in mo["speaker_flags"] and "2.26" not in mo["speaker_flags"]  # SAFE promoted
+    assert mo["cognate_sets"] == {"322": {"A": ["S1"]}}                       # AMBIGUOUS untouched

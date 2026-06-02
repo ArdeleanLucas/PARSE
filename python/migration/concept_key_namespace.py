@@ -112,6 +112,97 @@ def build_remap(concepts_csv: Path) -> dict[str, Any]:
     return remap
 
 
+_REMAP_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def build_remap_for_workspace(project_root: Path) -> dict[str, Any]:
+    """``build_remap`` for a workspace, cached by ``concepts.csv`` mtime so the
+    read-time promotion (below) is cheap on a hot path. Returns ``{}`` if the
+    csv is missing/unreadable (callers treat that as "no promotion")."""
+    csv_path = Path(project_root) / "concepts.csv"
+    try:
+        mtime = csv_path.stat().st_mtime
+    except OSError:
+        return {}
+    cached = _REMAP_CACHE.get(str(csv_path))
+    if cached and cached[0] == mtime:
+        return cached[1]
+    try:
+        remap = build_remap(csv_path)
+    except (OSError, KeyError, ValueError):
+        return {}
+    _REMAP_CACHE[str(csv_path)] = (mtime, remap)
+    return remap
+
+
+def _move_key(block: dict, old_key: str, new_key: str) -> None:
+    value = block.pop(old_key)
+    if new_key in block and isinstance(block[new_key], dict) and isinstance(value, dict):
+        merged = dict(block[new_key])
+        merged.update(value)
+        block[new_key] = merged
+    else:
+        block[new_key] = value
+
+
+def promote_safe_legacy_keys(enr: dict, remap: dict[str, Any]) -> list[dict]:
+    """In-memory promotion of decision data from SAFE legacy keys to their
+    canonical new keys, mutating ``enr`` in place. Returns promotion records.
+
+    Only SAFE (non-ambiguous) entries are touched — AMBIGUOUS/collided keys are
+    left exactly as-is so the original entanglement is never re-introduced (the
+    9 collided slots still need the migration report + human triage). Reuses the
+    same ``build_remap`` SAFE classification as the on-disk migration.
+
+    Call on load (after reading parse-enrichments.json) so old *safe* data is
+    visible under the new keys even when the migration script has not yet run —
+    a guardrail against a missed migration for the non-colliding groups. The
+    migration script remains the canonical "rewrite the file on disk" step.
+    """
+    promos: list[dict] = []
+
+    def promote_container(container: object) -> None:
+        if not isinstance(container, dict):
+            return
+        for name in CONCEPT_KEYED_BLOCKS:
+            block = container.get(name)
+            if not isinstance(block, dict):
+                continue
+            for old_key in list(block.keys()):
+                entry = remap.get(old_key)
+                if not entry or entry["classification"] != "SAFE":
+                    continue
+                _move_key(block, old_key, entry["new_key"])
+                promos.append({"block": name, "old_key": old_key, "new_key": entry["new_key"]})
+            if name == "concept_merges":  # absorbed-id arrays are concept keys too
+                for k, arr in block.items():
+                    if isinstance(arr, list):
+                        block[k] = [
+                            remap[x]["new_key"] if (x in remap and remap[x]["classification"] == "SAFE") else x
+                            for x in (_norm(e) for e in arr)
+                        ]
+
+    promote_container(enr.get("manual_overrides"))
+    promote_container(enr)
+    return promos
+
+
+def scan_legacy_keys(enr: dict, remap: dict[str, Any]) -> list[dict]:
+    """Return any legacy remap keys (SAFE or AMBIGUOUS) still present in the
+    decision blocks — used to warn at load time that a migration is pending."""
+    found: list[dict] = []
+    for container in (enr.get("manual_overrides") or {}, enr):
+        if not isinstance(container, dict):
+            continue
+        for name in CONCEPT_KEYED_BLOCKS:
+            block = container.get(name)
+            if isinstance(block, dict):
+                for k in block:
+                    if k in remap:
+                        found.append({"block": name, "key": k, "classification": remap[k]["classification"]})
+    return found
+
+
 def _remap_dict_keys(block: dict, remap: dict[str, Any], touched: list, ambiguous: list, block_name: str) -> dict:
     """Return a re-keyed copy of one concept-keyed dict block."""
     out: dict[str, Any] = {}
