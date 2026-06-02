@@ -116,10 +116,13 @@ export function useExport() {
     triggerDownload(blob, "canonical-lexemes.tsv");
   }, []);
 
-  const exportConceptAppendix = useCallback(async (speakers?: string[]): Promise<void> => {
-    const blob = await getConceptAppendixExport({ includeCognates: true, speakers });
-    await saveBlob(blob, "concept-appendix.md", { mimeType: "text/markdown" });
-  }, []);
+  const exportConceptAppendix = useCallback(
+    async (speakers?: string[], conceptIds?: string[]): Promise<void> => {
+      const blob = await getConceptAppendixExport({ includeCognates: true, speakers, conceptIds });
+      await saveBlob(blob, "concept-appendix.md", { mimeType: "text/markdown" });
+    },
+    [],
+  );
 
   const exportCSV = useCallback((): void => {
     const root = normalizeDataRoot(data);

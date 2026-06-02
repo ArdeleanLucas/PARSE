@@ -131,12 +131,13 @@ describe("useExport", () => {
     const { result } = renderHook(() => useExport());
 
     await act(async () => {
-      await result.current.exportConceptAppendix(["Fail01", "Kalh01"]);
+      await result.current.exportConceptAppendix(["Fail01", "Kalh01"], ["1", "3"]);
     });
 
     expect(getConceptAppendixExport).toHaveBeenCalledWith({
       includeCognates: true,
       speakers: ["Fail01", "Kalh01"],
+      conceptIds: ["1", "3"],
     });
     // No File System Access API in jsdom → saveBlob falls back to an anchor download.
     expect(mockCreateObjectURL).toHaveBeenCalledWith(mdBlob);

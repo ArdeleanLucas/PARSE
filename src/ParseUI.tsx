@@ -854,9 +854,13 @@ export function ParseUI() {
     setAppendixExporting(true);
     setActionsMenuOpen(false);
     try {
-      // Export the speakers currently selected in compare mode; an empty
-      // selection exports all speakers (handled server-side).
-      await exportConceptAppendix(selectedSpeakers);
+      // Export the speakers currently selected in compare mode (empty → all),
+      // and only the concepts currently visible in the concept menu (after tag /
+      // status / search / speaker-scope filters) — never the whole tag by default.
+      const conceptIds = Array.from(
+        new Set(speakerScopedConcepts.flatMap((candidate) => conceptUnderlyingKeys(candidate))),
+      );
+      await exportConceptAppendix(selectedSpeakers, conceptIds);
     } catch (err) {
       console.error('[ParseUI] Concept appendix export failed:', err);
     } finally {

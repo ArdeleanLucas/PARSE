@@ -98,7 +98,14 @@ def test_concept_appendix_tool_is_registered_for_chat_and_http_catalog(tmp_path:
     spec = tools.tool_spec("export_concept_appendix_md")
     assert spec.mutability == "mutating"
     assert spec.parameters["additionalProperties"] is False
-    assert set(spec.parameters["properties"]) == {"tagId", "includeCognates", "speakers", "outputPath", "dryRun"}
+    assert set(spec.parameters["properties"]) == {
+        "tagId",
+        "includeCognates",
+        "speakers",
+        "conceptIds",
+        "outputPath",
+        "dryRun",
+    }
 
     catalog = build_mcp_http_catalog(project_root=tmp_path, mode="all")
     assert "export_concept_appendix_md" in {tool["name"] for tool in catalog["tools"]}
@@ -151,6 +158,35 @@ def test_appendix_speaker_subset_limits_matrix_and_forms(tmp_path: pathlib.Path)
     assert "| SpkB |" not in md
     assert "| SpkA |" in md
     assert "| SpkC |" in md
+
+
+def test_appendix_concept_subset_limits_to_requested_ids(tmp_path: pathlib.Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    # Visible concept menu filtered to just 'big' (id 1) — 'small' (id 3) must drop out,
+    # and the export must not fall back to the whole tag.
+    result = ParseChatTools(project_root=workspace).execute(
+        "export_concept_appendix_md", {"conceptIds": ["1"]}
+    )
+
+    assert result["ok"] is True
+    payload = result["result"]
+    assert payload["concepts"] == 1
+    md = payload["markdown"]
+    assert "### 1 · big" in md
+    assert "small" not in md
+
+
+def test_appendix_preserves_caller_concept_order(tmp_path: pathlib.Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    # concepts.csv order is big(1,2) then small(3). Request the reverse order to prove
+    # the export mirrors the concept menu's order, not concepts.csv order.
+    result = ParseChatTools(project_root=workspace).execute(
+        "export_concept_appendix_md", {"conceptIds": ["3", "1"]}
+    )
+    md = result["result"]["markdown"]
+    assert md.index("· small") < md.index("· big")
+    assert "### 1 · small" in md
+    assert "### 2 · big" in md
 
 
 def test_appendix_unknown_speaker_returns_invalid_args(tmp_path: pathlib.Path) -> None:
