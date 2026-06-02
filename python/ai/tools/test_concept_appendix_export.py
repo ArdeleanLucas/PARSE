@@ -176,6 +176,19 @@ def test_appendix_concept_subset_limits_to_requested_ids(tmp_path: pathlib.Path)
     assert "small" not in md
 
 
+def test_appendix_preserves_caller_concept_order(tmp_path: pathlib.Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    # concepts.csv order is big(1,2) then small(3). Request the reverse order to prove
+    # the export mirrors the concept menu's order, not concepts.csv order.
+    result = ParseChatTools(project_root=workspace).execute(
+        "export_concept_appendix_md", {"conceptIds": ["3", "1"]}
+    )
+    md = result["result"]["markdown"]
+    assert md.index("· small") < md.index("· big")
+    assert "### 1 · small" in md
+    assert "### 2 · big" in md
+
+
 def test_appendix_unknown_speaker_returns_invalid_args(tmp_path: pathlib.Path) -> None:
     workspace = _make_workspace(tmp_path)
     result = ParseChatTools(project_root=workspace).execute(

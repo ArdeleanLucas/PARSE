@@ -1243,14 +1243,18 @@ def build_review_data(
 
     if concept_ids is not None:
         # Explicit concept selection (e.g. the caller's currently-filtered concept
-        # menu) overrides tag filtering — export exactly these ids, in concepts.csv
-        # order. Unknown ids are silently dropped; the caller owns the visible set.
-        requested_ids = {str(c).strip() for c in concept_ids if str(c).strip()}
-        ordered_concept_ids = [
-            str(row.get("id") or "").strip()
-            for row in concept_rows
-            if str(row.get("id") or "").strip() in requested_ids
-        ]
+        # menu) overrides tag filtering — export exactly these ids, preserving the
+        # caller's order (so the export mirrors the concept menu's sort) rather than
+        # concepts.csv order. Unknown/duplicate ids are dropped; caller owns the set.
+        valid_ids = {str(row.get("id") or "").strip() for row in concept_rows}
+        valid_ids.discard("")
+        seen_requested: set[str] = set()
+        ordered_concept_ids = []
+        for raw in concept_ids:
+            cid = str(raw).strip()
+            if cid and cid in valid_ids and cid not in seen_requested:
+                seen_requested.add(cid)
+                ordered_concept_ids.append(cid)
     else:
         ordered_concept_ids = [
             str(row.get("id") or "").strip()
