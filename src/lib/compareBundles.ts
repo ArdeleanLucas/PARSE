@@ -138,6 +138,37 @@ export function normalizeBundles(payload: unknown): CompareBundlesResponse {
 }
 
 
+/**
+ * Resolve the Compare bundle that owns a displayed concept.
+ *
+ * Routing precedence:
+ *  1. Always match on the stable ConceptIdentity `uid` (`bundle.uid === conceptKey`).
+ *     Compare and Annotate both address bundles by this key, and it lives in a
+ *     single collision-free namespace.
+ *  2. ONLY when `allowRowIdFallback` is true, fall back to `row_ids.includes`.
+ *     csv row ids share a string namespace with survey-local `source_item`
+ *     coordinates and silently collide (e.g. JBIL `source_item "123"` equals csv
+ *     id `123`), so this path can attach a concept to the WRONG bundle. It is the
+ *     legacy/mock routing the removed `findBundleForConcept` bridge guarded.
+ *
+ * The caller may only enable the fallback when concept identity is
+ * *legitimately empty* (loaded, zero concepts — mocks / older backends). When
+ * identity *failed to load*, the fallback MUST stay off: returning null is the
+ * correct, non-silent outcome, and the caller surfaces an explicit "concept
+ * identity unavailable" state instead of risking a mis-routed bundle.
+ */
+export function findCompareBundleForConcept(
+  bundles: readonly CompareBundle[],
+  conceptKey: string,
+  options: { allowRowIdFallback: boolean },
+): CompareBundle | null {
+  if (!conceptKey) return null;
+  const byUid = bundles.find((bundle) => bundle.uid === conceptKey);
+  if (byUid) return byUid;
+  if (!options.allowRowIdFallback) return null;
+  return bundles.find((bundle) => bundle.row_ids.includes(conceptKey)) ?? null;
+}
+
 export function enumerateVariants(bundle: CompareBundle): EnumeratedCompareVariant[] {
   const out: EnumeratedCompareVariant[] = [];
   for (const bucket of bundle.buckets) {

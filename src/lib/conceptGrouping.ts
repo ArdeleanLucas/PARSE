@@ -175,6 +175,38 @@ function isUsableConceptIdentity(identity: ConceptIdentityResponse | null | unde
   return !!identity && Array.isArray(identity.concepts) && identity.concepts.length > 0;
 }
 
+/**
+ * How concept identity resolved for the current view:
+ *  - `loaded`      — identity is present with at least one concept; group and
+ *                    route by stable `uid`.
+ *  - `empty`       — identity loaded successfully but carries no concepts
+ *                    (mocks / older backends that don't serve identity yet).
+ *                    The legacy `(survey, source_item)` grouping and the
+ *                    `row_ids.includes` bundle fallback are valid here.
+ *  - `unavailable` — identity FAILED to load (network/server error). This is
+ *                    NOT interchangeable with `empty`: the legacy grouping may
+ *                    still be shown for display, but the collision-prone
+ *                    `row_ids.includes` bundle routing MUST NOT be used, because
+ *                    it can silently attach a concept to the wrong bundle.
+ */
+export type ConceptIdentityAvailability = 'loaded' | 'empty' | 'unavailable';
+
+/**
+ * Classify the concept-identity load outcome so consumers can tell a
+ * legitimately-empty identity apart from one that failed to load. Identity
+ * presence wins: a usable payload is always `loaded` regardless of any stale
+ * error. A load error with no usable payload is `unavailable`; everything else
+ * (including the pre-load transient) is `empty`.
+ */
+export function classifyConceptIdentity(
+  identity: ConceptIdentityResponse | null | undefined,
+  loadError: string | null | undefined,
+): ConceptIdentityAvailability {
+  if (isUsableConceptIdentity(identity)) return 'loaded';
+  if (loadError) return 'unavailable';
+  return 'empty';
+}
+
 function groupConceptEntriesFromIdentity(
   rawConcepts: readonly ConceptEntry[],
   resolveTag: ResolveConceptTag,

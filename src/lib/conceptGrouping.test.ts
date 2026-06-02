@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ConceptEntry } from '../api/types';
-import { buildRealizationKey, findConceptByUnderlyingKey, groupConceptEntries, parseRealizationKey, resolveModeSwitchSelection } from './conceptGrouping';
+import type { ConceptEntry, ConceptIdentityResponse } from '../api/types';
+import { buildRealizationKey, classifyConceptIdentity, findConceptByUnderlyingKey, groupConceptEntries, parseRealizationKey, resolveModeSwitchSelection } from './conceptGrouping';
 
 const untagged = () => 'untagged' as const;
 
@@ -398,5 +398,31 @@ describe('resolveModeSwitchSelection (open-in-annotate / mode-switch reconcile)'
   it('returns no-op for a null or unknown key', () => {
     expect(resolveModeSwitchSelection(concepts, null, big.id, null)).toEqual({});
     expect(resolveModeSwitchSelection(concepts, 'nope', big.id, 'nope')).toEqual({});
+  });
+});
+
+describe('classifyConceptIdentity', () => {
+  const usable: ConceptIdentityResponse = {
+    version: 1,
+    concepts: [{ uid: 'c-1', label: 'one', members: ['1'], origin: 'auto' }],
+    uid_by_row: { '1': 'c-1' },
+    warnings: [],
+  };
+  const emptyIdentity: ConceptIdentityResponse = { version: 1, concepts: [], uid_by_row: {}, warnings: [] };
+
+  it("is 'loaded' when identity carries concepts (even alongside a stale error)", () => {
+    expect(classifyConceptIdentity(usable, null)).toBe('loaded');
+    expect(classifyConceptIdentity(usable, 'boom')).toBe('loaded');
+  });
+
+  it("is 'unavailable' when identity failed to load (null payload + error)", () => {
+    expect(classifyConceptIdentity(null, 'network down')).toBe('unavailable');
+  });
+
+  it("is 'empty' for a legitimately-empty identity or the pre-load transient", () => {
+    // Loaded-but-empty (mocks / older backends) and the not-yet-loaded state are
+    // both safe to treat as empty; only a load error is 'unavailable'.
+    expect(classifyConceptIdentity(emptyIdentity, null)).toBe('empty');
+    expect(classifyConceptIdentity(null, null)).toBe('empty');
   });
 });
