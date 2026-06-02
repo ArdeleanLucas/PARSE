@@ -3,6 +3,7 @@ import type {
   CanonicalLexemePutRequest,
   CanonicalLexemePutResponse,
   CompareBundlesResponse,
+  ConceptIdentityOverrideRequest,
   ConceptIdentityResponse,
 } from "../types";
 import { apiFetch } from "./shared";
@@ -27,6 +28,15 @@ export async function getCompareBundles(query: CompareBundlesQuery = {}): Promis
 
 export async function getConceptIdentity(): Promise<ConceptIdentityResponse> {
   return apiFetch<ConceptIdentityResponse>("/api/concept-identity");
+}
+
+export async function postConceptIdentityOverride(
+  payload: ConceptIdentityOverrideRequest,
+): Promise<ConceptIdentityResponse> {
+  return apiFetch<ConceptIdentityResponse>("/api/concept-identity", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function putCanonicalLexeme(

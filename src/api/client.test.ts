@@ -20,6 +20,7 @@ import {
   relinkConceptsByGloss,
   getCompareBundles,
   getConceptIdentity,
+  postConceptIdentityOverride,
   putCanonicalLexeme,
   deleteCanonicalLexeme,
 } from "./client";
@@ -623,6 +624,31 @@ describe("compare bundle API client contract", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/concept-identity",
       expect.objectContaining({ headers: expect.any(Object) }),
+    );
+  });
+
+  it("posts durable manual concept identity split and merge overrides", async () => {
+    const payload = {
+      version: 1,
+      concepts: [{ uid: "c-53", label: "big", members: ["53"], origin: "manual:split" }],
+      uid_by_row: { "53": "c-53", "150": "c-150" },
+      warnings: ["concept 'c-old' referenced 1 unknown row id(s) (999); they were dropped."],
+    };
+    fetchMock.mockResolvedValue(jsonResponse(payload));
+
+    await expect(postConceptIdentityOverride({
+      uid: "c-53",
+      label: "big",
+      members: ["53"],
+      origin: "manual:split",
+    })).resolves.toEqual(payload);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/concept-identity",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ uid: "c-53", label: "big", members: ["53"], origin: "manual:split" }),
+      }),
     );
   });
 

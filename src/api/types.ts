@@ -223,6 +223,15 @@ export interface ConceptIdentityConcept {
   origin: string;
 }
 
+export type ConceptIdentityOverrideOrigin = "manual:split" | "manual:merge";
+
+export interface ConceptIdentityOverrideRequest {
+  uid?: string;
+  label?: string;
+  members: string[];
+  origin: ConceptIdentityOverrideOrigin;
+}
+
 export interface ConceptIdentityResponse {
   version: number;
   concepts: ConceptIdentityConcept[];

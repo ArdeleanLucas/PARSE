@@ -25,6 +25,8 @@ import type {
   CanonicalLexemeSelection,
   CompareBundle,
   CompareVariant,
+  ConceptIdentityOverrideRequest,
+  ConceptIdentityResponse,
 } from '../../api/types';
 import {
   canonicalFor,
@@ -75,6 +77,10 @@ export interface SpeakerFormsTableProps {
   onResetCognate?: (speaker: string, cognateKey: string) => void;
   onToggleSpeakerFlag?: (speaker: string, current: boolean, cognateKey: string) => void;
   onOpenInAnnotate?: (speaker: string, variant: SpeakerFormsTableVariant) => void;
+  identityWarnings?: string[];
+  onConceptIdentityOverride?: (
+    request: ConceptIdentityOverrideRequest,
+  ) => Promise<{ identity: ConceptIdentityResponse; bundles: CompareBundle[] }>;
 }
 
 type SortState = 'unsorted' | 'desc' | 'asc';
@@ -815,6 +821,192 @@ function ExpandedPanel({
   );
 }
 
+
+function bundleMemberSummaries(bundle: CompareBundle): Array<{ rowId: string; label: string }> {
+  const allowedIds = new Set((bundle.row_ids ?? []).map((rowId) => String(rowId ?? '').trim()).filter(Boolean));
+  const byId = new Map<string, string>();
+  for (const bucket of bundle.buckets ?? []) {
+    for (const variant of bucket.variants ?? []) {
+      const rowId = String(variant.csv_row_id ?? '').trim();
+      if (!rowId || byId.has(rowId) || (allowedIds.size > 0 && !allowedIds.has(rowId))) continue;
+      const label = variant.variant_label
+        ? `${variant.variant_label} · ${variant.concept_en ?? variant.label ?? rowId}`
+        : (variant.concept_en ?? variant.label ?? rowId);
+      byId.set(rowId, label);
+    }
+  }
+  for (const rowId of bundle.row_ids ?? []) {
+    const id = String(rowId ?? '').trim();
+    if (id && !byId.has(id)) byId.set(id, id);
+  }
+  return Array.from(byId, ([rowId, label]) => ({ rowId, label }));
+}
+
+function defaultOverrideUid(bundle: CompareBundle): string {
+  return bundle.uid || bundle.bundle_id || (bundle.row_ids?.[0] ? `c-${bundle.row_ids[0]}` : 'c-manual');
+}
+
+function conceptsIntersectingRows(
+  identity: ConceptIdentityResponse | null,
+  rowIds: readonly string[],
+): ConceptIdentityResponse['concepts'] {
+  if (!identity) return [];
+  const rowSet = new Set(rowIds);
+  return identity.concepts.filter((concept) => concept.members.some((member) => rowSet.has(member)));
+}
+
+interface ConceptIdentityOverridePanelProps {
+  bundle: CompareBundle;
+  identityWarnings: string[];
+  onApply: (request: ConceptIdentityOverrideRequest) => Promise<{ identity: ConceptIdentityResponse; bundles: CompareBundle[] }>;
+}
+
+function ConceptIdentityOverridePanel({ bundle, identityWarnings, onApply }: ConceptIdentityOverridePanelProps) {
+  const members = useMemo(() => bundleMemberSummaries(bundle), [bundle]);
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(() => new Set(members.map((member) => member.rowId)));
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  const [lastIdentity, setLastIdentity] = useState<ConceptIdentityResponse | null>(null);
+  const [refreshedBundleCount, setRefreshedBundleCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    setSelectedRows(new Set(members.map((member) => member.rowId)));
+    setStatus('idle');
+    setError(null);
+    setLastIdentity(null);
+    setRefreshedBundleCount(null);
+  }, [members]);
+
+  const selected = useMemo(
+    () => members.map((member) => member.rowId).filter((rowId) => selectedRows.has(rowId)),
+    [members, selectedRows],
+  );
+  const visibleWarnings = lastIdentity?.warnings ?? identityWarnings;
+  const resultingConcepts = conceptsIntersectingRows(lastIdentity, bundle.row_ids ?? []);
+  const baseRequest = useCallback((origin: ConceptIdentityOverrideRequest['origin']): ConceptIdentityOverrideRequest => ({
+    uid: defaultOverrideUid(bundle),
+    label: bundle.label,
+    members: selected,
+    origin,
+  }), [bundle, selected]);
+
+  const apply = useCallback(async (origin: ConceptIdentityOverrideRequest['origin']) => {
+    if (selected.length === 0) return;
+    setStatus('saving');
+    setError(null);
+    try {
+      const result = await onApply(baseRequest(origin));
+      setLastIdentity(result.identity);
+      setRefreshedBundleCount(result.bundles.length);
+      setStatus('saved');
+    } catch (err) {
+      setStatus('error');
+      setError(err instanceof Error ? err.message : 'Could not write concept identity override.');
+    }
+  }, [baseRequest, onApply, selected.length]);
+
+  if (members.length === 0) return null;
+
+  return (
+    <div
+      className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 text-xs text-slate-700"
+      data-testid="concept-identity-override-panel"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-indigo-700">
+            Concept identity override
+          </div>
+          <p className="mt-1 max-w-2xl text-[11px] text-slate-600">
+            Persist a manual split or merge in concept-identity.json, then refresh identity and Compare bundles.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="rounded-md bg-indigo-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            disabled={status === 'saving' || selected.length === 0}
+            onClick={() => void apply('manual:split')}
+          >
+            Split into separate concepts
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-indigo-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:text-slate-400"
+            disabled={status === 'saving' || selected.length < 2}
+            onClick={() => void apply('manual:merge')}
+          >
+            Merge selected rows
+          </button>
+        </div>
+      </div>
+      {(bundle.warnings?.length ?? 0) > 0 && (
+        <ul className="mt-3 list-disc space-y-1 pl-4 text-[11px] text-amber-800">
+          {bundle.warnings!.map((warning) => <li key={warning}>{warning}</li>)}
+        </ul>
+      )}
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {members.map((member) => (
+          <label key={member.rowId} className="flex items-start gap-2 rounded-lg border border-white/70 bg-white px-2 py-2 text-[11px] text-slate-700 shadow-sm">
+            <input
+              type="checkbox"
+              checked={selectedRows.has(member.rowId)}
+              aria-label={`Include row ${member.rowId} in concept identity override`}
+              onChange={(event) => {
+                setSelectedRows((current) => {
+                  const next = new Set(current);
+                  if (event.target.checked) next.add(member.rowId);
+                  else next.delete(member.rowId);
+                  return next;
+                });
+              }}
+            />
+            <span>
+              <span className="font-mono font-semibold text-slate-900">{member.rowId}</span>
+              <span className="ml-1 text-slate-500">{member.label}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      {visibleWarnings.length > 0 && (
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2" data-testid="concept-identity-warnings">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-700">Identity warnings</div>
+          <ul className="mt-1 list-disc space-y-1 pl-4 text-[11px] text-amber-800">
+            {visibleWarnings.map((warning) => <li key={warning}>{warning}</li>)}
+          </ul>
+        </div>
+      )}
+      {status !== 'idle' && (
+        <div
+          className={`mt-3 rounded-lg px-3 py-2 text-[11px] ${status === 'error' ? 'border border-rose-200 bg-rose-50 text-rose-700' : 'border border-emerald-200 bg-emerald-50 text-emerald-700'}`}
+          data-testid="concept-identity-override-status"
+        >
+          {status === 'saving'
+            ? 'Saving override…'
+            : status === 'saved'
+              ? `Override saved. Refreshed identity and ${refreshedBundleCount ?? 0} Compare bundle${refreshedBundleCount === 1 ? '' : 's'}.`
+              : error}
+        </div>
+      )}
+      {resultingConcepts.length > 0 && (
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2" data-testid="concept-identity-override-result">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Resulting concepts</div>
+          <ul className="mt-1 space-y-1 text-[11px] text-slate-700">
+            {resultingConcepts.map((concept) => (
+              <li key={concept.uid}>
+                <span className="font-mono font-semibold">{concept.uid}</span>
+                <span className="mx-1">·</span>
+                <span>{concept.label}</span>
+                <span className="ml-1 text-slate-500">({concept.origin}; rows {concept.members.join(', ')})</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function speakerBadgeClass(surveyId: string | null | undefined): string {
   const id = (surveyId ?? '').toUpperCase();
   if (id === 'JBL') return 'bg-blue-100 text-blue-800';
@@ -836,6 +1028,8 @@ export function SpeakerFormsTable({
   onToggleSpeakerFlag,
   onOpenInAnnotate = () =>
     console.warn('[SpeakerFormsTable] onOpenInAnnotate not wired — see MC-388-I'),
+  identityWarnings = [],
+  onConceptIdentityOverride,
 }: SpeakerFormsTableProps) {
   const formsBySpeaker = useMemo(
     () => new Map(speakerForms.map((form) => [form.speaker, form])),
@@ -1027,6 +1221,14 @@ export function SpeakerFormsTable({
           )}
         </div>
       </div>
+
+      {onConceptIdentityOverride && (
+        <ConceptIdentityOverridePanel
+          bundle={bundle}
+          identityWarnings={identityWarnings}
+          onApply={onConceptIdentityOverride}
+        />
+      )}
 
       <div className="overflow-x-auto rounded-lg border border-slate-100">
         <table className="w-full min-w-[760px] text-xs">
