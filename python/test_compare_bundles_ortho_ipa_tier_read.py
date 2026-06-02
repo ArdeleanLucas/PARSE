@@ -20,6 +20,10 @@ def _seed_concepts(root: pathlib.Path, rows: list[dict[str, str]]) -> None:
             writer.writerow({key: row.get(key, "") for key in FIELDNAMES})
 
 
+def _seed_identity(root: pathlib.Path, concepts: list[dict]) -> None:
+    (root / "concept-identity.json").write_text(json.dumps({"version": 1, "concepts": concepts}), encoding="utf-8")
+
+
 def _seed_annotation(
     root: pathlib.Path,
     speaker: str,
@@ -90,6 +94,7 @@ def test_sibling_falls_back_to_time_overlap_when_conceptId_is_wrong(tmp_path: pa
             {"id": "624", "concept_en": "hair (C)", "source_item": "32", "source_survey": "JBIL", "custom_order": "624"},
         ],
     )
+    _seed_identity(tmp_path, [{"uid": "c-hair", "label": "hair", "members": ["1", "624"], "origin": "manual:merge"}])
     _seed_annotation(
         tmp_path,
         "Saha01",

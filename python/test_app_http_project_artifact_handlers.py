@@ -225,6 +225,10 @@ def _seed_nexus_compare_workspace(tmp_path: pathlib.Path) -> None:
         encoding="utf-8",
     )
     (tmp_path / "project.json").write_text(json.dumps({"speakers": {"Saha01": {}, "Khan02": {}}}), encoding="utf-8")
+    (tmp_path / "concept-identity.json").write_text(
+        json.dumps({"version": 1, "concepts": [{"uid": "c-big", "label": "big", "members": ["53", "619"], "origin": "manual:merge"}]}),
+        encoding="utf-8",
+    )
     (tmp_path / "parse-enrichments.json").write_text(
         json.dumps(
             {

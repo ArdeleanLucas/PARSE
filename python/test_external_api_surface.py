@@ -72,6 +72,7 @@ def test_build_openapi_document_covers_the_current_http_route_surface() -> None:
         "/api/export/lingpy",
         "/api/export/nexus",
         "/api/exports/canonical-lexemes-report",
+        "/api/concept-identity",
         "/api/compare/bundles",
         "/api/compare/canonical-lexemes/{bundleId}/{speaker}",
         "/api/contact-lexemes/coverage",
@@ -584,6 +585,8 @@ def test_build_openapi_document_covers_compare_bundle_contract() -> None:
     spec = build_openapi_document(base_url="http://127.0.0.1:8766")
     components = spec["components"]["schemas"]
     for name in [
+        "ConceptIdentityConcept",
+        "ConceptIdentityResponse",
         "CompareBundle",
         "CompareBucket",
         "CompareVariant",
@@ -594,6 +597,10 @@ def test_build_openapi_document_covers_compare_bundle_contract() -> None:
     ]:
         assert name in components
 
+    assert spec["paths"]["/api/concept-identity"]["get"]["operationId"] == "getConceptIdentity"
+    assert spec["paths"]["/api/concept-identity"]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ConceptIdentityResponse"
+    }
     assert spec["paths"]["/api/compare/bundles"]["get"]["operationId"] == "getCompareBundles"
     canonical_path = spec["paths"]["/api/compare/canonical-lexemes/{bundleId}/{speaker}"]
     assert set(canonical_path) == {"put", "delete"}
@@ -601,7 +608,9 @@ def test_build_openapi_document_covers_compare_bundle_contract() -> None:
         "$ref": "#/components/schemas/CanonicalLexemePutRequest"
     }
     compare_bundle = components["CompareBundle"]
-    assert compare_bundle["required"] == ["bundle_id", "label", "row_ids", "buckets", "candidates", "canonical", "warnings"]
+    assert compare_bundle["required"] == ["bundle_id", "uid", "label", "row_ids", "buckets", "candidates", "canonical", "warnings"]
+    assert compare_bundle["properties"]["uid"] == {"type": "string"}
+    assert components["CompareBundlesResponse"]["required"] == ["bundles", "identity_warnings"]
     assert compare_bundle["properties"]["concept_survey_links"] == {
         "type": "object",
         "additionalProperties": {"$ref": "#/components/schemas/ConceptSurveyLinks"},

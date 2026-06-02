@@ -21,6 +21,11 @@ def _seed_concepts(root: pathlib.Path, rows: list[dict[str, str]]) -> None:
             writer.writerow({key: row.get(key, "") for key in FIELDNAMES})
 
 
+
+
+def _seed_identity(root: pathlib.Path, concepts: list[dict]) -> None:
+    (root / "concept-identity.json").write_text(json.dumps({"version": 1, "concepts": concepts}), encoding="utf-8")
+
 def _seed_annotation(root: pathlib.Path, speaker: str, intervals: list[dict], *, source_audio: str | None = None) -> None:
     annotations = root / "annotations"
     annotations.mkdir(exist_ok=True)
@@ -52,6 +57,7 @@ def _big_rows() -> list[dict[str, str]]:
 
 def test_build_compare_bundles_groups_big_rows_into_bundle_buckets_and_variants(tmp_path: pathlib.Path) -> None:
     _seed_concepts(tmp_path, _big_rows())
+    _seed_identity(tmp_path, [{"uid": "c-big", "label": "big", "members": ["53", "619", "150"], "origin": "manual:merge"}])
     _seed_annotation(
         tmp_path,
         "Saha01",
@@ -66,7 +72,7 @@ def test_build_compare_bundles_groups_big_rows_into_bundle_buckets_and_variants(
     assert [bundle["bundle_id"] for bundle in payload["bundles"]] == ["bundle:big"]
     bundle = payload["bundles"][0]
     assert bundle["label"] == "big"
-    assert bundle["row_ids"] == ["53", "619", "150"]
+    assert bundle["row_ids"] == ["53", "150", "619"]
     assert [(bucket["survey_id"], bucket["source_item"], [variant["csv_row_id"] for variant in bucket["variants"]]) for bucket in bundle["buckets"]] == [
         ("klq", "4.1", ["53", "619"]),
         ("jbil", "169", ["150"]),
@@ -333,6 +339,7 @@ def test_diacritic_only_difference_does_not_warn(tmp_path: pathlib.Path) -> None
 
 def test_bundle_emits_scoped_survey_overlap_snapshot(tmp_path: pathlib.Path) -> None:
     _seed_concepts(tmp_path, _big_rows())
+    _seed_identity(tmp_path, [{"uid": "c-big", "label": "big", "members": ["53", "619", "150"], "origin": "manual:merge"}])
     (tmp_path / "survey-overlap.json").write_text(
         json.dumps(
             {
@@ -369,6 +376,7 @@ def test_bundle_emits_empty_survey_overlap_snapshot_when_unset(tmp_path: pathlib
 
 def test_migration_from_canonical_realizations_maps_unambiguous_order_and_skips_ambiguous(tmp_path: pathlib.Path) -> None:
     _seed_concepts(tmp_path, _big_rows() + [{"id": "9", "concept_en": "hand", "source_item": "2", "source_survey": "KLQ"}])
+    _seed_identity(tmp_path, [{"uid": "c-big", "label": "big", "members": ["53", "619", "150"], "origin": "manual:merge"}])
     (tmp_path / "parse-enrichments.json").write_text(
         json.dumps({"manual_overrides": {"canonical_realizations": {"big": {"Saha01": 1}, "missing": {"Saha01": 0}}}}),
         encoding="utf-8",
@@ -378,7 +386,7 @@ def test_migration_from_canonical_realizations_maps_unambiguous_order_and_skips_
     big = next(bundle for bundle in bundles if bundle["bundle_id"] == "bundle:big")
     hand = next(bundle for bundle in bundles if bundle["bundle_id"] == "bundle:hand")
 
-    assert big["canonical"]["Saha01"]["csv_row_id"] == "619"
+    assert big["canonical"]["Saha01"]["csv_row_id"] == "150"
     assert big["canonical"]["Saha01"]["source"] == "migration:canonical_realizations"
     assert "Saha01" not in hand["canonical"]
 
@@ -490,6 +498,66 @@ def test_unlinked_distinct_stems_stay_separate_bundles(tmp_path: pathlib.Path) -
     payload = build_compare_bundles(tmp_path, speakers=["Saha01"])
 
     assert sorted(b["bundle_id"] for b in payload["bundles"]) == ["bundle:salt", "bundle:salt-eating"]
+
+
+def test_compare_bundles_expose_identity_uid_and_members(tmp_path: pathlib.Path) -> None:
+    _seed_concepts(tmp_path, _salt_rows())
+    (tmp_path / "survey-overlap.json").write_text(
+        json.dumps({"concept_survey_links": {"52": {"jbil": "139"}, "352": {"klq": "3.14"}}}),
+        encoding="utf-8",
+    )
+
+    bundle = build_compare_bundles(tmp_path, speakers=[])["bundles"][0]
+
+    assert bundle["uid"] == "c-52"
+    assert bundle["row_ids"] == ["52", "352"]
+    assert bundle["bundle_id"] == "bundle:salt"
+
+
+def test_compare_bundles_do_not_merge_same_stem_without_identity_edge(tmp_path: pathlib.Path) -> None:
+    _seed_concepts(
+        tmp_path,
+        [
+            {"id": "1", "concept_en": "rain", "source_item": "1", "source_survey": "KLQ"},
+            {"id": "2", "concept_en": "rain", "source_item": "2", "source_survey": "JBIL"},
+        ],
+    )
+
+    payload = build_compare_bundles(tmp_path, speakers=[])
+
+    assert [(bundle["uid"], bundle["row_ids"], bundle["bundle_id"]) for bundle in payload["bundles"]] == [
+        ("c-1", ["1"], "bundle:rain"),
+        ("c-2", ["2"], "bundle:rain-2"),
+    ]
+
+
+def test_compare_bundles_split_shared_source_item_without_explicit_link(tmp_path: pathlib.Path) -> None:
+    _seed_concepts(
+        tmp_path,
+        [
+            {"id": "517", "concept_en": "I", "source_item": "319", "source_survey": "JBIL"},
+            {"id": "558", "concept_en": "i am teaching", "source_item": "319", "source_survey": "JBIL"},
+        ],
+    )
+
+    payload = build_compare_bundles(tmp_path, speakers=[])
+
+    assert [(bundle["uid"], bundle["row_ids"], bundle["label"]) for bundle in payload["bundles"]] == [
+        ("c-517", ["517"], "I"),
+        ("c-558", ["558"], "i am teaching"),
+    ]
+
+
+def test_compare_bundles_include_identity_warnings(tmp_path: pathlib.Path) -> None:
+    _seed_concepts(tmp_path, [{"id": "91", "concept_en": "green", "source_item": "5.4", "source_survey": "KLQ"}])
+    (tmp_path / "concept-identity.json").write_text(
+        json.dumps({"version": 1, "concepts": [{"uid": "c-green", "label": "green", "members": ["91", "9999"], "origin": "manual:merge"}]}),
+        encoding="utf-8",
+    )
+
+    payload = build_compare_bundles(tmp_path, speakers=[])
+
+    assert any("9999" in warning and "unknown" in warning for warning in payload["identity_warnings"])
 
 
 def test_annotation_is_read_once_per_speaker_not_once_per_bundle(
