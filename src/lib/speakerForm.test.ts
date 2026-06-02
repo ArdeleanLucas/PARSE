@@ -56,6 +56,7 @@ describe('buildSpeakerForm', () => {
       similarityByLang: { ar: 0.9, fa: null },
       cognate: '—',
       cognateKey: 'hair',
+      flagKey: 'hair',
       flagged: false,
       startSec: 10.1,
       endSec: 10.4,
@@ -231,10 +232,10 @@ describe('buildSpeakerForm', () => {
   });
 
 
-  it('reads grouped source-item cognate, flag, and similarity from the selected variant numeric key', () => {
+  it('reads grouped source-item cognate/similarity from the selected variant but speaker flags from the concept uid', () => {
     const groupedConcept: Concept = {
       id: 32,
-      key: '1.1',
+      key: 'uid:hair',
       name: 'hair',
       tag: 'untagged',
       sourceItem: '1.1',
@@ -264,9 +265,9 @@ describe('buildSpeakerForm', () => {
         '599': { Fail02: { ar: { score: 0.88, has_reference_data: true } } },
       },
       manual_overrides: {
-        canonical_realizations: { '1.1': { Fail02: 1 } },
+        canonical_realizations: { 'uid:hair': { Fail02: 1 } },
         speaker_flags: {
-          '1.1': { Fail02: false },
+          'uid:hair': { Fail02: true },
           '599': { Fail02: true },
         },
       },
@@ -274,12 +275,42 @@ describe('buildSpeakerForm', () => {
 
     expect(form.selectedIdx).toBe(1);
     expect(form.cognateKey).toBe('599');
+    expect(form.flagKey).toBe('uid:hair');
     expect(form.cognate).toBe('A');
     expect(form.flagged).toBe(true);
     expect(form.similarityByLang.ar).toBe(0.88);
   });
 
-  it('reads merged cognate and flag from the selected merged numeric key', () => {
+  it('keeps grouped speaker flags off when only a selected row-id legacy flag is present', () => {
+    const groupedConcept: Concept = {
+      id: 32,
+      key: 'uid:hair',
+      name: 'hair',
+      tag: 'untagged',
+      sourceItem: '1.1',
+      variants: [
+        { conceptKey: '1', conceptEn: 'hair (A)', variantLabel: 'A' },
+        { conceptKey: '599', conceptEn: 'hair (B)', variantLabel: 'B' },
+      ],
+    };
+    const record = makeRecord({
+      concept: [{ start: 3, end: 4, text: 'hair (B)', concept_id: '599' }],
+      ipa: [{ start: 3.1, end: 3.4, text: 'mu-b' }],
+    });
+
+    const form = buildSpeakerForm(record, groupedConcept, 'Fail02', {
+      manual_overrides: {
+        canonical_realizations: { 'uid:hair': { Fail02: 1 } },
+        speaker_flags: { '599': { Fail02: true } },
+      },
+    }, []);
+
+    expect(form.cognateKey).toBe('599');
+    expect(form.flagKey).toBe('uid:hair');
+    expect(form.flagged).toBe(false);
+  });
+
+  it('reads merged cognate from the selected member but speaker flags from the concept uid', () => {
     const mergedConcept: Concept = { id: 1, key: '527', name: 'head', tag: 'untagged', mergedKeys: ['527', '247', '248'] };
     const record = makeRecord({
       concept: [
@@ -310,8 +341,9 @@ describe('buildSpeakerForm', () => {
 
     expect(form.selectedIdx).toBe(2);
     expect(form.cognateKey).toBe('248');
+    expect(form.flagKey).toBe('527');
     expect(form.cognate).toBe('B');
-    expect(form.flagged).toBe(true);
+    expect(form.flagged).toBe(false);
   });
 
   it('keeps singleton cognate and flag keying unchanged', () => {

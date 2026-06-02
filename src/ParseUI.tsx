@@ -977,6 +977,15 @@ export function ParseUI() {
   );
   const activeTagScopeKey = activeTagScope.join('\u0000');
 
+  const hasSpeakerFlagForKey = useCallback((key: string, speakerScope: readonly string[] = activeTagScope): boolean => {
+    const overrides = isRecord(enrichmentData?.manual_overrides) ? enrichmentData.manual_overrides as Record<string, unknown> : {};
+    const speakerFlags = isRecord(overrides.speaker_flags) ? overrides.speaker_flags as Record<string, unknown> : {};
+    const block = speakerFlags[key];
+    if (!isRecord(block)) return false;
+    if (speakerScope.length > 0) return speakerScope.some((scopedSpeaker) => !!block[scopedSpeaker]);
+    return Object.values(block).some((value) => !!value);
+  }, [enrichmentData, activeTagScopeKey]);
+
   // Toggle a concept-level tag for the in-scope speakers. When `isSet` (the
   // tag is already present anywhere in scope) clear it everywhere, otherwise
   // set it. Without the clear branch the Flag / Accept buttons could only ever
@@ -1009,6 +1018,17 @@ export function ParseUI() {
     const resolveVariantTag = (conceptKey: string) => getConceptStatus(getTagsForConcept(conceptKey, activeTagScope));
     return groupConceptEntries(rawConcepts, resolveParentTag, mergesForCurrentMode, resolveVariantTag, conceptIdentity);
   }, [rawConcepts, getTagsForConcept, activeTagScopeKey, conceptMerges, conceptIdentity, currentMode, scopedToSpeaker, elicitedConceptKeys]);
+
+  const flaggedConceptKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const candidate of concepts) {
+      const key = candidate.key;
+      if (getTagsForConcept(key, activeTagScope).some((tag) => tag.id === 'problematic') || hasSpeakerFlagForKey(key)) {
+        keys.add(key);
+      }
+    }
+    return keys;
+  }, [concepts, getTagsForConcept, activeTagScopeKey, hasSpeakerFlagForKey]);
 
   const sourceSortDisabled = selectedSpeakers.length !== 1;
   const effectiveSortParent: ConceptSortParent = sortParent === 'source' && sourceSortDisabled ? 'concept' : sortParent;
@@ -1183,7 +1203,6 @@ export function ParseUI() {
     const overrides = isRecord(enrichmentData?.manual_overrides) ? enrichmentData.manual_overrides as Record<string, unknown> : {};
     const overrideSets = isRecord(overrides.cognate_sets) ? overrides.cognate_sets as Record<string, unknown> : {};
     const autoSets = isRecord(enrichmentData?.cognate_sets) ? enrichmentData.cognate_sets as Record<string, unknown> : {};
-    const speakerFlags = isRecord(overrides.speaker_flags) ? overrides.speaker_flags as Record<string, unknown> : {};
     const borrowingFlags = isRecord(enrichmentData?.borrowing_flags) ? enrichmentData.borrowing_flags as Record<string, unknown> : {};
     const borrowingRoot = isRecord(enrichmentData?.borrowings) ? enrichmentData.borrowings as Record<string, unknown>
       : isRecord(enrichmentData?.borrowing_candidates) ? enrichmentData.borrowing_candidates as Record<string, unknown>
@@ -1193,12 +1212,6 @@ export function ParseUI() {
       const block = (isRecord(overrideSets[key]) ? overrideSets[key] : isRecord(autoSets[key]) ? autoSets[key] : null) as Record<string, unknown> | null;
       if (!block) return false;
       return Object.values(block).some((members) => Array.isArray(members) && members.length > 0);
-    };
-    const hasSpeakerFlag = (key: string, speakerScope?: string[]): boolean => {
-      const block = speakerFlags[key];
-      if (!isRecord(block)) return false;
-      if (speakerScope && speakerScope.length > 0) return speakerScope.some((scopedSpeaker) => !!block[scopedSpeaker]);
-      return Object.values(block).some((v) => !!v);
     };
     const hasBorrowing = (key: string): boolean => {
       if (key in borrowingRoot) return true;
@@ -1213,7 +1226,7 @@ export function ParseUI() {
       // Formerly lived as a separate header tab; now a left-panel pill.
       list = list.filter(c => !hasCognateAssignment(c.key) && getTagsForConcept(c.key, activeTagScope).every((tag) => tag.id !== 'confirmed'));
     } else if (statusFilter === 'flagged') {
-      list = list.filter(c => getTagsForConcept(c.key, activeTagScope).some((tag) => tag.id === 'problematic') || hasSpeakerFlag(c.key, activeTagScope));
+      list = list.filter(c => getTagsForConcept(c.key, activeTagScope).some((tag) => tag.id === 'problematic') || hasSpeakerFlagForKey(c.key, activeTagScope));
     } else if (statusFilter === 'borrowings') {
       list = list.filter(c => hasBorrowing(c.key));
     }
@@ -1261,7 +1274,7 @@ export function ParseUI() {
       list = [...list].sort((a, b) => a.id - b.id);
     }
     return list;
-  }, [query, statusFilter, selectedTagIds, effectiveSortParent, conceptSortSub, sourceSortSub, speakerSortKeys, currentMode, enrichmentData, concepts, getTagsForConcept, activeTagScopeKey]);
+  }, [query, statusFilter, selectedTagIds, effectiveSortParent, conceptSortSub, sourceSortSub, speakerSortKeys, currentMode, enrichmentData, concepts, getTagsForConcept, activeTagScopeKey, hasSpeakerFlagForKey]);
 
   const baseConcept = concepts.find(c => c.id === conceptId) ?? concepts[0] ?? { id: 1, key: '1', name: '—', tag: 'untagged' as ConceptTag };
   const concept = useMemo<Concept>(() => {
@@ -2090,6 +2103,7 @@ export function ParseUI() {
           onSourceSubChange={handleSourceSortSubChange}
           sourceDisabled={sourceSortDisabled}
           filteredConcepts={speakerScopedConcepts}
+          flaggedConceptKeys={flaggedConceptKeys}
           statusFilter={statusFilter}
           onStatusFilterChange={setStatusFilter}
           selectedTagIds={selectedTagIds}

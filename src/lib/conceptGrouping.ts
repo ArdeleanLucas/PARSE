@@ -208,7 +208,7 @@ function groupConceptEntriesFromIdentity(
       id: emittedId,
       key: uid,
       name: cleanIdentityString(identityConcept.label) || variantStemFor(memberEntries.map((entry) => entry.label)),
-      tag: resolveTag(memberIds),
+      tag: resolveTag([uid, ...memberIds]),
       sourceItem,
       sourceSurvey: sourceItem ? firstEntry.source_survey : undefined,
       customOrder: firstEntry.custom_order,

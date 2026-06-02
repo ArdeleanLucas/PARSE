@@ -204,7 +204,7 @@ describe('SpeakerFormsTable header & layout', () => {
 
 
 describe('SpeakerFormsTable cognate/flag callback keys', () => {
-  it('passes each row resolved cognateKey to cognate and flag handlers', () => {
+  it('passes row cognateKey to cognate handlers and concept uid flagKey to flag handlers', () => {
     const onCycleCognate = vi.fn();
     const onResetCognate = vi.fn();
     const onToggleSpeakerFlag = vi.fn();
@@ -212,10 +212,10 @@ describe('SpeakerFormsTable cognate/flag callback keys', () => {
       <SpeakerFormsTable
         bundle={makeBundle()}
         speakers={['Fail01']}
-        speakerForms={[makeForm({ speaker: 'Fail01', cognate: 'A', flagged: true, cognateKey: '599' } as Partial<SpeakerForm>)]}
+        speakerForms={[makeForm({ speaker: 'Fail01', cognate: 'A', flagged: true, cognateKey: '599', flagKey: 'uid:hair' } as Partial<SpeakerForm>)]}
         primaryContactCodes={PRIMARY_CODES}
         contactLanguageNames={CONTACT_NAMES}
-        conceptKey="1.1"
+        conceptKey="uid:hair"
         initialExpandedSpeaker="__none__"
         onCycleCognate={onCycleCognate}
         onResetCognate={onResetCognate}
@@ -238,7 +238,7 @@ describe('SpeakerFormsTable cognate/flag callback keys', () => {
     expect(onResetCognate).toHaveBeenCalledWith('Fail01', '599');
 
     fireEvent.click(screen.getByTestId('speaker-flag-Fail01'));
-    expect(onToggleSpeakerFlag).toHaveBeenCalledWith('Fail01', true, '599');
+    expect(onToggleSpeakerFlag).toHaveBeenCalledWith('Fail01', true, 'uid:hair');
   });
 });
 

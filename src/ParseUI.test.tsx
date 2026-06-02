@@ -3036,6 +3036,9 @@ describe("ParseUI", () => {
       Fail01: { ...makeRecord("Fail01", []), concept_tags: { "1": ["problematic", "confirmed"] } },
       Kalh01: { ...makeRecord("Kalh01", []), concept_tags: { "1": ["problematic", "confirmed"] } },
     };
+    mockEnrichmentData = {
+      manual_overrides: { speaker_flags: { "1": { Fail01: true } } },
+    };
 
     render(<ParseUI />);
 
@@ -3052,6 +3055,28 @@ describe("ParseUI", () => {
     // Must not re-set the very tag it was asked to clear.
     expect(mockSetConceptTag).not.toHaveBeenCalledWith("Fail01", "1", "problematic");
     expect(mockSetConceptTag).not.toHaveBeenCalledWith("Fail01", "1", "confirmed");
+    // Hybrid flag model: clearing the concept flag must not clear per-speaker flags.
+    expect(mockSaveEnrichments).not.toHaveBeenCalledWith({
+      manual_overrides: { speaker_flags: { "1": { Fail01: false } } },
+    });
+  });
+
+  it("Flagged sidebar filter and marker include speaker flags without replacing confirmed status", async () => {
+    mockRecords = {
+      Fail01: { ...makeRecord("Fail01", []), concept_tags: { "1": ["confirmed"] } },
+    };
+    mockEnrichmentData = {
+      manual_overrides: { speaker_flags: { "1": { Fail01: true } } },
+    };
+
+    render(<ParseUI />);
+
+    fireEvent.click(screen.getByTestId("tagfilter-flagged"));
+
+    expect(await screen.findByRole("button", { name: /water/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /fire/i })).toBeNull();
+    expect(screen.getByTestId("concept-status-dot-1").className).toContain("bg-emerald-500");
+    expect(screen.getByTestId("concept-flag-rollup-1").getAttribute("class")).toContain("text-rose-500");
   });
 
   it("compare table row flag button targets a single speaker via enrichment overrides", async () => {
