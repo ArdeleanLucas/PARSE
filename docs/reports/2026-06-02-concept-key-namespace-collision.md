@@ -1,6 +1,6 @@
 # Concept-key namespace collision — design note
 
-**Status:** proposal, pre-implementation. Reviewable before any code change.
+**Status:** implemented in PR #634 (single PR — §7 records what shipped vs the original staged plan in §6).
 **Spec gate:** [`src/lib/conceptKeyNamespace.test.ts`](../../src/lib/conceptKeyNamespace.test.ts)
 **Related:** issue [#529](https://github.com/ArdeleanLucas/PARSE/issues/529) (concept identity pollution); [`2026-05-19-compare-display-bugs-fix-plan.md`](./2026-05-19-compare-display-bugs-fix-plan.md) (Bug 3 — same root cause, display-only fix).
 
@@ -99,10 +99,19 @@ Existing on-disk decisions (`speaker_flags`, `cognate_sets`, tags, `borrowing_fl
 
 ### 6.3 Sequencing
 
-1. **This PR (part a):** design note + `it.fails` spec gate. No behavior change. Reviewable in isolation.
-2. **PR 2 — read-compat shim:** new code reads new key, falls back to legacy key. Lets PR 3 land without a flag day.
-3. **PR 3 — key mint + branded type + backend invariant test.** Flip `it.fails` → `it`.
-4. **PR 4 — migration tool + report UI.** Retire the shim after migration confirmed.
+> **Superseded by what shipped — see §7.** This was the original staged plan
+> (separate spec-gate, read-compat shim, key-mint, migration PRs). It was
+> collapsed into a **single PR** (#634) because the change is small and the
+> spec gate, key mint, and migration are coherent together. Differences from
+> the plan: the spec test asserts the invariant directly (it is not an
+> `it.fails` placeholder); there is no read-compat shim (see the read-fallback
+> discussion in §7); and there is no in-app report UI (the migration emits a
+> JSON report instead). The plan is retained for context.
+
+1. ~~Design note + `it.fails` spec gate.~~ → shipped as a passing invariant guard.
+2. ~~Read-compat shim.~~ → not shipped; deploy couples code + migration (§7).
+3. ~~Key mint + branded type + backend invariant test.~~ → key mint shipped; branded type + backend corpus test are follow-ups (§7).
+4. ~~Migration tool + report UI.~~ → migration tool shipped (`python/migration/concept_key_namespace.py` + CLI); report UI not built.
 
 ### 6.4 Open questions for review
 
@@ -163,7 +172,7 @@ which no other concept owns.
 
 - Code: [`src/lib/conceptGrouping.ts`](../../src/lib/conceptGrouping.ts) — `canonicalConceptKey()` replaces `groupedConceptKey()`; the `source:`-prefix / `sourceItemsWithMultipleGroupedBuckets` machinery is deleted (no longer needed).
 - Guard: [`src/lib/conceptKeyNamespace.test.ts`](../../src/lib/conceptKeyNamespace.test.ts) now asserts the invariant *holds* (`ice`→`45`, `I`→`517`, every key ∈ csv-id namespace, all unique).
-- Migration: [`python/scripts/migrate_concept_key_namespace.py`](../../python/scripts/migrate_concept_key_namespace.py) — dry-run-first, idempotent, refuses to guess on ambiguous (collided) keys.
+- Migration: [`python/migration/concept_key_namespace.py`](../../python/migration/concept_key_namespace.py) (logic) + [`python/scripts/migrate_concept_key_namespace.py`](../../python/scripts/migrate_concept_key_namespace.py) (CLI), mirroring the #529 `concept_suffix_pollution` layout — dry-run-first, idempotent, optimistic-concurrency guarded, refuses to guess on ambiguous (collided) keys. Tests: [`python/migration/test_concept_key_namespace.py`](../../python/migration/test_concept_key_namespace.py).
 
 **Verification:**
 
@@ -176,3 +185,12 @@ which no other concept owns.
 These two are the irreducible historical-ambiguity cases from §3/§6.2: the slot was genuinely shared, so the tool reports them rather than guessing.
 
 **Out of scope (tracked follow-ups, deliberately not bundled):** the FE still *groups* by `(survey, source_item)` (24/25 groups spurious post-#529) and ~10 near-duplicate concept rows + 1 `(JBIL,32)` #529 merge-miss remain. The keying fix is correct and collision-free regardless; grouping-model alignment and data dedup are separate PRs.
+
+### 7.1 Follow-ups raised in review (PR #634)
+
+Accepted but deliberately not bundled into this PR — each is its own concern:
+
+- **MCP wrapper.** Expose the migration as a chat/MCP tool in `python/ai/tools/migration_tools.py`, mirroring `migrate_concept_suffix_pollution`. Deferred because adding an MCP tool bumps the surface-lock counts and needs parity-fixture updates; doing it here would widen the diff into the MCP surface tests. Tracked separately.
+- **Read-compat fallback (decision, not obvious).** A blanket "read new key, fall back to legacy key" shim is **unsafe** for the 9 collided keys: falling back to legacy `"123"` would read `to jump`'s slot into `ice`. A fallback is only safe for the 16 non-colliding (dotted) legacy keys. Options: (a) safe-keys-only read shim; (b) couple migration to deploy (code + migration land together) and skip the shim. The migration on real data shows **0** safe decision keys currently un-migrated, so (b) is low-risk today; (a) is the belt-and-suspenders option. Needs a call.
+- **Backend corpus invariant test.** `concepts.csv` lives in the workspace, not the repo, so a CI test can't read the live corpus. The shipped guard is the FE fixture test (`conceptKeyNamespace.test.ts`) over the real collision shapes plus the migration's `build_remap` tests. A live-corpus check belongs in a workspace-aware (non-CI) verification or the MCP tool's verify path.
+- **Branded `ConceptKey` type.** Compile-time guard so a `source_item` string can never be passed where a concept key is expected. Pure type-system hardening; separate change.

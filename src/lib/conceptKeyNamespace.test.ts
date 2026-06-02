@@ -50,15 +50,9 @@ describe('concept-key namespace integrity', () => {
 
   it('no Concept.key is a survey-local source_item (keys live only in the csv-id namespace)', () => {
     const ids = new Set(FIXTURE.map((e) => e.id));
-    const sourceItems = new Set(FIXTURE.map((e) => e.source_item).filter(Boolean) as string[]);
-    for (const c of concepts()) {
-      expect(ids.has(c.key), `key ${c.key} is not a real csv id`).toBe(true);
-      // A key may coincide with a source_item string only if that string is also
-      // a real id it legitimately owns; the load-bearing check is id-membership above.
-      if (sourceItems.has(c.key) && !ids.has(c.key)) {
-        throw new Error(`key ${c.key} is a bare source_item`);
-      }
-    }
+    // Every key must be a real csv id; a bare source_item would not be in `ids`.
+    const keysOutsideIdNamespace = concepts().map((c) => c.key).filter((key) => !ids.has(key));
+    expect(keysOutsideIdNamespace).toEqual([]);
   });
 
   it('grouped concepts key by canonical member id, never the colliding source_item', () => {
