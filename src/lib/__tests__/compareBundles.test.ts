@@ -4,7 +4,6 @@ import {
   activeCandidateFor,
   canonicalFor,
   enumerateVariants,
-  findBundleForConcept,
   migrateCanonicalRealizationToSelection,
   normalizeBundles,
   resolveActiveBucketForSpeaker,
@@ -84,6 +83,12 @@ describe("normalizeBundles", () => {
     expect(enumerateVariants(payload.bundles[0]).map(({ variant }) => variant.csv_row_id)).toEqual(["53", "619", "150"]);
   });
 
+  it("preserves the concept identity uid carried by backend bundles", () => {
+    const payload = normalizeBundles({ bundles: [bigBundle({ uid: "c-53" })] });
+
+    expect(payload.bundles[0].uid).toBe("c-53");
+  });
+
   it("accepts MC-368-B emitted variant and candidate shapes without filtering variants", () => {
     const payload = normalizeBundles({ bundles: [bigBundle()] });
     const [bundle] = payload.bundles;
@@ -100,25 +105,6 @@ describe("normalizeBundles", () => {
   });
 });
 
-describe("findBundleForConcept", () => {
-  it("matches singleton concepts by row id before considering labels", () => {
-    const decoy = bigBundle({ bundle_id: "bundle:label-decoy", label: "not big", row_ids: ["999"] });
-
-    expect(findBundleForConcept([decoy, bigBundle()], { key: "53", name: "not big" })?.bundle_id).toBe("bundle:big");
-  });
-
-  it("falls back from grouped source-item keys to normalized bundle labels", () => {
-    expect(findBundleForConcept([bigBundle()], { key: "4.1", name: "big" })?.bundle_id).toBe("bundle:big");
-  });
-
-  it("uses case-insensitive trimmed label matching without a row match", () => {
-    expect(findBundleForConcept([bigBundle({ label: "  BIG  " })], { key: "missing", name: " big " })?.bundle_id).toBe("bundle:big");
-  });
-
-  it("returns null when neither row ids nor labels match", () => {
-    expect(findBundleForConcept([bigBundle()], { key: "999", name: "small" })).toBeNull();
-  });
-});
 
 describe("canonical selectors", () => {
   it("uses manual canonical selections before defaults", () => {

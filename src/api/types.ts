@@ -216,6 +216,20 @@ export interface ConceptEntry {
   surveys?: ConceptSurveyLinks;
 }
 
+export interface ConceptIdentityConcept {
+  uid: string;
+  label: string;
+  members: string[];
+  origin: string;
+}
+
+export interface ConceptIdentityResponse {
+  version: number;
+  concepts: ConceptIdentityConcept[];
+  uid_by_row: Record<string, string>;
+  warnings: string[];
+}
+
 export interface ConceptSurveyLinkMutation {
   survey_id: string;
   source_item?: string;
@@ -339,6 +353,8 @@ export interface CompareBucket {
 
 export interface CompareBundle {
   bundle_id: string;
+  /** Stable ConceptIdentity uid; Compare and Annotate both address bundles by this key. */
+  uid?: string;
   label: string;
   row_ids: string[];
   buckets: CompareBucket[];

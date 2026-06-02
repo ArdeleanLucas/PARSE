@@ -3,6 +3,7 @@ import type {
   CanonicalLexemePutRequest,
   CanonicalLexemePutResponse,
   CompareBundlesResponse,
+  ConceptIdentityResponse,
 } from "../types";
 import { apiFetch } from "./shared";
 
@@ -22,6 +23,10 @@ function queryString(query: CompareBundlesQuery = {}): string {
 export async function getCompareBundles(query: CompareBundlesQuery = {}): Promise<CompareBundlesResponse> {
   // Spec source: MC-368-A audit lane-1 examples; MC-368-B OpenAPI was not present on origin/main at implementation time.
   return apiFetch<CompareBundlesResponse>(`/api/compare/bundles${queryString(query)}`);
+}
+
+export async function getConceptIdentity(): Promise<ConceptIdentityResponse> {
+  return apiFetch<ConceptIdentityResponse>("/api/concept-identity");
 }
 
 export async function putCanonicalLexeme(

@@ -1,4 +1,4 @@
-import type { ConceptEntry } from '../api/types';
+import type { ConceptEntry, ConceptIdentityResponse } from '../api/types';
 import type { Concept, ConceptVariant } from './speakerForm';
 import type { ConceptTag } from './parseUIUtils';
 
@@ -167,6 +167,59 @@ function singletonConcept(entry: ConceptEntry, emittedId: number, resolveTag: Re
   };
 }
 
+function cleanIdentityString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function isUsableConceptIdentity(identity: ConceptIdentityResponse | null | undefined): identity is ConceptIdentityResponse {
+  return !!identity && Array.isArray(identity.concepts) && identity.concepts.length > 0;
+}
+
+function groupConceptEntriesFromIdentity(
+  rawConcepts: readonly ConceptEntry[],
+  resolveTag: ResolveConceptTag,
+  resolveVariantTag: ResolveVariantTag | undefined,
+  identity: ConceptIdentityResponse,
+): Concept[] {
+  const entriesByRowId = new Map(rawConcepts.map((entry) => [String(entry.id), entry]));
+  const grouped: Concept[] = [];
+  let emittedId = 0;
+
+  for (const identityConcept of identity.concepts) {
+    const uid = cleanIdentityString(identityConcept.uid);
+    if (!uid) continue;
+    const memberIds = identityConcept.members.map(cleanIdentityString).filter(Boolean);
+    const memberEntries = memberIds
+      .map((rowId) => entriesByRowId.get(rowId))
+      .filter((entry): entry is ConceptEntry => !!entry);
+    if (memberEntries.length === 0) continue;
+
+    emittedId += 1;
+    const firstEntry = memberEntries[0];
+    const sourceItem = normalizeSourceItem(firstEntry.source_item) ?? undefined;
+    const variants: ConceptVariant[] = memberEntries.map((entry, index) => withVariantTag({
+      conceptKey: entry.id,
+      conceptEn: entry.label,
+      variantLabel: variantLabelFor(entry.label, index),
+      surveys: entry.surveys,
+    }, resolveVariantTag));
+
+    grouped.push({
+      id: emittedId,
+      key: uid,
+      name: cleanIdentityString(identityConcept.label) || variantStemFor(memberEntries.map((entry) => entry.label)),
+      tag: resolveTag(memberIds),
+      sourceItem,
+      sourceSurvey: sourceItem ? firstEntry.source_survey : undefined,
+      customOrder: firstEntry.custom_order,
+      surveys: firstEntry.surveys,
+      variants,
+    });
+  }
+
+  return grouped;
+}
+
 export function findConceptByUnderlyingKey(concepts: readonly Concept[], underlyingKey: string): Concept | undefined {
   return concepts.find((concept) => {
     if (concept.mergedKeys?.includes(underlyingKey)) return true;
@@ -218,7 +271,12 @@ export function groupConceptEntries(
   resolveTag: ResolveConceptTag,
   conceptMerges?: Record<string, readonly string[]>,
   resolveVariantTag?: ResolveVariantTag,
+  conceptIdentity?: ConceptIdentityResponse | null,
 ): Concept[] {
+  if (isUsableConceptIdentity(conceptIdentity)) {
+    return groupConceptEntriesFromIdentity(rawConcepts, resolveTag, resolveVariantTag, conceptIdentity);
+  }
+
   const sourceBuckets = new Map<string, number[]>();
   rawConcepts.forEach((entry, index) => {
     const sourceItem = normalizeSourceItem(entry.source_item);

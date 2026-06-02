@@ -19,6 +19,7 @@ import {
   promoteConceptSurveyPrimary,
   relinkConceptsByGloss,
   getCompareBundles,
+  getConceptIdentity,
   putCanonicalLexeme,
   deleteCanonicalLexeme,
 } from "./client";
@@ -604,6 +605,23 @@ describe("compare bundle API client contract", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/compare/bundles?speaker=Saha01&bundle_id=bundle%3Abig",
+      expect.objectContaining({ headers: expect.any(Object) }),
+    );
+  });
+
+  it("fetches the backend concept identity contract", async () => {
+    const payload = {
+      version: 1,
+      concepts: [{ uid: "c-53", label: "big", members: ["53", "150"], origin: "auto" }],
+      uid_by_row: { "53": "c-53", "150": "c-53" },
+      warnings: [],
+    };
+    fetchMock.mockResolvedValue(jsonResponse(payload));
+
+    await expect(getConceptIdentity()).resolves.toEqual(payload);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/concept-identity",
       expect.objectContaining({ headers: expect.any(Object) }),
     );
   });

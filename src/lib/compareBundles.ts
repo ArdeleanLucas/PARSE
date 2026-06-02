@@ -112,10 +112,12 @@ function normalizeBundle(raw: unknown): CompareBundle | null {
   const derivedRowIds = buckets.flatMap((b) => b.variants.map((v) => v.csv_row_id));
   const rowIds = Array.isArray(raw.row_ids) ? raw.row_ids.map(cleanString).filter(Boolean) : derivedRowIds;
   const bundleId = cleanString(raw.bundle_id ?? raw.bundleId);
+  const uid = cleanString(raw.uid) || bundleId;
   const label = cleanString(raw.label);
   if (!bundleId || !label || buckets.length === 0) return null;
   return {
     bundle_id: bundleId,
+    uid,
     label,
     row_ids: Array.from(new Set(rowIds)),
     buckets,
@@ -135,42 +137,6 @@ export function normalizeBundles(payload: unknown): CompareBundlesResponse {
   return { bundles, warnings };
 }
 
-export function findBundleForConcept(
-  bundles: readonly CompareBundle[],
-  concept: {
-    key: string;
-    name: string;
-    variants?: readonly { conceptKey: string }[];
-    mergedKeys?: readonly string[];
-  },
-): CompareBundle | null {
-  // Match using csv-row-id values, never `concept.key` directly when the
-  // concept is grouped or user-merged. Grouped concepts key themselves by
-  // `sourceItem` (e.g. "92", "123") which shares an integer-string
-  // namespace with `bundle.row_ids` (csv row ids) and collides whenever
-  // a sourceItem happens to equal an unrelated concept's csv row id.
-  // See docs/reports/2026-05-19-compare-display-bugs-fix-plan.md.
-  const rowIdCandidates: string[] = [];
-  if (concept.mergedKeys?.length) {
-    rowIdCandidates.push(...concept.mergedKeys.map(cleanString).filter(Boolean));
-  }
-  if (concept.variants?.length) {
-    rowIdCandidates.push(...concept.variants.map((v) => cleanString(v.conceptKey)).filter(Boolean));
-  }
-  if (rowIdCandidates.length === 0) {
-    const conceptKey = cleanString(concept.key);
-    if (conceptKey) rowIdCandidates.push(conceptKey);
-  }
-
-  for (const rowId of rowIdCandidates) {
-    const byRowId = bundles.find((bundle) => bundle.row_ids.includes(rowId));
-    if (byRowId) return byRowId;
-  }
-
-  const conceptLabel = cleanString(concept.name).toLocaleLowerCase();
-  if (!conceptLabel) return null;
-  return bundles.find((bundle) => cleanString(bundle.label).toLocaleLowerCase() === conceptLabel) ?? null;
-}
 
 export function enumerateVariants(bundle: CompareBundle): EnumeratedCompareVariant[] {
   const out: EnumeratedCompareVariant[] = [];

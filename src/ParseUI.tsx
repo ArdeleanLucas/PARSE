@@ -9,7 +9,7 @@ import {
   Download,
   Sun, Moon,
 } from 'lucide-react';
-import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, pollOffsetDetectJob, getCompareBundles } from './api/client';
+import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, pollOffsetDetectJob, getCompareBundles, getConceptIdentity } from './api/client';
 import { useChatSession } from './hooks/useChatSession';
 import { useCompareReturnRestore } from './hooks/useCompareReturnRestore';
 import { useOpenInAnnotateHandler } from './hooks/useOpenInAnnotateHandler';
@@ -40,7 +40,7 @@ import {
   resolveReferenceFormLists,
 } from './lib/referenceFormParsing';
 import { buildSpeakerForm } from './lib/speakerForm';
-import { findBundleForConcept, normalizeBundles } from './lib/compareBundles';
+import { normalizeBundles } from './lib/compareBundles';
 import { conceptMatchesElicitedKeys, conceptUnderlyingKeys, speakerElicitedConceptKeys } from './lib/speakerElicitedConcepts';
 import { buildSpeakerSortKeys } from './lib/speakerSortKeys';
 import { buildRealizationKey, findConceptByUnderlyingKey, groupConceptEntries, parseRealizationKey, resolveModeSwitchSelection } from './lib/conceptGrouping';
@@ -100,7 +100,7 @@ import {
 import { OffsetAdjustmentModal } from './components/parse/modals/OffsetAdjustmentModal';
 import { AIChat } from './components/shared/AIChat';
 import { getClefConfig, getContactLexemeCoverage, saveClefFormSelections } from './api/client';
-import type { ClefConfigStatus, CompareBundle, ContactLexemePopulateResult, SurveyOverlapPatch, Tag } from './api/types';
+import type { ClefConfigStatus, CompareBundle, ConceptIdentityResponse, ContactLexemePopulateResult, SurveyOverlapPatch, Tag } from './api/types';
 
 type AppMode = 'annotate' | 'compare' | 'tags';
 
@@ -189,9 +189,23 @@ export function ParseUI() {
   const { theme, cycleTheme, nextTheme } = useThemeCycle();
   // — Annotation sync (auto-loads record when activeSpeaker changes) —
   useAnnotationSync();
+  const loadConceptIdentity = useCallback(async () => {
+    try {
+      const payload = await getConceptIdentity();
+      setConceptIdentity(payload);
+      setConceptIdentityError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not load concept identity.';
+      setConceptIdentity(null);
+      setConceptIdentityError(message);
+      console.error('[ParseUI] concept identity load failed:', err);
+    }
+  }, []);
+
   // — Bootstrap —
   useEffect(() => {
     loadConfig().catch(console.error);
+    void loadConceptIdentity();
     hydrateTagStore();
     syncTagStoreFromServer().catch(console.error);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -367,6 +381,8 @@ export function ParseUI() {
   const [compareBundles, setCompareBundles] = useState<CompareBundle[]>([]);
   const [compareBundlesLoading, setCompareBundlesLoading] = useState(false);
   const [compareBundlesError, setCompareBundlesError] = useState<string | null>(null);
+  const [conceptIdentity, setConceptIdentity] = useState<ConceptIdentityResponse | null>(null);
+  const [conceptIdentityError, setConceptIdentityError] = useState<string | null>(null);
 
 
   const writeSpeakerCognate = (conceptKey: string, speaker: string, nextGroup: string | null) => {
@@ -912,11 +928,12 @@ export function ParseUI() {
     try {
       await promoteConceptSurveyPrimary(conceptId, { survey_id: surveyId, source_item: sourceItem });
       await reloadConfig();
+      await loadConceptIdentity();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       flashActionFeedback(`Could not promote survey primary: ${message}`, 'error');
     }
-  }, [flashActionFeedback, reloadConfig]);
+  }, [flashActionFeedback, loadConceptIdentity, reloadConfig]);
 
   // — Derived: real speakers (no fallback — empty until workspace provides them) —
   const speakers = rawSpeakers;
@@ -981,7 +998,7 @@ export function ParseUI() {
   );
   const concepts = useMemo<Concept[]>(() => {
     if (rawConcepts.length === 0) return [];
-    const mergesForCurrentMode = currentMode === 'compare' ? conceptMerges : undefined;
+    const mergesForCurrentMode = conceptIdentity?.concepts.length ? undefined : (currentMode === 'compare' ? conceptMerges : undefined);
     const resolveParentTag = (conceptKeys: readonly string[]) => {
       const visibleKeys = scopedToSpeaker && elicitedConceptKeys.size > 0
         ? conceptKeys.filter((key) => elicitedConceptKeys.has(key))
@@ -990,8 +1007,8 @@ export function ParseUI() {
       return getConceptStatus(tags);
     };
     const resolveVariantTag = (conceptKey: string) => getConceptStatus(getTagsForConcept(conceptKey, activeTagScope));
-    return groupConceptEntries(rawConcepts, resolveParentTag, mergesForCurrentMode, resolveVariantTag);
-  }, [rawConcepts, getTagsForConcept, activeTagScopeKey, conceptMerges, currentMode, scopedToSpeaker, elicitedConceptKeys]);
+    return groupConceptEntries(rawConcepts, resolveParentTag, mergesForCurrentMode, resolveVariantTag, conceptIdentity);
+  }, [rawConcepts, getTagsForConcept, activeTagScopeKey, conceptMerges, conceptIdentity, currentMode, scopedToSpeaker, elicitedConceptKeys]);
 
   const sourceSortDisabled = selectedSpeakers.length !== 1;
   const effectiveSortParent: ConceptSortParent = sortParent === 'source' && sourceSortDisabled ? 'concept' : sortParent;
@@ -1549,6 +1566,7 @@ export function ParseUI() {
     }
     return {
       bundle_id: rowId,
+      uid: concept.key,
       label: concept.name,
       row_ids: [rowId],
       buckets: [{
@@ -1562,11 +1580,12 @@ export function ParseUI() {
     };
   }, [annotationRecords, concept, speakerForms]);
   const activeCompareBundle = useMemo(() => {
-    const matchedBundle = findBundleForConcept(compareBundles, concept);
+    const conceptUid = concept.key;
+    const matchedBundle = compareBundles.find((bundle) => bundle.uid === conceptUid || (!conceptIdentity?.concepts.length && bundle.row_ids.includes(conceptUid)));
     if (matchedBundle) return matchedBundle;
     if (compareBundlesError !== null && compareBundles.length === 0) return fallbackCompareBundle;
     return null;
-  }, [compareBundles, compareBundlesError, concept, fallbackCompareBundle]);
+  }, [compareBundles, compareBundlesError, concept.key, conceptIdentity, fallbackCompareBundle]);
   const selectedCompareSpeakers = useMemo(() => selectedSpeakers.filter((speaker) => speakers.includes(speaker)), [selectedSpeakers, speakers]);
   // Seed the mode-switch resolver with the clicked row so it navigates to that
   // concept and keeps the chosen realization index (mirrors the post-delete
@@ -1607,7 +1626,7 @@ export function ParseUI() {
     return () => { cancelled = true; };
   }, [currentMode]);
   const reviewed = concepts.filter(c => c.tag === 'confirmed').length;
-  const total = concepts.length;
+  const total = conceptIdentity?.concepts.length ? conceptIdentity.concepts.length : concepts.length;
   const activeSpeakerProgress = currentMode === 'annotate' && activeSpeakerForSidebar ? activeSpeakerForSidebar : null;
   const elicitedForSpeaker = activeSpeakerProgress ? elicitedConceptKeys.size : 0;
   const reviewedForSpeaker = activeSpeakerProgress && elicitedForSpeaker > 0
@@ -2410,6 +2429,9 @@ export function ParseUI() {
 
               <SectionCard title={`Speaker forms · ${selectedSpeakers.length} selected`}
                 aside={<button className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-slate-800"><ArrowUpDown className="h-3 w-3"/> Sort by similarity</button>}>
+                {conceptIdentityError && (
+                  <div className="mb-3 rounded-lg border border-amber-100 bg-amber-50 p-4 text-xs text-amber-800" data-testid="concept-identity-error">{conceptIdentityError}</div>
+                )}
                 {compareBundlesError && (
                   <div className="mb-3 rounded-lg border border-rose-100 bg-rose-50 p-4 text-xs text-rose-700" data-testid="compare-bundle-error">{compareBundlesError}</div>
                 )}
