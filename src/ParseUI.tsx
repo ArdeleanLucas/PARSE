@@ -1307,12 +1307,12 @@ export function ParseUI() {
     }
     return baseConcept;
   }, [baseConcept, activeRawKey, currentMode]);
-  // Stable csv-id key(s) for concept notes — NOT the volatile sequential
-  // `Concept.id`. Singleton → [concept.key]; merged → underlying member ids.
-  // Notes are uid-keyed (concept.key) post MC-458-E; noteKeysForConcept leads
-  // with the uid (member csv ids kept as legacy fallback). The old "variant
-  // csv ids only" form looked up the wrong key for grouped/identity concepts,
-  // so the box silently fell back to stale localStorage (e.g. cold under cloud).
+  // Keys to read/write this concept's note under — NOT the volatile sequential
+  // `Concept.id`. Notes are uid-keyed (concept.key) post MC-458-E, so
+  // noteKeysForConcept leads with the uid (member csv ids kept after it as a
+  // legacy read-fallback). The old "variant csv ids only" form looked up the
+  // wrong key for grouped/identity concepts, so the box silently fell back to
+  // stale localStorage (e.g. cold's note under cloud).
   const conceptNoteKeys = useMemo<string[]>(() => noteKeysForConcept(concept), [concept]);
   const activeResolvedSurvey = useMemo(() => {
     if (currentMode !== 'annotate') {
