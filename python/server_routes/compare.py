@@ -49,7 +49,10 @@ def _compute_cognates(job_id: str, payload: _server.Dict[str, _server.Any]) -> _
         selected_concept_ids = sorted(filtered_forms.keys(), key=_server._concept_sort_key)
     concept_specs = [_server.cognate_compute_module.ConceptSpec(concept_id=concept_id, label='') for concept_id in selected_concept_ids]
     _server._set_job_progress(job_id, 45.0, message='Computing cognate sets')
-    cognate_sets = _server.cognate_compute_module._compute_cognate_sets_with_lingpy(filtered_forms, concept_specs, threshold)
+    skipped_forms: _server.List[_server.Dict[str, str]] = []
+    cognate_sets = _server.cognate_compute_module._compute_cognate_sets_with_lingpy(filtered_forms, concept_specs, threshold, skipped_out=skipped_forms)
+    if skipped_forms:
+        _server._set_job_progress(job_id, 70.0, message='Skipped {0} form(s) LingPy could not cluster'.format(len(skipped_forms)))
     _server._set_job_progress(job_id, 75.0, message='Computing similarity scores')
     similarity = _server.cognate_compute_module.compute_similarity_scores(forms_by_concept=filtered_forms, concepts=concept_specs, contact_languages=contact_languages, refs_by_concept=refs_by_concept, form_selections_by_concept=form_selections_by_concept)
     if speaker_filter_values:
@@ -60,7 +63,7 @@ def _compute_cognates(job_id: str, payload: _server.Dict[str, _server.Any]) -> _
     _server._set_job_progress(job_id, 92.0, message='Writing parse-enrichments.json')
     output_path = _server._enrichments_path()
     _server._write_json_file(output_path, enrichments_payload)
-    return {'type': 'cognates', 'outputPath': str(output_path), 'computedAt': enrichments_payload['computed_at'], 'conceptCount': len(enrichments_payload['config']['concepts_included']), 'speakerCount': len(enrichments_payload['config']['speakers_included'])}
+    return {'type': 'cognates', 'outputPath': str(output_path), 'computedAt': enrichments_payload['computed_at'], 'conceptCount': len(enrichments_payload['config']['concepts_included']), 'speakerCount': len(enrichments_payload['config']['speakers_included']), 'skippedFormCount': len(skipped_forms), 'skippedForms': skipped_forms[:50]}
 
 def _api_get_enrichments(self) -> None:
     project_root = _server._project_root()

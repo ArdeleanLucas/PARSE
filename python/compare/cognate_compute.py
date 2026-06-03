@@ -827,7 +827,16 @@ def _compute_cognate_sets_with_lingpy(
     forms_by_concept: Mapping[str, Sequence[FormRecord]],
     concepts: Sequence[ConceptSpec],
     threshold: float,
+    skipped_out: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Dict[str, List[str]]]:
+    """Cluster forms into cognate sets via LingPy LexStat.
+
+    Forms LingPy cannot tokenise (multi-word handling aside) are skipped
+    rather than crashing the job. When ``skipped_out`` is provided, each
+    skipped form is appended as ``{"concept_id", "speaker", "form"}`` so
+    the caller can surface a data-quality signal (e.g. a bare ``"?"``
+    placeholder) instead of dropping it silently.
+    """
     try:
         from lingpy import LexStat  # type: ignore
         from lingpy.sequence.sound_classes import ipa2tokens, tokens2class  # type: ignore
@@ -856,13 +865,33 @@ def _compute_cognate_sets_with_lingpy(
     index_meta: Dict[int, Tuple[str, str]] = {}
 
     row_index = 0
+    skipped: List[Dict[str, str]] = []
     for speaker, concept_label, ipa_form, concept_id in rows:
         safe_form = _lingpy_safe_form(ipa_form)
         if not _lingpy_clusterable(safe_form, ipa2tokens, tokens2class):
+            skipped.append({
+                "concept_id": concept_id,
+                "speaker": speaker,
+                "form": str(ipa_form or ""),
+            })
             continue
         row_index += 1
         lex_data[row_index] = [speaker, concept_label, safe_form]
         index_meta[row_index] = (concept_id, speaker)
+
+    if skipped:
+        _warn(
+            "Cognate clustering skipped {0} un-clusterable form(s); "
+            "first few: {1}".format(
+                len(skipped),
+                ", ".join(
+                    "{0}/{1}={2!r}".format(s["concept_id"], s["speaker"], s["form"])
+                    for s in skipped[:5]
+                ),
+            )
+        )
+    if skipped_out is not None:
+        skipped_out.extend(skipped)
 
     if not index_meta:  # nothing clusterable
         return {}
