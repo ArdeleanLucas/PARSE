@@ -124,3 +124,40 @@ def test_all_unclusterable_returns_empty_without_crashing():
     concepts = [ConceptSpec(concept_id="999")]
 
     assert _compute_cognate_sets_with_lingpy(forms_by_concept, concepts, 0.6) == {}
+
+
+def test_skipped_out_collects_unclusterable_forms():
+    pytest.importorskip("lingpy")
+
+    # The "?" placeholder is skipped; the collector records what/why so the
+    # caller can surface it instead of dropping it silently.
+    forms_by_concept = {
+        "629": [
+            FormRecord("Badr01", "629", "", "?", "", 0.0, 1.0),
+            FormRecord("Fail03", "629", "", "dest", "", 0.0, 1.0),
+            FormRecord("Kalh02", "629", "", "dest", "", 0.0, 1.0),
+        ],
+    }
+    concepts = [ConceptSpec(concept_id="629")]
+
+    skipped: list = []
+    _compute_cognate_sets_with_lingpy(forms_by_concept, concepts, 0.6, skipped_out=skipped)
+
+    assert skipped == [{"concept_id": "629", "speaker": "Badr01", "form": "?"}]
+
+
+def test_skipped_out_stays_empty_when_all_clusterable():
+    pytest.importorskip("lingpy")
+
+    forms_by_concept = {
+        "626": [
+            FormRecord("Fail03", "626", "", "xwārdin", "", 0.0, 1.0),
+            FormRecord("Kalh02", "626", "", "xwardin", "", 0.0, 1.0),
+        ],
+    }
+    concepts = [ConceptSpec(concept_id="626")]
+
+    skipped: list = []
+    _compute_cognate_sets_with_lingpy(forms_by_concept, concepts, 0.6, skipped_out=skipped)
+
+    assert skipped == []
