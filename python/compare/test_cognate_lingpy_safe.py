@@ -37,8 +37,14 @@ def test_safe_form_collapses_internal_space():
 
 
 def test_safe_form_handles_multiple_and_repeated_spaces():
-    assert _lingpy_safe_form("qap/gaza girtin") == "qap/gaza_girtin"
     assert _lingpy_safe_form("a   b\tc") == "a_b_c"
+
+
+def test_safe_form_collapses_slash_variant_separator():
+    # A "/" variant separator survives ipa2tokens as an unknown segment
+    # that LexStat rejects; fold it into the "_" word boundary too.
+    assert _lingpy_safe_form("qap/gaza girtin") == "qap_gaza_girtin"
+    assert _lingpy_safe_form("a/b") == "a_b"
 
 
 def test_safe_form_leaves_single_word_unchanged():
@@ -124,3 +130,61 @@ def test_all_unclusterable_returns_empty_without_crashing():
     concepts = [ConceptSpec(concept_id="999")]
 
     assert _compute_cognate_sets_with_lingpy(forms_by_concept, concepts, 0.6) == {}
+
+
+def test_skipped_out_collects_unclusterable_forms():
+    pytest.importorskip("lingpy")
+
+    # The "?" placeholder is skipped; the collector records what/why so the
+    # caller can surface it instead of dropping it silently.
+    forms_by_concept = {
+        "629": [
+            FormRecord("Badr01", "629", "", "?", "", 0.0, 1.0),
+            FormRecord("Fail03", "629", "", "dest", "", 0.0, 1.0),
+            FormRecord("Kalh02", "629", "", "dest", "", 0.0, 1.0),
+        ],
+    }
+    concepts = [ConceptSpec(concept_id="629")]
+
+    skipped: list = []
+    _compute_cognate_sets_with_lingpy(forms_by_concept, concepts, 0.6, skipped_out=skipped)
+
+    assert skipped == [{"concept_id": "629", "speaker": "Badr01", "form": "?"}]
+
+
+def test_skipped_out_stays_empty_when_all_clusterable():
+    pytest.importorskip("lingpy")
+
+    forms_by_concept = {
+        "626": [
+            FormRecord("Fail03", "626", "", "xwārdin", "", 0.0, 1.0),
+            FormRecord("Kalh02", "626", "", "xwardin", "", 0.0, 1.0),
+        ],
+    }
+    concepts = [ConceptSpec(concept_id="626")]
+
+    skipped: list = []
+    _compute_cognate_sets_with_lingpy(forms_by_concept, concepts, 0.6, skipped_out=skipped)
+
+    assert skipped == []
+
+
+def test_slash_variant_form_clusters_and_is_not_skipped():
+    pytest.importorskip("lingpy")
+
+    # "/"-variant forms previously survived sanitising but were rejected by
+    # LexStat ("Could not convert item ID"). They must now cluster, not skip.
+    forms_by_concept = {
+        "627": [
+            FormRecord("Badr01", "627", "", "qap/gaza girtin", "", 0.0, 1.0),
+            FormRecord("Fail03", "627", "", "qap girtin", "", 0.0, 1.0),
+        ],
+    }
+    concepts = [ConceptSpec(concept_id="627")]
+
+    skipped: list = []
+    result = _compute_cognate_sets_with_lingpy(forms_by_concept, concepts, 0.6, skipped_out=skipped)
+
+    assert skipped == []
+    speakers = {s for group in result.get("627", {}).values() for s in group}
+    assert speakers == {"Badr01", "Fail03"}
