@@ -41,7 +41,7 @@ import {
 } from './lib/referenceFormParsing';
 import { buildSpeakerForm } from './lib/speakerForm';
 import { findCompareBundleForConcept, normalizeBundles } from './lib/compareBundles';
-import { conceptMatchesElicitedKeys, conceptUnderlyingKeys, speakerElicitedConceptKeys } from './lib/speakerElicitedConcepts';
+import { conceptMatchesElicitedKeys, conceptUnderlyingKeys, noteKeysForConcept, speakerElicitedConceptKeys } from './lib/speakerElicitedConcepts';
 import { buildSpeakerSortKeys } from './lib/speakerSortKeys';
 import { buildRealizationKey, classifyConceptIdentity, findConceptByUnderlyingKey, groupConceptEntries, parseRealizationKey, resolveModeSwitchSelection } from './lib/conceptGrouping';
 import { buildElicitationDetailsByConceptKey } from './lib/elicitationDetails';
@@ -1307,12 +1307,13 @@ export function ParseUI() {
     }
     return baseConcept;
   }, [baseConcept, activeRawKey, currentMode]);
-  // Stable csv-id key(s) for concept notes — NOT the volatile sequential
-  // `Concept.id`. Singleton → [concept.key]; merged → underlying member ids.
-  const conceptNoteKeys = useMemo<string[]>(() => {
-    const variantKeys = concept.variants?.map((v) => v.conceptKey).filter((k): k is string => Boolean(k)) ?? [];
-    return variantKeys.length > 0 ? variantKeys : [concept.key];
-  }, [concept]);
+  // Keys to read/write this concept's note under — NOT the volatile sequential
+  // `Concept.id`. Notes are uid-keyed (concept.key) post MC-458-E, so
+  // noteKeysForConcept leads with the uid (member csv ids kept after it as a
+  // legacy read-fallback). The old "variant csv ids only" form looked up the
+  // wrong key for grouped/identity concepts, so the box silently fell back to
+  // stale localStorage (e.g. cold's note under cloud).
+  const conceptNoteKeys = useMemo<string[]>(() => noteKeysForConcept(concept), [concept]);
   const activeResolvedSurvey = useMemo(() => {
     if (currentMode !== 'annotate') {
       return resolveConceptSurvey(concept, selectedSpeakers[0] ?? null, speakerSurveyChoices, surveySettings);

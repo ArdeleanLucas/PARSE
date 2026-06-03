@@ -59,6 +59,16 @@ describe('ConceptNotesBox', () => {
     expect((screen.getByTestId('concept-note-356') as HTMLTextAreaElement).value).toBe('HONEY — rep=B');
   });
 
+  it('resolves the uid-keyed note when keys lead with the uid (MC-458-K)', () => {
+    // Post MC-458-E concept_notes is uid-keyed (c-328). noteKeysForConcept now
+    // leads with the uid, so the box must read c-328 (not the member id 328,
+    // which would miss and fall back to a stale cached note).
+    mocks.storeData = { concept_notes: { 'c-328': { note: 'CLOUD — single state A hawr' } } };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ '328': 'STALE cold note' }));
+    render(<ConceptNotesBox conceptKeys={['c-328', '328']} />);
+    expect((screen.getByTestId('concept-note-c-328') as HTMLTextAreaElement).value).toBe('CLOUD — single state A hawr');
+  });
+
   it('falls back to the legacy localStorage cache when the server has no note', () => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ '356': 'legacy local note' }));
     render(<ConceptNotesBox conceptKeys={['356']} />);

@@ -39,6 +39,29 @@ export function conceptUnderlyingKeys(concept: ConceptKeyCarrier): string[] {
   return Array.from(keys);
 }
 
+/**
+ * Keys under which a concept's note is read/written. Notes are keyed by the
+ * concept identity uid (`concept.key`) post MC-458-E (the server uid-migrates
+ * `concept_notes`), so the uid MUST come first — `ConceptNotesBox` /
+ * `resolveServerNote` returns the first non-empty match. The underlying member
+ * csv ids are kept after it as a legacy read-fallback (notes typed before the
+ * migration) and to keep merged members in sync on save. Unlike
+ * `conceptUnderlyingKeys`, this intentionally includes `concept.key` because the
+ * note store IS uid-keyed (no concept_id-collision concern here).
+ */
+export function noteKeysForConcept(concept: ConceptKeyCarrier): string[] {
+  const keys = new Set<string>();
+  const add = (value: string | null | undefined) => {
+    const key = value == null ? '' : String(value).trim();
+    if (key) keys.add(key);
+  };
+  add(concept.key);
+  for (const key of concept.mergedKeys ?? []) add(key);
+  for (const variant of concept.variants ?? []) add(variant.conceptKey);
+  for (const variant of concept.mergedVariants ?? []) add(variant.conceptKey);
+  return Array.from(keys);
+}
+
 export function conceptMatchesElicitedKeys(
   concept: ConceptKeyCarrier,
   elicitedConceptKeys: ReadonlySet<string>,
