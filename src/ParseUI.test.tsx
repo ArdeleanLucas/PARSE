@@ -4225,6 +4225,47 @@ describe("ParseUI", () => {
     await waitFor(() => expect(mockSetActiveConcept).toHaveBeenCalledWith("2"));
   });
 
+  it("scrolls the active concept row into view when navigating concepts in Compare mode", async () => {
+    // Compare/Tags navigation clears selectedRealizationKey, so the sidebar
+    // auto-scroll must fall back to the active concept's parent row — otherwise
+    // it would only ever fire on Annotate (regression: MC-460).
+    window.localStorage.setItem("parse.currentMode", "compare");
+    mockConfig = {
+      ...mockConfig!,
+      concepts: [
+        { id: "1", label: "water" },
+        { id: "2", label: "hair" },
+        { id: "3", label: "fire" },
+      ],
+    };
+
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+    try {
+      render(<ParseUI />);
+
+      const sidebar = await screen.findByTestId("concept-sidebar");
+      fireEvent.click(within(sidebar).getByRole("button", { name: /hair/i }));
+      expect(screen.getByPlaceholderText(/Ask PARSE AI about hair/i)).toBeTruthy();
+      scrollSpy.mockClear();
+
+      // No realization is selected in Compare mode, yet ArrowDown to "fire"
+      // should still scroll the concept-parent-button for the active concept.
+      fireEvent.keyDown(window, { key: "ArrowDown" });
+      expect(await screen.findByPlaceholderText(/Ask PARSE AI about fire/i)).toBeTruthy();
+
+      await waitFor(() => {
+        const scrolledActiveRow = scrollSpy.mock.instances.some(
+          (instance) => (instance as HTMLElement)?.getAttribute?.("data-testid") === "concept-parent-button-3",
+        );
+        expect(scrolledActiveRow).toBe(true);
+      });
+    } finally {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
   it("persists compare notes per concept via localStorage without requiring a blur", () => {
     const { unmount } = render(<ParseUI />);
     const notesField = screen.getByPlaceholderText(/Add observations, etymological notes, or questions for review/i);
