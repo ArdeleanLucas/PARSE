@@ -1808,13 +1808,18 @@ export function ParseUI() {
   }, [currentMode, goToConceptOffset, goToRealizationOffset, selectedRealizationKey, dispatchSelectedSidebarDelete]);
 
   useEffect(() => {
-    if (!selectedRealizationKey) return;
-    const activeChip = Array.from(document.querySelectorAll<HTMLElement>('[data-realization-key]'))
-      .find((element) => element.getAttribute('data-realization-key') === selectedRealizationKey);
-    if (typeof activeChip?.scrollIntoView === 'function') {
-      activeChip.scrollIntoView({ block: 'nearest' });
+    // Keep the active sidebar entry in view. Annotate navigates by realization
+    // (selectedRealizationKey); Compare/Tags navigate by concept and clear that
+    // key, so fall back to the active concept's parent row there — otherwise the
+    // auto-scroll would only ever fire on Annotate.
+    const activeElement = selectedRealizationKey
+      ? Array.from(document.querySelectorAll<HTMLElement>('[data-realization-key]'))
+          .find((element) => element.getAttribute('data-realization-key') === selectedRealizationKey)
+      : document.querySelector<HTMLElement>(`[data-testid="concept-parent-button-${conceptId}"]`);
+    if (typeof activeElement?.scrollIntoView === 'function') {
+      activeElement.scrollIntoView({ block: 'nearest' });
     }
-  }, [selectedRealizationKey]);
+  }, [selectedRealizationKey, conceptId]);
 
   const toggleSpeaker = (s: string) => {
     if (currentMode === 'annotate') {
