@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import sys
 import unicodedata
 from dataclasses import dataclass, field
@@ -781,46 +782,25 @@ def _group_label(index: int) -> str:
 def _lingpy_safe_form(ipa_form: str) -> str:
     """Make a form safe for LingPy's tokenizer without altering stored data.
 
-    LingPy's ``ipa2tokens`` raises ``ValueError: Input must not contain
-    spaces`` on multi-word forms (e.g. Kurdish light-verb constructions
-    like ``"qap girtin"``), which LexStat surfaces as the opaque
-    ``Could not convert item ID: <row>`` error and aborts the whole
-    cognate job. Collapse internal whitespace to ``_`` -- LingPy's own
-    word-boundary symbol -- so the form tokenizes cleanly.
+    Two real-world form shapes abort the whole cognate job with the opaque
+    ``Could not convert item ID: <row>`` error:
+
+    - **multi-word forms** (e.g. light-verb constructions like
+      ``"qap girtin"``) -- ``ipa2tokens`` rejects spaces outright;
+    - **``/`` variant separators** (e.g. ``"qap/gaza girtin"``) -- the
+      ``/`` survives tokenisation as an unknown segment that LexStat then
+      refuses to convert.
+
+    Collapse internal whitespace *and* ``/`` to ``_`` -- LingPy's own
+    word-boundary symbol -- so both shapes tokenize cleanly and still
+    cluster.
 
     This value is fed ONLY to the in-memory LexStat wordlist. It is never
     persisted to parse-enrichments.json nor shown in the UI: the cognate
     output is speaker groupings only, and similarity scores use the
     original ``record.ipa``. The displayed form is unchanged.
     """
-    return "_".join(str(ipa_form or "").split())
-
-
-def _lingpy_clusterable(safe_form: str, ipa2tokens, tokens2class) -> bool:
-    """Return True if LingPy can tokenise ``safe_form`` into known sounds.
-
-    A few stored form values are un-clusterable even after whitespace
-    sanitising -- e.g. a bare ``"?"`` placeholder that tokenises to
-    only-unknown sound classes. LexStat aborts the entire job on such a
-    form (``Could not convert item ID: <row>``). Detecting them up front
-    lets us build a gap-free wordlist and exclude only the offending rows
-    -- deleting keys after construction instead corrupts LingPy's row
-    numbering and triggers a misleading "contains N fields" error.
-
-    Excluded rows keep their stored/displayed form untouched; they simply
-    receive no cognate grouping (a ``"?"`` placeholder is not cognate with
-    anything). Any tokeniser exception is treated as un-clusterable.
-    """
-    if not safe_form:
-        return False
-    try:
-        tokens = ipa2tokens(safe_form)
-        if not tokens:
-            return False
-        classes = tokens2class(tokens, "sca")
-    except Exception:
-        return False
-    return any(cls != "0" for cls in classes)
+    return "_".join(str(ipa_form or "").replace("/", " ").split())
 
 
 def _compute_cognate_sets_with_lingpy(
@@ -839,7 +819,6 @@ def _compute_cognate_sets_with_lingpy(
     """
     try:
         from lingpy import LexStat  # type: ignore
-        from lingpy.sequence.sound_classes import ipa2tokens, tokens2class  # type: ignore
     except ImportError as exc:
         raise RuntimeError(
             "LingPy is not installed. Install it with: pip install lingpy"
@@ -855,29 +834,48 @@ def _compute_cognate_sets_with_lingpy(
     if not rows:
         return {}
 
-    # Build the LexStat wordlist with CONTIGUOUS integer row IDs. Forms
-    # are whitespace-sanitised (so multi-word forms still cluster) and any
-    # form LingPy cannot tokenise into known sounds is skipped up front --
-    # excluding them after construction would leave gaps in the row
-    # numbering and crash LingPy. Skipped rows keep their displayed form
-    # and simply receive no cognate grouping.
-    lex_data: Dict[int, List[str]] = {0: ["doculect", "concept", "ipa"]}
-    index_meta: Dict[int, Tuple[str, str]] = {}
-
-    row_index = 0
+    # Sanitise forms (whitespace/"/" -> "_", so multi-word and variant
+    # forms still cluster) and drop empties. Each surviving candidate
+    # carries its original form so we can report it if LexStat rejects it.
+    candidates: List[Tuple[str, str, str, str, str]] = []
     skipped: List[Dict[str, str]] = []
     for speaker, concept_label, ipa_form, concept_id in rows:
         safe_form = _lingpy_safe_form(ipa_form)
-        if not _lingpy_clusterable(safe_form, ipa2tokens, tokens2class):
-            skipped.append({
-                "concept_id": concept_id,
-                "speaker": speaker,
-                "form": str(ipa_form or ""),
-            })
+        original = str(ipa_form or "")
+        if not safe_form:
+            skipped.append({"concept_id": concept_id, "speaker": speaker, "form": original})
             continue
-        row_index += 1
-        lex_data[row_index] = [speaker, concept_label, safe_form]
-        index_meta[row_index] = (concept_id, speaker)
+        candidates.append((speaker, concept_label, safe_form, concept_id, original))
+
+    # Let LexStat itself be the authority on what it can ingest. A few
+    # values survive sanitising yet LexStat still refuses to convert them
+    # (e.g. a bare "?" that tokenises to only-unknown sounds), aborting
+    # with "Could not convert item ID: <row>". When that happens, drop the
+    # offending row and rebuild the wordlist with fresh CONTIGUOUS ids,
+    # then retry -- deleting a key in place instead leaves a gap that
+    # corrupts LingPy's row numbering. Bounded by the candidate count.
+    lexstat = None
+    index_meta: Dict[int, Tuple[str, str]] = {}
+    for _attempt in range(len(candidates) + 1):
+        lex_data: Dict[int, List[str]] = {0: ["doculect", "concept", "ipa"]}
+        index_meta = {}
+        for idx, (speaker, concept_label, safe_form, concept_id, _orig) in enumerate(candidates, start=1):
+            lex_data[idx] = [speaker, concept_label, safe_form]
+            index_meta[idx] = (concept_id, speaker)
+        if not index_meta:
+            break
+        try:
+            lexstat = LexStat(lex_data, check=False)
+            break
+        except ValueError as exc:
+            match = re.search(r"convert item ID:\s*(\d+)", str(exc))
+            if match is None:
+                raise
+            bad = int(match.group(1))
+            if not 1 <= bad <= len(candidates):
+                raise
+            speaker, concept_label, safe_form, concept_id, original = candidates.pop(bad - 1)
+            skipped.append({"concept_id": concept_id, "speaker": speaker, "form": original})
 
     if skipped:
         _warn(
@@ -893,10 +891,9 @@ def _compute_cognate_sets_with_lingpy(
     if skipped_out is not None:
         skipped_out.extend(skipped)
 
-    if not index_meta:  # nothing clusterable
+    if lexstat is None or not index_meta:  # nothing clusterable
         return {}
 
-    lexstat = LexStat(lex_data, check=False)
     lexstat.get_scorer()
     lexstat.cluster(method="lexstat", threshold=float(threshold), ref="cogid")
 
