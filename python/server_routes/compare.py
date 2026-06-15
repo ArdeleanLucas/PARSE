@@ -79,6 +79,15 @@ def _api_get_enrichments(self) -> None:
     self._send_json(_server.HTTPStatus.OK, {'enrichments': payload})
 
 def _api_post_enrichments(self) -> None:
+    """Persist enrichments by deep-merging the request into the on-disk copy.
+
+    This endpoint does NOT replace the file. Any caller (frontend, scripts,
+    external API) should send the full client snapshot; an omitted or empty
+    ``manual_overrides`` will not erase existing human review decisions. To
+    clear a value, send its emptied shape explicitly (e.g. an empty list for an
+    emptied cognate group) rather than dropping the key — dropped keys are
+    preserved from disk by the merge.
+    """
     body = self._read_json_body(required=True)
     if not isinstance(body, dict):
         raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, 'Enrichments payload must be a JSON object')

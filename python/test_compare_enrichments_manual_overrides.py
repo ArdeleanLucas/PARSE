@@ -185,3 +185,28 @@ def test_post_enrichments_preserves_non_empty_disk_manual_overrides_when_client_
     assert handler.wfile.payload() == {"success": True}
     written = _read_enrichments(tmp_path)
     assert written["manual_overrides"] == manual_overrides
+
+
+def test_post_enrichments_persists_emptied_cognate_group_from_full_snapshot(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The frontend emits every existing group (an empty list for an emptied
+    # group) so the deep-merge replaces membership rather than re-adding it.
+    # Lock that contract: a non-empty incoming manual_overrides that empties
+    # group B must leave B == [] on disk, not re-populate it from the prior
+    # decision. (Guards against a future "prune empty groups" change silently
+    # reintroducing the deletion-suppression bug.)
+    _seed_enrichments(
+        tmp_path,
+        {"manual_overrides": {"cognate_sets": {"538": {"A": ["Mand01", "Qasr01"], "B": ["Saha01"]}}}},
+    )
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    server._install_route_bindings()
+    incoming = {"manual_overrides": {"cognate_sets": {"538": {"A": ["Mand01", "Qasr01", "Saha01"], "B": []}}}}
+    handler = _Handler({"enrichments": incoming})
+
+    handler._api_post_enrichments()
+
+    assert handler.status == HTTPStatus.OK
+    written = _read_enrichments(tmp_path)
+    assert written["manual_overrides"]["cognate_sets"]["538"] == {"A": ["Mand01", "Qasr01", "Saha01"], "B": []}

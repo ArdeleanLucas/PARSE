@@ -421,10 +421,24 @@ def _read_json_file(path: pathlib.Path, default: Dict[str, Any]) -> Dict[str, An
 
 def _write_json_file(path: pathlib.Path, payload: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    data = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    # Write atomically so a crash, a concurrent reader, or two interleaved
+    # read-modify-write callers can never observe (or be left with) a
+    # half-written or truncated file. The temp file lives beside the target so
+    # os.replace stays on a single filesystem (where it is atomic).
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    try:
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
 
 
 def _dist_dir(project_root: Optional[pathlib.Path] = None) -> pathlib.Path:
