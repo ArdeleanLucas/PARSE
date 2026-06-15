@@ -238,6 +238,7 @@ def build_wordlist_rows(
     cognate_sets: CognateSets,
     id_to_key: Mapping[str, str],
     allowed_ids: Optional[Set[str]] = None,
+    canonical_lexemes: Optional[Mapping[str, Any]] = None,
 ) -> List[Tuple[Any, ...]]:
     """Build LingPy wordlist rows remapped onto consolidated canonical concepts.
 
@@ -247,6 +248,22 @@ def build_wordlist_rows(
     """
     forms_by_concept, _speakers = load_annotations(annotations_dir)
     cogid_lookup, cogid_group_by_speaker = _build_cogid_lookup(cognate_sets)
+
+    selected_row_by_key_speaker: Dict[Tuple[str, str], str] = {}
+    if isinstance(canonical_lexemes, Mapping):
+        for speaker_map in canonical_lexemes.values():
+            if not isinstance(speaker_map, Mapping):
+                continue
+            for speaker, selection in speaker_map.items():
+                if not isinstance(selection, Mapping):
+                    continue
+                row_id = str(selection.get("csv_row_id") or "").strip()
+                if not row_id:
+                    continue
+                key = id_to_key.get(row_id)
+                if not key:
+                    continue
+                selected_row_by_key_speaker[(key, _speaker_lookup_key(str(speaker)))] = row_id
 
     # Remap and de-dup forms onto canonical gloss keys.
     by_key_speaker: Dict[Tuple[str, str], Any] = {}
@@ -258,7 +275,17 @@ def build_wordlist_rows(
             sk = _speaker_lookup_key(record.speaker)
             slot = (key, sk)
             existing = by_key_speaker.get(slot)
-            if existing is None or record.start_sec < existing.start_sec:
+            selected_row_id = selected_row_by_key_speaker.get(slot)
+            if existing is None:
+                by_key_speaker[slot] = record
+            elif selected_row_id:
+                record_is_selected = str(record.concept_id) == selected_row_id
+                existing_is_selected = str(existing.concept_id) == selected_row_id
+                if record_is_selected and not existing_is_selected:
+                    by_key_speaker[slot] = record
+                elif record_is_selected == existing_is_selected and record.start_sec < existing.start_sec:
+                    by_key_speaker[slot] = record
+            elif record.start_sec < existing.start_sec:
                 by_key_speaker[slot] = record
 
     forms_by_key: Dict[str, List[Any]] = {}

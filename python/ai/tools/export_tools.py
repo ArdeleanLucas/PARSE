@@ -653,7 +653,8 @@ def export_lingpy_tsv(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str
             try:
                 from compare.consolidated_matrix import build_wordlist_rows, wordlist_rows_to_tsv
                 cognate_sets, meta, id_to_key, _speakers, allowed_ids = _consolidated_sets(tools, concept_tag)
-                rows = build_wordlist_rows(tools.annotations_dir, cognate_sets, id_to_key, allowed_ids)
+                canonical_lexemes = (_read_json_file(tools.enrichments_path, {}).get("manual_overrides") or {}).get("canonical_lexemes")
+                rows = build_wordlist_rows(tools.annotations_dir, cognate_sets, id_to_key, allowed_ids, canonical_lexemes)
                 content = wordlist_rows_to_tsv(rows)
             except ChatToolError:
                 raise
