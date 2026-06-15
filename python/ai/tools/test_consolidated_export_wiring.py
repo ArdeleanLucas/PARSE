@@ -6,12 +6,14 @@ import pathlib
 import re
 import sys
 import xml.etree.ElementTree as ET
+from typing import Any
 
 import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from ai.chat_tools import ParseChatTools  # noqa: E402  (import first; avoids export_tools load cycle)
+from ai.workflow_tools import WorkflowTools  # noqa: E402
 
 
 def _seed_workspace(root: pathlib.Path) -> None:
@@ -51,6 +53,73 @@ def _seed_workspace(root: pathlib.Path) -> None:
         }), encoding="utf-8")
     write("Spk1", "53", "gewra")   # tagged under KLQ id
     write("Spk3", "150", "kalan")  # tagged under the duplicate JBIL id
+
+
+def _write_annotation(root: pathlib.Path, speaker: str, intervals: list[dict[str, Any]]) -> None:
+    ann = root / "annotations"
+    ann.mkdir(exist_ok=True)
+    concept_intervals = []
+    ipa_intervals = []
+    for index, item in enumerate(intervals):
+        start = float(index)
+        end = start + 0.5
+        concept_intervals.append(
+            {"text": item.get("label", ""), "concept_id": item["concept_id"], "start": start, "end": end}
+        )
+        ipa_intervals.append({"text": item["ipa"], "start": start, "end": end})
+    (ann / f"{speaker}.parse.json").write_text(
+        json.dumps({"speaker": speaker, "tiers": {"concept": {"intervals": concept_intervals}, "ipa": {"intervals": ipa_intervals}}}),
+        encoding="utf-8",
+    )
+
+
+def _seed_roundtrip_workspace(root: pathlib.Path) -> None:
+    (root / "concepts.csv").write_text(
+        "id,concept_en,source_survey,source_item\n"
+        "101,hand,KLQ,1.1\n"
+        "201,hand,JBIL,101\n"
+        "102,foot,KLQ,1.2\n"
+        "202,foot,JBIL,102\n"
+        "103,salt,KLQ,1.3\n"
+        "203,salt,JBIL,103\n",
+        encoding="utf-8",
+    )
+    groups = {"A": ["Spk1", "Spk2"], "B": ["Spk3"]}
+    (root / "parse-enrichments.json").write_text(
+        json.dumps({
+            "manual_overrides": {
+                "cognate_sets": {
+                    "101": groups,
+                    "201": dict(groups),
+                    "102": {"A": ["Spk1"], "B": ["Spk2", "Spk3"]},
+                    "202": {"A": ["Spk1"], "B": ["Spk2", "Spk3"]},
+                    # Disagreement safety: this overlapping gloss must stay split.
+                    "103": {"A": ["Spk1", "Spk2"], "B": ["Spk3"]},
+                    "203": {"A": ["Spk1"], "B": ["Spk2", "Spk3"]},
+                },
+                # Spk1 has both survey forms for hand; the explicit canonical
+                # choice should select row 201 rather than the earlier 101 form.
+                "canonical_lexemes": {"bundle:hand": {"Spk1": {"csv_row_id": "201", "source": "manual"}}},
+            }
+        }),
+        encoding="utf-8",
+    )
+    (root / "project.json").write_text(
+        json.dumps({"speakers": {"Spk1": {}, "Spk2": {}, "Spk3": {}}}), encoding="utf-8"
+    )
+    _write_annotation(
+        root,
+        "Spk1",
+        [
+            {"concept_id": "101", "label": "hand", "ipa": "old-hand"},
+            {"concept_id": "201", "label": "hand", "ipa": "chosen-hand"},
+            {"concept_id": "102", "label": "foot", "ipa": "foot-one"},
+            {"concept_id": "103", "label": "salt", "ipa": "salt-one"},
+            {"concept_id": "203", "label": "salt", "ipa": "salt-two"},
+        ],
+    )
+    _write_annotation(root, "Spk2", [{"concept_id": "201", "label": "hand", "ipa": "hand-two"}, {"concept_id": "202", "label": "foot", "ipa": "foot-two"}])
+    _write_annotation(root, "Spk3", [{"concept_id": "101", "label": "hand", "ipa": "hand-three"}, {"concept_id": "202", "label": "foot", "ipa": "foot-three"}])
 
 
 def test_export_nexus_consolidates_and_tag_filters(tmp_path: pathlib.Path) -> None:
@@ -115,3 +184,35 @@ def test_export_beast2_xml_rejects_bad_chain_length(tmp_path: pathlib.Path) -> N
     tools = ParseChatTools(project_root=tmp_path)
     with pytest.raises(Exception):
         tools._tool_export_beast2_xml({"consolidate": True, "chainLength": 0, "dryRun": True})
+
+
+def test_complete_export_consolidate_roundtrip_collapses_n_not_2n(tmp_path: pathlib.Path) -> None:
+    _seed_roundtrip_workspace(tmp_path)
+    workflow = WorkflowTools(project_root=tmp_path)
+
+    payload = workflow.execute(
+        "export_complete_lingpy_dataset",
+        {"with_contact_lexemes": False, "consolidate": True, "outputDir": "exports/roundtrip", "dryRun": False},
+    )["result"]
+
+    nexus_text = (tmp_path / "exports" / "roundtrip" / "dataset.nex").read_text(encoding="utf-8")
+    wordlist_text = (tmp_path / "exports" / "roundtrip" / "wordlist.tsv").read_text(encoding="utf-8")
+    nchar = int(re.search(r"NCHAR=(\d+)", nexus_text).group(1))
+    concept_values = [line.split("\t")[1] for line in wordlist_text.splitlines()[1:]]
+    hand_rows = [line.split("\t") for line in wordlist_text.splitlines()[1:] if line.split("\t")[1] == "hand"]
+
+    assert payload["consolidated"] is True
+    assert payload["stages"][0]["payload"]["consolidation"]["collapsed_groups"] == 2
+    assert payload["stages"][0]["payload"]["consolidation"]["concept_count"] == 4
+    assert payload["stages"][0]["payload"]["consolidation"]["needs_recluster_groups"] == 1
+    assert any("kept separate" in warning for warning in payload["warnings"])
+    # N=2 safe overlapping meanings (hand + foot) produce N consolidated concept
+    # blocks, not 2N per-survey duplicates; disagreeing salt remains split.
+    assert "hand#" not in nexus_text
+    assert "foot#" not in nexus_text
+    assert "salt#103" in nexus_text and "salt#203" in nexus_text
+    assert nchar == 8  # hand(2) + foot(2) + safe split salt#103(2) + salt#203(2)
+    assert concept_values.count("hand") == 3
+    assert len({row[2] for row in hand_rows}) == len(hand_rows)
+    assert any(row[3] == "chosen-hand" for row in hand_rows)
+    assert all(row[3] != "old-hand" for row in hand_rows)
