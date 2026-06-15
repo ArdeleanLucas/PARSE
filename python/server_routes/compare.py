@@ -6,6 +6,47 @@ from canonical_lexemes import CanonicalLexemeError, delete_canonical_selection, 
 from compare_bundles import build_canonical_lexemes_report_tsv, build_compare_bundles
 from concept_identity import identity_payload, load_concept_identity, write_concept_identity_override
 
+
+def find_cognate_partition_violations(cognate_sets: _server.Any) -> set[tuple[str, str]]:
+    """Return (concept, speaker) pairs assigned to multiple manual cognate groups."""
+    if not isinstance(cognate_sets, dict):
+        return set()
+    violations: set[tuple[str, str]] = set()
+    for concept_key, groups in cognate_sets.items():
+        if not isinstance(groups, dict):
+            continue
+        concept = str(concept_key).strip()
+        first_group_by_speaker: dict[str, str] = {}
+        for group_key, speakers in groups.items():
+            if not isinstance(speakers, list):
+                continue
+            group = str(group_key).strip()
+            seen_in_group: set[str] = set()
+            for raw_speaker in speakers:
+                speaker = str(raw_speaker).strip()
+                if not speaker or speaker in seen_in_group:
+                    continue
+                seen_in_group.add(speaker)
+                previous_group = first_group_by_speaker.setdefault(speaker, group)
+                if previous_group != group:
+                    violations.add((concept, speaker))
+    return violations
+
+
+def _format_cognate_partition_error(violations: set[tuple[str, str]]) -> str:
+    details = ', '.join('{0}: {1}'.format(concept, speaker) for concept, speaker in sorted(violations))
+    return 'Invalid cognate partition: manual_overrides.cognate_sets lists speaker(s) in multiple groups for the same concept: {0}'.format(details)
+
+
+def _manual_cognate_sets_from_payload(payload: _server.Any) -> _server.Any:
+    if not isinstance(payload, dict):
+        return None
+    manual_overrides = payload.get('manual_overrides')
+    if not isinstance(manual_overrides, dict):
+        return None
+    return manual_overrides.get('cognate_sets')
+
+
 def _compute_cognates(job_id: str, payload: _server.Dict[str, _server.Any]) -> _server.Dict[str, _server.Any]:
     if _server.cognate_compute_module is None:
         raise RuntimeError('compare.cognate_compute is unavailable')
@@ -63,6 +104,9 @@ def _compute_cognates(job_id: str, payload: _server.Dict[str, _server.Any]) -> _
     enrichments_payload = _server._read_json_file(output_path, _server._default_enrichments_payload())
     enrichments_payload.update({'computed_at': _server._utc_now_iso(), 'config': {'contact_languages': list(contact_languages), 'speakers_included': speakers_included, 'concepts_included': [_server._concept_out_value(concept_id) for concept_id in selected_concept_ids], 'lexstat_threshold': round(float(threshold), 3)}, 'cognate_sets': cognate_sets, 'similarity': similarity})
     enrichments_payload.setdefault('manual_overrides', {})
+    violations = find_cognate_partition_violations(_manual_cognate_sets_from_payload(enrichments_payload))
+    if violations:
+        raise RuntimeError(_format_cognate_partition_error(violations))
     _server._set_job_progress(job_id, 92.0, message='Writing parse-enrichments.json')
     _server._write_json_file(output_path, enrichments_payload)
     return {'type': 'cognates', 'outputPath': str(output_path), 'computedAt': enrichments_payload['computed_at'], 'conceptCount': len(enrichments_payload['config']['concepts_included']), 'speakerCount': len(enrichments_payload['config']['speakers_included']), 'skippedFormCount': len(skipped_forms), 'skippedForms': skipped_forms[:50]}
@@ -103,6 +147,9 @@ def _api_post_enrichments(self) -> None:
     incoming_manual = enrichments_payload.get('manual_overrides')
     if isinstance(existing_manual, dict) and existing_manual and (not isinstance(incoming_manual, dict) or not incoming_manual):
         merged_payload['manual_overrides'] = _server.copy.deepcopy(existing_manual)
+    violations = find_cognate_partition_violations(_manual_cognate_sets_from_payload(merged_payload))
+    if violations:
+        raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, _format_cognate_partition_error(violations))
     _server._write_json_file(output_path, merged_payload)
     self._send_json(_server.HTTPStatus.OK, {'success': True})
 
@@ -281,5 +328,5 @@ def _api_get_canonical_lexemes_report(self) -> None:
     self.wfile.write(body)
 
 
-__all__ = ['_compute_cognates', '_api_get_enrichments', '_api_post_enrichments', '_api_post_lexeme_note', '_api_post_lexeme_notes_import', '_api_get_lexeme_search', '_api_get_tags', '_api_post_tags_merge', '_api_get_concept_identity', '_api_post_concept_identity', '_api_get_compare_bundles', '_api_put_compare_canonical_lexeme', '_api_delete_compare_canonical_lexeme', '_api_get_canonical_lexemes_report']
+__all__ = ['find_cognate_partition_violations', '_compute_cognates', '_api_get_enrichments', '_api_post_enrichments', '_api_post_lexeme_note', '_api_post_lexeme_notes_import', '_api_get_lexeme_search', '_api_get_tags', '_api_post_tags_merge', '_api_get_concept_identity', '_api_post_concept_identity', '_api_get_compare_bundles', '_api_put_compare_canonical_lexeme', '_api_delete_compare_canonical_lexeme', '_api_get_canonical_lexemes_report']
 

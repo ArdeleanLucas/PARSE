@@ -14,7 +14,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import server  # noqa: E402
-from server_routes import jobs  # noqa: E402
+from server_routes import compare, jobs  # noqa: E402
 
 
 @dataclass
@@ -113,6 +113,15 @@ def _install_compute_fakes(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPat
     server._install_route_bindings()
 
 
+def test_find_cognate_partition_violations_reports_cross_group_speaker_membership() -> None:
+    cognate_sets = {
+        "black": {"A": ["Kalh02", "Kalh02"], "B": ["Mand01", "Kalh02"]},
+        "white": {"A": ["Mand01"], "B": []},
+    }
+
+    assert compare.find_cognate_partition_violations(cognate_sets) == {("black", "Kalh02")}
+
+
 @pytest.mark.parametrize("compute_type", ["cognates", "similarity"])
 def test_compute_job_preserves_manual_overrides_and_unrelated_enrichment_keys(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, compute_type: str
@@ -162,6 +171,21 @@ def test_compute_cognates_without_existing_enrichments_defaults_manual_overrides
     assert written["cognate_sets"] == {"538": {"AUTO": ["Mand01", "Qasr01", "Saha01"]}}
 
 
+def test_compute_cognates_rejects_malformed_existing_manual_cognate_partition(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_compute_fakes(tmp_path, monkeypatch)
+    existing = {"manual_overrides": {"cognate_sets": {"black": {"A": ["Kalh02"], "B": ["Kalh02"]}}}}
+    _seed_enrichments(tmp_path, existing)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        server._compute_cognates("job-1", {"threshold": 0.6})
+
+    assert "black" in str(exc_info.value)
+    assert "Kalh02" in str(exc_info.value)
+    assert _read_enrichments(tmp_path) == existing
+
+
 @pytest.mark.parametrize("incoming_enrichments", [{"cognate_sets": {"538": {"AUTO": ["Mand01"]}}}, {"manual_overrides": {}}])
 def test_post_enrichments_preserves_non_empty_disk_manual_overrides_when_client_omits_them(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, incoming_enrichments: dict[str, Any]
@@ -185,6 +209,38 @@ def test_post_enrichments_preserves_non_empty_disk_manual_overrides_when_client_
     assert handler.wfile.payload() == {"success": True}
     written = _read_enrichments(tmp_path)
     assert written["manual_overrides"] == manual_overrides
+
+
+def test_post_enrichments_rejects_duplicate_manual_cognate_membership_after_merge(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    existing = {"manual_overrides": {"cognate_sets": {"black": {"A": ["Kalh02"], "B": ["Mand01"]}}}}
+    _seed_enrichments(tmp_path, existing)
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    server._install_route_bindings()
+    handler = _Handler({"enrichments": {"manual_overrides": {"cognate_sets": {"black": {"B": ["Mand01", "Kalh02"]}}}}})
+
+    with pytest.raises(server.ApiError) as exc_info:
+        handler._api_post_enrichments()
+
+    assert exc_info.value.status == HTTPStatus.BAD_REQUEST
+    assert "black" in exc_info.value.message
+    assert "Kalh02" in exc_info.value.message
+    assert _read_enrichments(tmp_path) == existing
+
+
+def test_post_enrichments_persists_single_membership_manual_cognate_partition(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_enrichments(tmp_path, {"manual_overrides": {"cognate_sets": {"black": {"A": ["Kalh02"], "B": []}}}})
+    monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
+    server._install_route_bindings()
+    handler = _Handler({"enrichments": {"manual_overrides": {"cognate_sets": {"black": {"A": [], "B": ["Kalh02"]}}}}})
+
+    handler._api_post_enrichments()
+
+    assert handler.status == HTTPStatus.OK
+    assert _read_enrichments(tmp_path)["manual_overrides"]["cognate_sets"]["black"] == {"A": [], "B": ["Kalh02"]}
 
 
 def test_post_enrichments_persists_emptied_cognate_group_from_full_snapshot(
