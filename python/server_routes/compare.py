@@ -59,9 +59,11 @@ def _compute_cognates(job_id: str, payload: _server.Dict[str, _server.Any]) -> _
         speakers_included = sorted([speaker for speaker in discovered_speakers if speaker in speaker_filter])
     else:
         speakers_included = sorted(discovered_speakers)
-    enrichments_payload = {'computed_at': _server._utc_now_iso(), 'config': {'contact_languages': list(contact_languages), 'speakers_included': speakers_included, 'concepts_included': [_server._concept_out_value(concept_id) for concept_id in selected_concept_ids], 'lexstat_threshold': round(float(threshold), 3)}, 'cognate_sets': cognate_sets, 'similarity': similarity, 'borrowing_flags': {}, 'manual_overrides': {}}
-    _server._set_job_progress(job_id, 92.0, message='Writing parse-enrichments.json')
     output_path = _server._enrichments_path()
+    enrichments_payload = _server._read_json_file(output_path, _server._default_enrichments_payload())
+    enrichments_payload.update({'computed_at': _server._utc_now_iso(), 'config': {'contact_languages': list(contact_languages), 'speakers_included': speakers_included, 'concepts_included': [_server._concept_out_value(concept_id) for concept_id in selected_concept_ids], 'lexstat_threshold': round(float(threshold), 3)}, 'cognate_sets': cognate_sets, 'similarity': similarity})
+    enrichments_payload.setdefault('manual_overrides', {})
+    _server._set_job_progress(job_id, 92.0, message='Writing parse-enrichments.json')
     _server._write_json_file(output_path, enrichments_payload)
     return {'type': 'cognates', 'outputPath': str(output_path), 'computedAt': enrichments_payload['computed_at'], 'conceptCount': len(enrichments_payload['config']['concepts_included']), 'speakerCount': len(enrichments_payload['config']['speakers_included']), 'skippedFormCount': len(skipped_forms), 'skippedForms': skipped_forms[:50]}
 
@@ -80,8 +82,19 @@ def _api_post_enrichments(self) -> None:
     body = self._read_json_body(required=True)
     if not isinstance(body, dict):
         raise _server.ApiError(_server.HTTPStatus.BAD_REQUEST, 'Enrichments payload must be a JSON object')
-    enrichments_payload = body.get('enrichments') if isinstance(body.get('enrichments'), dict) else body
-    _server._write_json_file(_server._enrichments_path(), enrichments_payload)
+    raw_enrichments = body.get('enrichments')
+    enrichments_payload: _server.Dict[str, _server.Any] = raw_enrichments if isinstance(raw_enrichments, dict) else body
+    output_path = _server._enrichments_path()
+    existing_payload = _server._read_json_file(output_path, _server._default_enrichments_payload())
+    # /api/enrichments accepts stale full-client snapshots; merge them into the
+    # server copy so omitted or empty manual_overrides cannot erase human review
+    # decisions while still allowing callers to update automatic enrichment keys.
+    merged_payload = _server._deep_merge_dicts(existing_payload, enrichments_payload)
+    existing_manual = existing_payload.get('manual_overrides')
+    incoming_manual = enrichments_payload.get('manual_overrides')
+    if isinstance(existing_manual, dict) and existing_manual and (not isinstance(incoming_manual, dict) or not incoming_manual):
+        merged_payload['manual_overrides'] = _server.copy.deepcopy(existing_manual)
+    _server._write_json_file(output_path, merged_payload)
     self._send_json(_server.HTTPStatus.OK, {'success': True})
 
 def _api_post_lexeme_note(self) -> None:
