@@ -2114,6 +2114,78 @@ describe("ParseUI", () => {
     expect(mockSetActiveConcept).not.toHaveBeenCalledWith("1");
   });
 
+  it("blocked Delete offers Force delete, which retries with cascade after confirm", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }, { id: "2", label: "hair" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", []) };
+    vi.mocked(apiClient.deleteConcept)
+      .mockRejectedValueOnce(new ApiError(409, "DELETE", "/api/concepts/2", { error: "blocked", blocking_speakers: ["Qasr01"] }, "API DELETE /api/concepts/2 failed 409"))
+      .mockResolvedValueOnce({ ok: true, deleted_id: "2", purged_intervals: 2, purged_speakers: ["Qasr01"] });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    try {
+      render(<ParseUI />);
+      fireEvent.click(await screen.findByRole("button", { name: /hair/i }));
+      expect(await screen.findByRole("heading", { name: "hair" })).toBeTruthy();
+
+      fireEvent.click(screen.getByTestId("annotate-delete-concept"));
+      fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+      // Blocked → the force button appears.
+      const forceButton = await screen.findByTestId("concept-force-delete");
+      fireEvent.click(forceButton);
+
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(apiClient.deleteConcept).toHaveBeenCalledWith("2", { cascade: true }));
+      // Modal closes on success.
+      await waitFor(() => expect(screen.queryByText("Delete hair?")).toBeNull());
+    } finally {
+      confirmSpy.mockRestore();
+    }
+  });
+
+  it("Force delete aborts when the confirm dialog is dismissed", async () => {
+    window.localStorage.setItem("parse.currentMode", "annotate");
+    mockConfig = {
+      project_name: "PARSE",
+      language_code: "ku",
+      speakers: ["Fail01"],
+      concepts: [{ id: "1", label: "water" }, { id: "2", label: "hair" }],
+      audio_dir: "audio",
+      annotations_dir: "annotations",
+    };
+    mockRecords = { Fail01: makeRecord("Fail01", []) };
+    vi.mocked(apiClient.deleteConcept).mockRejectedValueOnce(
+      new ApiError(409, "DELETE", "/api/concepts/2", { error: "blocked", blocking_speakers: ["Qasr01"] }, "API DELETE /api/concepts/2 failed 409"),
+    );
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    try {
+      render(<ParseUI />);
+      fireEvent.click(await screen.findByRole("button", { name: /hair/i }));
+      expect(await screen.findByRole("heading", { name: "hair" })).toBeTruthy();
+      fireEvent.click(screen.getByTestId("annotate-delete-concept"));
+      fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+      fireEvent.click(await screen.findByTestId("concept-force-delete"));
+
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+      // Only the original blocked call happened — no cascade retry.
+      expect(apiClient.deleteConcept).toHaveBeenCalledTimes(1);
+      expect(apiClient.deleteConcept).not.toHaveBeenCalledWith("2", { cascade: true });
+      expect(screen.getByText("Delete hair?")).toBeTruthy();
+    } finally {
+      confirmSpy.mockRestore();
+    }
+  });
+
   it("sidebar right-click delete success keeps the current post-delete navigation behavior", async () => {
     window.localStorage.setItem("parse.currentMode", "annotate");
     mockConfig = {

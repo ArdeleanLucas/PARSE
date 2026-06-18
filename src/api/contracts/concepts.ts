@@ -13,6 +13,9 @@ import { startCompute } from "./chat-and-generic-compute";
 export interface ConceptDeleteResponse {
   ok: true;
   deleted_id: string;
+  /** Present only on a cascade delete: recordings purged and the speakers touched. */
+  purged_intervals?: number;
+  purged_speakers?: string[];
 }
 
 export interface ConceptDeleteConflict {
@@ -47,9 +50,13 @@ export async function deleteAnnotationInterval(
   );
 }
 
-export async function deleteConcept(conceptId: string): Promise<ConceptDeleteResponse> {
+export async function deleteConcept(
+  conceptId: string,
+  options: { cascade?: boolean } = {},
+): Promise<ConceptDeleteResponse> {
+  const query = options.cascade ? "?cascade=true" : "";
   return apiFetch<ConceptDeleteResponse>(
-    `/api/concepts/${encodeURIComponent(conceptId)}`,
+    `/api/concepts/${encodeURIComponent(conceptId)}${query}`,
     { method: "DELETE" },
   );
 }

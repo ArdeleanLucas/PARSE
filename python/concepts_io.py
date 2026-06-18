@@ -106,13 +106,112 @@ def _speakers_annotating(project_root: Path, concept_id: str) -> list[str]:
     return sorted(blocking)
 
 
+# Tiers cleared alongside the concept interval when a recording is purged, and
+# the time-match tolerance — both mirror the single-interval delete endpoint
+# (server_routes/annotate._INTERVAL_DELETE_TIERS / _INTERVAL_DELETE_TOLERANCE_SEC)
+# so a cascade delete removes exactly what deleting each recording by hand would.
+_CASCADE_SIBLING_TIERS = ("ipa", "ortho", "ortho_words", "speaker")
+_INTERVAL_MATCH_EPSILON = 0.001
+
+
+def _interval_bounds(interval: Mapping[str, Any]) -> tuple[float, float] | None:
+    try:
+        return float(interval["start"]), float(interval["end"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _matches_any_range(interval: object, ranges: Sequence[tuple[float, float]]) -> bool:
+    if not isinstance(interval, Mapping):
+        return False
+    bounds = _interval_bounds(interval)
+    if bounds is None:
+        return False
+    start, end = bounds
+    return any(abs(start - rs) < _INTERVAL_MATCH_EPSILON and abs(end - re) < _INTERVAL_MATCH_EPSILON for rs, re in ranges)
+
+
+def _purge_concept_intervals(payload: dict[str, Any], concept_id: str) -> int:
+    """Remove every concept-tier interval tagged ``concept_id`` and the sibling
+    intervals (ipa/ortho/…) at the same time range. Mutates ``payload`` in place
+    and returns the number of concept intervals removed."""
+    tiers = payload.get("tiers")
+    if not isinstance(tiers, dict):
+        return 0
+    concept_tier = tiers.get("concept")
+    intervals = concept_tier.get("intervals") if isinstance(concept_tier, dict) else None
+    if not isinstance(intervals, list):
+        return 0
+    ranges: list[tuple[float, float]] = []
+    kept: list[Any] = []
+    for interval in intervals:
+        if isinstance(interval, Mapping) and str(interval.get("concept_id") or "").strip() == concept_id:
+            bounds = _interval_bounds(interval)
+            if bounds is not None:
+                ranges.append(bounds)
+        else:
+            kept.append(interval)
+    removed = len(intervals) - len(kept)
+    if removed <= 0:
+        return 0
+    concept_tier["intervals"] = kept
+    for tier_name in _CASCADE_SIBLING_TIERS:
+        tier = tiers.get(tier_name)
+        sibling = tier.get("intervals") if isinstance(tier, dict) else None
+        if not isinstance(sibling, list):
+            continue
+        tier["intervals"] = [iv for iv in sibling if not _matches_any_range(iv, ranges)]
+    return removed
+
+
+def _atomic_write_json(path: Path, payload: object) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _cascade_purge_annotations(project_root: Path, concept_id: str, *, now: datetime | None = None) -> dict[str, object]:
+    """Strip ``concept_id`` recordings from every live annotation file (a backup
+    is written before each rewrite). Returns the total intervals removed and the
+    affected speakers."""
+    annotations_dir = Path(project_root) / "annotations"
+    if not annotations_dir.is_dir():
+        return {"removed": 0, "speakers": []}
+    removed_total = 0
+    affected: set[str] = set()
+    stamp = _backup_timestamp(now)
+    for annotation_path in _live_annotation_files(annotations_dir):
+        try:
+            payload = json.loads(annotation_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        removed = _purge_concept_intervals(payload, concept_id)
+        if removed <= 0:
+            continue
+        backup = annotation_path.with_name("{0}.bak-{1}-pre-purge-{2}".format(annotation_path.name, stamp, concept_id))
+        backup.write_bytes(annotation_path.read_bytes())
+        _atomic_write_json(annotation_path, payload)
+        removed_total += removed
+        affected.add(_speaker_name_from_annotation(annotation_path, payload))
+    return {"removed": removed_total, "speakers": sorted(affected)}
+
+
 def delete_concept_variant(
     project_root: Path,
     concept_id: str,
     *,
+    cascade: bool = False,
     now: datetime | None = None,
 ) -> dict[str, object]:
-    """Delete one unannotated concepts.csv row with backup/rollback safety."""
+    """Delete one concepts.csv row with backup/rollback safety.
+
+    By default a row that any speaker has annotated is protected (409). With
+    ``cascade=True`` the blocking recordings are first purged from every live
+    annotation file (each backed up) so the user can remove a garbage variant
+    and its recordings in one action.
+    """
 
     normalized_id = _numeric_id(concept_id)
     if not normalized_id:
@@ -132,13 +231,16 @@ def delete_concept_variant(
     if target_index is None:
         raise ConceptDeleteError(HTTPStatus.NOT_FOUND, "concept not found")
 
+    purge_summary: dict[str, object] = {}
     blocking_speakers = _speakers_annotating(Path(project_root), normalized_id)
     if blocking_speakers:
-        raise ConceptDeleteError(
-            HTTPStatus.CONFLICT,
-            "canonical concept row is annotated by one or more speakers; cannot delete",
-            blocking_speakers=blocking_speakers,
-        )
+        if not cascade:
+            raise ConceptDeleteError(
+                HTTPStatus.CONFLICT,
+                "canonical concept row is annotated by one or more speakers; cannot delete",
+                blocking_speakers=blocking_speakers,
+            )
+        purge_summary = _cascade_purge_annotations(Path(project_root), normalized_id, now=now)
 
     backup_path = _delete_backup_path(concepts_path, normalized_id, now)
     try:
@@ -156,4 +258,8 @@ def delete_concept_variant(
         finally:
             raise ConceptDeleteError(HTTPStatus.INTERNAL_SERVER_ERROR, "failed to delete concept") from exc
 
-    return {"ok": True, "deleted_id": normalized_id}
+    result: dict[str, object] = {"ok": True, "deleted_id": normalized_id}
+    if purge_summary:
+        result["purged_intervals"] = purge_summary["removed"]
+        result["purged_speakers"] = purge_summary["speakers"]
+    return result

@@ -65,10 +65,10 @@ def _read_concepts(path: pathlib.Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
-def _delete_concept(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, concept_id: str) -> tuple[int, dict]:
+def _delete_concept(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, concept_id: str, *, query: str = "") -> tuple[int, dict]:
     monkeypatch.setattr(server, "_project_root", lambda: tmp_path)
     server._install_route_bindings()
-    handler = _FakeHandler(f"/api/concepts/{concept_id}")
+    handler = _FakeHandler(f"/api/concepts/{concept_id}{query}")
     assert handler._handle_api("DELETE") is True
     assert handler.status is not None
     return int(handler.status), handler.wfile.payload()
@@ -140,6 +140,58 @@ def test_delete_ignores_stale_legacy_json_when_parse_json_is_clean(tmp_path: pat
 
     assert status == HTTPStatus.OK
     assert payload == {"ok": True, "deleted_id": "322"}
+
+
+def test_cascade_delete_purges_recordings_across_speakers_and_removes_row(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """?cascade=true removes the concept's recordings (and their sibling tier
+    intervals) from every speaker, backs each file up, then deletes the row."""
+    _write_concepts(tmp_path / "concepts.csv", [
+        {"id": "322", "concept_en": "dry (A)", "source_item": "102", "source_survey": "JBIL", "custom_order": ""},
+        {"id": "323", "concept_en": "dry (B)", "source_item": "103", "source_survey": "JBIL", "custom_order": ""},
+    ])
+    annotations_dir = tmp_path / "annotations"
+    annotations_dir.mkdir()
+    # Two speakers each have a garbage 322 recording plus an unrelated 323 one.
+    for speaker in ("Fail01", "Qasr01"):
+        (annotations_dir / f"{speaker}.parse.json").write_text(
+            json.dumps({
+                "speaker": speaker,
+                "tiers": {
+                    "concept": {"intervals": [
+                        {"concept_id": "322", "start": 1.0, "end": 2.0},
+                        {"concept_id": "323", "start": 3.0, "end": 4.0},
+                    ]},
+                    "ipa": {"intervals": [
+                        {"text": "taːl", "start": 1.0, "end": 2.0},
+                        {"text": "heʃɪk", "start": 3.0, "end": 4.0},
+                    ]},
+                },
+            }),
+            encoding="utf-8",
+        )
+
+    status, payload = _delete_concept(tmp_path, monkeypatch, "322", query="?cascade=true")
+
+    assert status == HTTPStatus.OK
+    assert payload["deleted_id"] == "322"
+    assert payload["purged_intervals"] == 2
+    assert payload["purged_speakers"] == ["Fail01", "Qasr01"]
+    # Row removed.
+    assert [r["id"] for r in _read_concepts(tmp_path / "concepts.csv")] == ["323"]
+    # Each speaker keeps only the unrelated 323 recording (concept + sibling ipa).
+    for speaker in ("Fail01", "Qasr01"):
+        data = json.loads((annotations_dir / f"{speaker}.parse.json").read_text(encoding="utf-8"))
+        assert [i["concept_id"] for i in data["tiers"]["concept"]["intervals"]] == ["323"]
+        assert [i["text"] for i in data["tiers"]["ipa"]["intervals"]] == ["heʃɪk"]
+        assert list(annotations_dir.glob(f"{speaker}.parse.json.bak-*-pre-purge-322"))
+
+
+def test_cascade_delete_is_noop_purge_when_not_blocked(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """cascade on an unannotated row deletes normally and reports no purge."""
+    _write_concepts(tmp_path / "concepts.csv", [{"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": ""}])
+    status, payload = _delete_concept(tmp_path, monkeypatch, "322", query="?cascade=true")
+    assert status == HTTPStatus.OK
+    assert "purged_intervals" not in payload
 
 
 def test_delete_blocks_when_live_parse_json_references_concept(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
