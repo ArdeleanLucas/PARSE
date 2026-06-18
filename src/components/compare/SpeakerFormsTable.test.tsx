@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CompareBundle } from '../../api/types';
 import type { SpeakerForm } from '../../lib/speakerForm';
+import { normalizeBundles } from '../../lib/compareBundles';
 import { SpeakerFormsTable } from './SpeakerFormsTable';
 
 const mocks = vi.hoisted(() => ({
@@ -1236,5 +1237,34 @@ describe('SpeakerFormsTable per-realization cards', () => {
     // and would both flip to Pause.
     expect(playB.getAttribute('title')).toBe('Pause');
     expect(playA.getAttribute('title')).toBe('Play');
+  });
+
+  // Regression (MC-466-A): the other per-realization tests above hand a RAW
+  // hand-built bundle straight to the component, which bypasses the live
+  // getCompareBundles() -> normalizeBundles -> SpeakerFormsTable path. That
+  // bypass is exactly why a normalizer that silently dropped candidate
+  // `realizations` still rendered multi-realization cards in tests while the
+  // running Compare page collapsed every speaker to a single non-selectable
+  // form. This test routes the same fixture THROUGH normalizeBundles first, so
+  // it goes red if the normalizer ever stops carrying `realizations` again.
+  it('still renders one card per realization after the bundle passes through normalizeBundles', () => {
+    const normalized = normalizeBundles({ bundles: [hairBundle()] }).bundles[0];
+    expect(normalized?.candidates?.Saha01?.['1']?.realizations).toHaveLength(3);
+
+    render(
+      <SpeakerFormsTable
+        bundle={normalized}
+        speakers={['Saha01']}
+        speakerForms={[makeForm({ speaker: 'Saha01', ipa: 'A', ortho: 'oA' })]}
+        primaryContactCodes={PRIMARY_CODES}
+        contactLanguageNames={CONTACT_NAMES}
+        conceptKey="hair"
+        initialExpandedSpeaker="Saha01"
+      />,
+    );
+
+    expect(screen.queryAllByTestId(/^variant-card-Saha01-1-r\d$/)).toHaveLength(3);
+    expect(screen.getByTestId('variant-count-Saha01').textContent).toMatch(/\+2 variant/);
+    expect(screen.queryAllByTestId('canonical-option-Saha01-1-r2')).toHaveLength(1);
   });
 });

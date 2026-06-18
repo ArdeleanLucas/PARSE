@@ -83,8 +83,19 @@ function normalizeCanonical(raw: unknown): Record<string, CanonicalLexemeSelecti
 function normalizeCandidate(raw: unknown, csvRowId: string): CompareCandidate | null {
   if (raw === null) return null;
   if (!isRecord(raw)) return null;
+  const csv_row_id = cleanString(raw.csv_row_id ?? raw.csvRowId) || csvRowId;
+  // Carry the per-row A/B/… realization list through. SpeakerFormsTable's
+  // buildVariantList renders one selectable card per realization, so dropping
+  // this array collapses every speaker to a single non-selectable form on the
+  // Compare page (regression: backend emits it since #616, table consumes it
+  // since #617, but this normalizer silently stripped it).
+  const realizations = Array.isArray(raw.realizations)
+    ? raw.realizations
+        .map((r) => normalizeCandidate(r, csv_row_id))
+        .filter((c): c is CompareCandidate => c !== null)
+    : undefined;
   return {
-    csv_row_id: cleanString(raw.csv_row_id ?? raw.csvRowId) || csvRowId,
+    csv_row_id,
     speaker: cleanString(raw.speaker) || undefined,
     ipa: typeof raw.ipa === "string" || raw.ipa === null ? raw.ipa : undefined,
     ortho: typeof raw.ortho === "string" || raw.ortho === null ? raw.ortho : undefined,
@@ -92,6 +103,8 @@ function normalizeCandidate(raw: unknown, csvRowId: string): CompareCandidate | 
     end_sec: typeof raw.end_sec === "number" || raw.end_sec === null ? raw.end_sec : undefined,
     source_wav: cleanString(raw.source_wav) || undefined,
     realization_index: typeof raw.realization_index === "number" ? raw.realization_index : undefined,
+    realizations: realizations && realizations.length > 0 ? realizations : undefined,
+    warnings: Array.isArray(raw.warnings) ? raw.warnings.filter((w): w is string => typeof w === "string") : undefined,
   };
 }
 
