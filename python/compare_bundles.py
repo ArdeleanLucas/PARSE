@@ -533,15 +533,18 @@ def build_compare_bundles(project_root: Path, *, speakers: Sequence[str] | None 
                     realizations: list[dict[str, Any]] = []
                     for index, concept_interval in enumerate(matches):
                         cid = _interval_concept_id(concept_interval)
-                        ortho_interval = (
-                            _pick_sibling(ortho_by_concept.get(cid, []), tiers["ortho"], concept_interval, index)
-                            if cid
-                            else None
+                        # Resolve the IPA/ortho sibling even when the concept
+                        # interval carries no concept_id (e.g. text/Audition-
+                        # imported speakers whose concept tier has concept_id=None):
+                        # pass an empty cid-indexed list so _pick_sibling falls
+                        # straight through to its whole-tier time-overlap match.
+                        # Short-circuiting to None here left those rows blank in
+                        # Compare despite an IPA interval overlapping in time.
+                        ortho_interval = _pick_sibling(
+                            ortho_by_concept.get(cid, []) if cid else [], tiers["ortho"], concept_interval, index
                         )
-                        ipa_interval = (
-                            _pick_sibling(ipa_by_concept.get(cid, []), tiers["ipa"], concept_interval, index)
-                            if cid
-                            else None
+                        ipa_interval = _pick_sibling(
+                            ipa_by_concept.get(cid, []) if cid else [], tiers["ipa"], concept_interval, index
                         )
                         realizations.append(
                             _candidate_from_interval(
