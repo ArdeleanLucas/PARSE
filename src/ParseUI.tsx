@@ -40,7 +40,7 @@ import {
   resolveReferenceFormLists,
 } from './lib/referenceFormParsing';
 import { buildSpeakerForm } from './lib/speakerForm';
-import { findCompareBundleForConcept, normalizeBundles } from './lib/compareBundles';
+import { findCompareBundleForConcept, mergeCompareBundleSpeakers, normalizeBundles } from './lib/compareBundles';
 import { conceptMatchesElicitedKeys, conceptUnderlyingKeys, noteKeysForConcept, speakerElicitedConceptKeys } from './lib/speakerElicitedConcepts';
 import { buildSpeakerSortKeys } from './lib/speakerSortKeys';
 import { buildRealizationKey, classifyConceptIdentity, findConceptByUnderlyingKey, groupConceptEntries, parseRealizationKey, resolveModeSwitchSelection } from './lib/conceptGrouping';
@@ -1633,7 +1633,16 @@ export function ParseUI() {
     seedActiveConceptKey,
   });
   const handleCompareBundleUpdated = useCallback((nextBundle: CompareBundle) => {
-    setCompareBundles((current) => current.map((bundle) => bundle.bundle_id === nextBundle.bundle_id ? nextBundle : bundle));
+    // The canonical PUT/DELETE response is rebuilt for a single speaker
+    // (speakers=[speaker]), so it only carries that speaker's candidates and
+    // canonical. Normalize it (the write path skips normalizeBundles) and
+    // overlay it onto the existing full bundle instead of replacing it — a
+    // wholesale replace wipes every other speaker's forms until the next full
+    // reload (collapsed rows then show stale/blank IPA and lose variants).
+    const normalized = normalizeBundles({ bundles: [nextBundle] }).bundles[0] ?? nextBundle;
+    setCompareBundles((current) => current.map((bundle) =>
+      bundle.bundle_id === normalized.bundle_id ? mergeCompareBundleSpeakers(bundle, normalized) : bundle,
+    ));
   }, []);
 
   const handleConceptIdentityOverride = useCallback(async (request: ConceptIdentityOverrideRequest) => {

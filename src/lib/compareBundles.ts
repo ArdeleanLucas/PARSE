@@ -150,6 +150,32 @@ export function normalizeBundles(payload: unknown): CompareBundlesResponse {
   return { bundles, warnings };
 }
 
+/**
+ * Overlay the per-speaker data of an incoming Compare bundle onto an existing
+ * one, preserving every speaker the incoming bundle does NOT mention.
+ *
+ * The canonical PUT/DELETE endpoints rebuild the bundle for a single speaker
+ * (`build_compare_bundles(speakers=[speaker])`), so their response carries only
+ * that speaker's `candidates` and `canonical`. Replacing the whole bundle with
+ * it would wipe every other speaker's forms until the next full reload — the
+ * collapsed Compare table then falls back to a stale per-speaker IPA (from a
+ * previously-viewed concept) or shows nothing, and realization variants vanish.
+ *
+ * For each speaker present in `incoming.candidates` the candidate map and the
+ * canonical selection (null when `incoming` has none, e.g. after a clear) are
+ * taken from `incoming`; all other speakers and every structural field
+ * (buckets, row_ids, links, warnings) stay as they were on `base`.
+ */
+export function mergeCompareBundleSpeakers(base: CompareBundle, incoming: CompareBundle): CompareBundle {
+  const candidates: NonNullable<CompareBundle["candidates"]> = { ...(base.candidates ?? {}) };
+  const canonical: NonNullable<CompareBundle["canonical"]> = { ...(base.canonical ?? {}) };
+  for (const [speaker, byRow] of Object.entries(incoming.candidates ?? {})) {
+    candidates[speaker] = byRow;
+    canonical[speaker] = incoming.canonical?.[speaker] ?? null;
+  }
+  return { ...base, candidates, canonical };
+}
+
 
 /**
  * Resolve the Compare bundle that owns a displayed concept.
