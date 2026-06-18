@@ -218,6 +218,33 @@ def test_no_concept_id_legacy_interval_falls_back_to_text_with_warning(tmp_path:
     assert any("legacy text fallback" in warning for warning in bundle["warnings"])
 
 
+def test_no_concept_id_interval_resolves_sibling_ipa_ortho_by_time_overlap(tmp_path: pathlib.Path) -> None:
+    """Text/Audition-imported speakers carry concept_id=None on every concept
+    interval, but their IPA/ortho still live in the sibling tiers at the same
+    time range. Compare must resolve those by time overlap — previously the
+    builder short-circuited sibling resolution when cid was empty, leaving the
+    candidate IPA/ortho blank in Compare despite the data existing."""
+    _seed_concepts(tmp_path, [{"id": "7", "concept_en": "water", "source_item": "3", "source_survey": "KLQ"}])
+    annotations = tmp_path / "annotations"
+    annotations.mkdir(exist_ok=True)
+    payload = {
+        "speaker": "Saha01",
+        "audio": {"source_wav": "Saha01.wav"},
+        "tiers": {
+            # concept_id intentionally absent on the concept interval.
+            "concept": {"intervals": [{"text": "water", "start": 4.0, "end": 5.0}]},
+            "ipa": {"intervals": [{"text": "aw", "start": 4.0, "end": 5.0}]},
+            "ortho": {"intervals": [{"text": "ئاو", "start": 4.0, "end": 5.0}]},
+            "ortho_words": {"intervals": []},
+        },
+    }
+    (annotations / "Saha01.parse.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    candidate = build_compare_bundles(tmp_path, speakers=["Saha01"])["bundles"][0]["candidates"]["Saha01"]["7"]
+    assert candidate["ipa"] == "aw"
+    assert candidate["ortho"] == "ئاو"
+
+
 def test_speaker_concept_survey_links_take_precedence_over_legacy_bucket(tmp_path: pathlib.Path) -> None:
     _seed_concepts(tmp_path, _big_rows())
     (tmp_path / "survey-overlap.json").write_text(
