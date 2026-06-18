@@ -1267,4 +1267,41 @@ describe('SpeakerFormsTable per-realization cards', () => {
     expect(screen.getByTestId('variant-count-Saha01').textContent).toMatch(/\+2 variant/);
     expect(screen.queryAllByTestId('canonical-option-Saha01-1-r2')).toHaveLength(1);
   });
+
+  // Regression (MC-466-A): selecting a non-first realization as canonical must
+  // update the COLLAPSED row's primary IPA. Pre-fix the collapsed cell read the
+  // candidate's top-level ipa (= realization A) and ignored the selection's
+  // realization_index, so picking B/C left the collapsed row showing A.
+  it('collapsed IPA cell reflects the canonical realization, not realization A', () => {
+    const base = hairBundle();
+    const bundle: CompareBundle = {
+      ...base,
+      // Manually pick realization C (index 2, ipa "C" in the fixture).
+      canonical: {
+        Saha01: {
+          csv_row_id: '1',
+          survey_id: 'jbl',
+          source_item: '32',
+          bucket_key: 'jbl 32',
+          realization_index: 2,
+          source: 'manual',
+          selected_at: '2026-06-18T00:00:00Z',
+        },
+      },
+    };
+    render(
+      <SpeakerFormsTable
+        bundle={bundle}
+        speakers={['Saha01']}
+        speakerForms={[makeForm({ speaker: 'Saha01', ipa: 'A', ortho: 'oA' })]}
+        primaryContactCodes={PRIMARY_CODES}
+        contactLanguageNames={CONTACT_NAMES}
+        conceptKey="hair"
+        initialExpandedSpeaker="__none__"
+      />,
+    );
+    const cell = screen.getByTestId('ipa-cell-Saha01');
+    expect(cell.textContent).toContain('/C/');
+    expect(cell.textContent).not.toContain('/A/');
+  });
 });

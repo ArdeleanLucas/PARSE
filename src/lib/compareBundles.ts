@@ -225,13 +225,37 @@ export function activeCandidateFor(bundle: CompareBundle, speaker: string): Comp
 }
 
 /**
+ * IPA of the specific realization a canonical selection points at, matched by
+ * its `realization_index` (positional fallback for backends that omit the
+ * per-realization index). When a row is recorded as multiple realizations
+ * (A/B/…), the candidate's top-level fields mirror `realizations[0]`, so
+ * selecting realization B (index 1) must resolve through the array — reading
+ * the candidate's top-level `ipa` would always show realization A. Returns null
+ * when the row has no multi-realization data (the single-realization path).
+ */
+function canonicalRealizationIpa(
+  candidate: CompareCandidate | null | undefined,
+  realizationIndex: number | undefined,
+): string | null {
+  if (!candidate || typeof realizationIndex !== "number") return null;
+  const realizations = candidate.realizations;
+  if (!realizations || realizations.length === 0) return null;
+  const match = realizations.find((r) => r.realization_index === realizationIndex) ?? realizations[realizationIndex];
+  if (!match) return null;
+  return typeof match.ipa === "string" ? match.ipa : null;
+}
+
+/**
  * IPA to display in the Compare-mode collapsed row, derived from the
- * bundle so it always matches the first variant card the user sees in
+ * bundle so it always matches the canonical variant card the user sees in
  * the expanded panel.
  *
  * Precedence:
- *   1. The canonical's IPA (manual selection or backend
- *      `default:single-candidate` / `migration:canonical_realizations`).
+ *   1. The canonical's IPA. For a row with multiple realizations this is the
+ *      *selected* realization (by `realization_index`), not just
+ *      `realizations[0]`; otherwise the candidate's top-level IPA. Covers
+ *      manual selection, `default:single-candidate`, and
+ *      `migration:canonical_realizations`.
  *   2. The first non-null candidate IPA by `bundle.row_ids` order.
  *   3. `fallbackIpa` (`SpeakerForm.ipa`) — only used when the bundle has
  *      no candidate data at all for this speaker, e.g. the synthetic
@@ -248,7 +272,8 @@ export function collapsedIpaForSpeaker(
 ): string | null {
   const canonical = canonicalFor(bundle, speaker);
   if (canonical) {
-    const ipa = bundle.candidates?.[speaker]?.[canonical.csv_row_id]?.ipa;
+    const candidate = bundle.candidates?.[speaker]?.[canonical.csv_row_id];
+    const ipa = canonicalRealizationIpa(candidate, canonical.realization_index) ?? candidate?.ipa;
     if (typeof ipa === "string" && ipa.length > 0) return ipa;
   }
   const byRow = bundle.candidates?.[speaker] ?? {};
