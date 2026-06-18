@@ -117,6 +117,47 @@ def test_delete_returns_409_when_speaker_has_annotated_concept(tmp_path: pathlib
     assert len(list(tmp_path.glob("concepts.csv.bak-*-pre-delete-322"))) == 0
 
 
+def test_delete_ignores_stale_legacy_json_when_parse_json_is_clean(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A speaker who still references the concept in the STALE legacy .json but
+    has cleared it from the live .parse.json must NOT block deletion — the guard
+    reads the same .parse.json view as Compare. Regression: globbing *.json kept
+    garbage concepts undeletable after the user cleaned the live annotation."""
+    _write_concepts(tmp_path / "concepts.csv", [{"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": ""}])
+    annotations_dir = tmp_path / "annotations"
+    annotations_dir.mkdir()
+    # Live annotation: concept 322 already removed.
+    (annotations_dir / "Qasr01.parse.json").write_text(
+        json.dumps({"tiers": {"concept": {"intervals": [{"concept_id": "999"}]}}}),
+        encoding="utf-8",
+    )
+    # Stale legacy file: still references 322. Must be ignored.
+    (annotations_dir / "Qasr01.json").write_text(
+        json.dumps({"tiers": {"concept": {"intervals": [{"concept_id": "322"}]}}}),
+        encoding="utf-8",
+    )
+
+    status, payload = _delete_concept(tmp_path, monkeypatch, "322")
+
+    assert status == HTTPStatus.OK
+    assert payload == {"ok": True, "deleted_id": "322"}
+
+
+def test_delete_blocks_when_live_parse_json_references_concept(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The live .parse.json is authoritative: a real reference there still blocks."""
+    _write_concepts(tmp_path / "concepts.csv", [{"id": "322", "concept_en": "leaf", "source_item": "102", "source_survey": "JBIL", "custom_order": ""}])
+    annotations_dir = tmp_path / "annotations"
+    annotations_dir.mkdir()
+    (annotations_dir / "Qasr01.parse.json").write_text(
+        json.dumps({"speaker": "Qasr01", "tiers": {"concept": {"intervals": [{"concept_id": "322"}]}}}),
+        encoding="utf-8",
+    )
+
+    status, payload = _delete_concept(tmp_path, monkeypatch, "322")
+
+    assert status == HTTPStatus.CONFLICT
+    assert payload["blocking_speakers"] == ["Qasr01"]
+
+
 def test_delete_cleans_sidecar_state(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PARSE_TAGS_PATH", str(tmp_path / "tags.json"))
     concepts_path = tmp_path / "concepts.csv"

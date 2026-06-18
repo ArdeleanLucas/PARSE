@@ -50,6 +50,35 @@ def _speaker_name_from_annotation(path: Path, payload: Mapping[str, Any]) -> str
     return stem.removesuffix(".parse")
 
 
+def _live_annotation_files(annotations_dir: Path) -> list[Path]:
+    """Speaker annotation files to inspect, preferring the live ``.parse.json``
+    over the legacy ``.json`` for the same speaker.
+
+    The Compare pipeline (``compare_bundles._annotation_path``) and the exporters
+    (``export_review_data._iter_annotation_files``) read ``{speaker}.parse.json``
+    and treat the bare ``{speaker}.json`` as a stale fallback used only when no
+    ``.parse.json`` exists. The delete guard must use the same view: globbing
+    every ``*.json`` makes a concept the user already cleared from the live
+    annotation still look "annotated" via a stale ``.json``, so the row can never
+    be deleted. ``.tmp``/``.bak`` working files are skipped.
+    """
+    candidates = [
+        path
+        for path in sorted(annotations_dir.glob("*.json"))
+        if not path.name.endswith(".tmp") and ".bak" not in path.name
+    ]
+    parse_speakers = {
+        path.name[: -len(".parse.json")]
+        for path in candidates
+        if path.name.endswith(".parse.json")
+    }
+    selected: list[Path] = []
+    for path in candidates:
+        if path.name.endswith(".parse.json") or path.stem not in parse_speakers:
+            selected.append(path)
+    return selected
+
+
 def _speakers_annotating(project_root: Path, concept_id: str) -> list[str]:
     """Return speaker ids whose concept tier references ``concept_id``."""
 
@@ -58,7 +87,7 @@ def _speakers_annotating(project_root: Path, concept_id: str) -> list[str]:
     if not annotations_dir.is_dir():
         return []
     blocking: set[str] = set()
-    for annotation_path in sorted(annotations_dir.glob("*.json")):
+    for annotation_path in _live_annotation_files(annotations_dir):
         try:
             payload = json.loads(annotation_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError):
