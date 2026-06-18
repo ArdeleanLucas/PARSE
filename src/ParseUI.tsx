@@ -1517,36 +1517,6 @@ export function ParseUI() {
     });
   }, [resolveDeleteConceptLabel]);
 
-  // Shared by the normal Delete and the blocked-state Force delete buttons.
-  // cascade=true purges the blocking recordings (each backed up server-side)
-  // then deletes the row; a fresh 409 re-arms the blocked confirmation instead.
-  const performConceptDelete = useCallback(async (pending: DeleteConfirmationState, cascade: boolean) => {
-    try {
-      setDeleteModalError(null);
-      await (cascade ? deleteConcept(pending.conceptKey, { cascade: true }) : deleteConcept(pending.conceptKey));
-      await reloadConfig();
-      await syncTagStoreFromServer();
-      if (pending.navigateAfterDeleteTo) {
-        previousActiveRawKeyRef.current = pending.navigateAfterDeleteTo.conceptKey;
-        setConceptId(pending.navigateAfterDeleteTo.conceptId);
-        setSelectedRealizationKey(pending.navigateAfterDeleteTo.conceptKey ? buildRealizationKey(pending.navigateAfterDeleteTo.conceptKey, 0) : null);
-      }
-      setDeleteConfirmation(null);
-    } catch (err) {
-      console.error('[ParseUI] deleteConcept failed:', err);
-      const body = err instanceof ApiError && err.body && typeof err.body === 'object' ? err.body as { blocking_speakers?: unknown } : null;
-      const blockingSpeakers = Array.isArray(body?.blocking_speakers)
-        ? body.blocking_speakers.filter((speaker): speaker is string => typeof speaker === 'string')
-        : null;
-      if (err instanceof ApiError && err.status === 409 && blockingSpeakers?.length) {
-        setDeleteConfirmation({ ...pending, blockingSpeakers });
-        return;
-      }
-      const message = err instanceof Error ? err.message : String(err);
-      setDeleteModalError(message);
-    }
-  }, [reloadConfig, syncTagStoreFromServer]);
-
   const dispatchSelectedSidebarDelete = useCallback(() => {
     if (!selectedRealizationKey) return false;
     const selectedElement = Array.from(document.querySelectorAll<HTMLElement>('[data-realization-key]'))
@@ -2826,26 +2796,39 @@ export function ParseUI() {
               >
                 Cancel
               </button>
-              {deleteConfirmation.blockingSpeakers ? (
+              {!deleteConfirmation.blockingSpeakers && (
                 <button
                   type="button"
-                  data-testid="concept-force-delete"
                   className="rounded bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-700"
                   onClick={() => {
                     const pending = deleteConfirmation;
-                    const count = pending.blockingSpeakers?.length ?? 0;
-                    if (!window.confirm(`Force delete "${pending.conceptLabel}"? This also removes its recordings from ${count} speaker(s). Each annotation file is backed up first.`)) return;
-                    void performConceptDelete(pending, true);
+                    void (async () => {
+                      try {
+                        setDeleteModalError(null);
+                        await deleteConcept(pending.conceptKey);
+                        await reloadConfig();
+                        await syncTagStoreFromServer();
+                        if (pending.navigateAfterDeleteTo) {
+                          previousActiveRawKeyRef.current = pending.navigateAfterDeleteTo.conceptKey;
+                          setConceptId(pending.navigateAfterDeleteTo.conceptId);
+                          setSelectedRealizationKey(pending.navigateAfterDeleteTo.conceptKey ? buildRealizationKey(pending.navigateAfterDeleteTo.conceptKey, 0) : null);
+                        }
+                        setDeleteConfirmation(null);
+                      } catch (err) {
+                        console.error('[ParseUI] deleteConcept failed:', err);
+                        const body = err instanceof ApiError && err.body && typeof err.body === 'object' ? err.body as { blocking_speakers?: unknown } : null;
+                        const blockingSpeakers = Array.isArray(body?.blocking_speakers)
+                          ? body.blocking_speakers.filter((speaker): speaker is string => typeof speaker === 'string')
+                          : null;
+                        if (err instanceof ApiError && err.status === 409 && blockingSpeakers?.length) {
+                          setDeleteConfirmation({ ...pending, blockingSpeakers });
+                          return;
+                        }
+                        const message = err instanceof Error ? err.message : String(err);
+                        setDeleteModalError(message);
+                      }
+                    })();
                   }}
-                >
-                  Force delete + recordings
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  data-testid="concept-delete"
-                  className="rounded bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-700"
-                  onClick={() => { void performConceptDelete(deleteConfirmation, false); }}
                 >
                   Delete
                 </button>
