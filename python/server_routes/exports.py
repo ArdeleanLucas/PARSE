@@ -163,15 +163,9 @@ def _drop_canonical_references(project_root: Path, concept_id: str) -> None:
 
 
 def _api_delete_concept(self, concept_id: str) -> None:
-    """Delete one concepts.csv row and clean best-effort sidecars.
-
-    ``?cascade=true`` first purges the blocking recordings from every annotation
-    file (each backed up) so an annotated garbage variant can be removed.
-    """
-    query = _server.parse_qs(_server.urlparse(self.path).query)
-    cascade = str((query.get("cascade") or [""])[0]).strip().lower() in ("1", "true", "yes")
+    """Delete one unannotated concepts.csv row and clean best-effort sidecars."""
     try:
-        payload = delete_concept_variant(_server._project_root(), concept_id, cascade=cascade)
+        payload = delete_concept_variant(_server._project_root(), concept_id)
     except ConceptDeleteError as exc:
         body: dict[str, object] = {"error": exc.message}
         if exc.blocking_speakers:

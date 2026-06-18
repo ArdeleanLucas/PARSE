@@ -27,27 +27,6 @@ describe('deleteConcept', () => {
     expect(res).toEqual({ ok: true, deleted_id: '322' });
   });
 
-  it('appends ?cascade=true and surfaces the purge summary when cascade is set', async () => {
-    fetchSpy.mockResolvedValueOnce(
-      new Response(JSON.stringify({ ok: true, deleted_id: '322', purged_intervals: 3, purged_speakers: ['Fail01', 'Qasr01'] }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    );
-
-    const res = await deleteConcept('322', { cascade: true });
-
-    const [url, init] = fetchSpy.mock.calls[0];
-    expect(url).toBe('/api/concepts/322?cascade=true');
-    expect(init).toMatchObject({ method: 'DELETE' });
-    expect(res).toMatchObject({ purged_intervals: 3, purged_speakers: ['Fail01', 'Qasr01'] });
-  });
-
-  it('omits the cascade query by default', async () => {
-    fetchSpy.mockResolvedValueOnce(
-      new Response(JSON.stringify({ ok: true, deleted_id: '322' }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    );
-    await deleteConcept('322');
-    expect(fetchSpy.mock.calls[0][0]).toBe('/api/concepts/322');
-  });
-
   it('throws an ApiError with the parsed conflict body on 409', async () => {
     fetchSpy.mockResolvedValueOnce(
       new Response(JSON.stringify({ error: 'blocked', blocking_speakers: ['Qasr01'] }), { status: 409, headers: { 'Content-Type': 'application/json' } }),
