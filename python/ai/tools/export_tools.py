@@ -670,6 +670,24 @@ def _consolidated_sets(
                 concepts_rows = list(_csv.DictReader(handle))
 
         enrichments = _read_json_file(tools.enrichments_path, {})
+        # Resolve cognate membership the same way export_concept_appendix_md does:
+        # collapse legacy row-id keys into their concept uid (the value compare-mode
+        # writes wins) and re-materialise member-row keys, so the consolidated
+        # lookup-by-csv-id below sees the current decision, not a stale auto/legacy
+        # block. Without this, a concept keyed both "534" (stale) and "c-534"
+        # (current) exports the stale auto partition / drops a post-uid-migration
+        # speaker to "?" — diverging from the appendix/UI. Mirrors PR #666.
+        if isinstance(enrichments, dict):
+            try:
+                from migration.concept_uid_enrichments import (
+                    expand_uid_keys_for_legacy_read,
+                    promote_legacy_uid_keys,
+                )
+
+                promote_legacy_uid_keys(tools.project_root, enrichments)
+                enrichments = expand_uid_keys_for_legacy_read(tools.project_root, enrichments)
+            except Exception:
+                pass
 
         explicit_ids = (
             {str(c).strip() for c in concept_ids if str(c).strip()}
