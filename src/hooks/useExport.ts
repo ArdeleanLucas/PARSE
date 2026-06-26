@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { getCanonicalLexemesReport, getConceptAppendixExport, getLingPyExport, getNEXUSExport } from "../api/client";
+import { getCanonicalLexemesReport, getConceptAppendixExport, getConsolidatedNEXUSExport, getLingPyExport, getNEXUSExport } from "../api/client";
 import { saveBlob } from "../lib/fileSave";
 import { useEnrichmentStore } from "../stores/enrichmentStore";
 
@@ -124,6 +124,14 @@ export function useExport() {
     [],
   );
 
+  const exportConsolidatedNEXUS = useCallback(
+    async (speakers?: string[], conceptIds?: string[]): Promise<void> => {
+      const blob = await getConsolidatedNEXUSExport({ speakers, conceptIds });
+      await saveBlob(blob, "parse-cognates.nex", { mimeType: "text/plain" });
+    },
+    [],
+  );
+
   const exportCSV = useCallback((): void => {
     const root = normalizeDataRoot(data);
     const rows: string[] = [WORDLIST_HEADERS.join("	")];
@@ -171,5 +179,5 @@ export function useExport() {
     triggerDownload(blob, "parse-wordlist-local.tsv");
   }, [data]);
 
-  return { exportLingPyTSV, exportNEXUS, exportCanonicalLexemesReport, exportConceptAppendix, exportCSV };
+  return { exportLingPyTSV, exportNEXUS, exportCanonicalLexemesReport, exportConceptAppendix, exportConsolidatedNEXUS, exportCSV };
 }

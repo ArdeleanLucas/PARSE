@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
 from ..chat_tools import (
     ANNOTATION_FILENAME_SUFFIX,
@@ -24,6 +24,7 @@ EXPORT_TOOL_NAMES = (
     "export_annotations_csv",
     "export_lingpy_tsv",
     "export_nexus",
+    "export_concept_nexus",
     "export_annotations_elan",
     "export_annotations_textgrid",
     "export_review_data",
@@ -149,6 +150,66 @@ EXPORT_TOOL_SPECS: Dict[str, ChatToolSpec] = {
                                 "description": "If set, restrict the matrix to this concept tag (e.g. custom-sk-concept-list, the thesis tag) and fold survey-overlap duplicate concept ids into one canonical character.",
                             },
                             "consolidate": {"type": "boolean", "description": "Fold survey-overlap duplicate concept ids into one canonical character (implied when conceptTag is set)."},
+                            "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
+                        },
+                    },
+                    mutability="mutating",
+                    supports_dry_run=True,
+                    dry_run_parameter="dryRun",
+                    preconditions=(
+                        _project_loaded_condition(),
+                        _tool_condition(
+                            "cognate_matrix_available",
+                            "The project must contain enough cognate/enrichment data to build a NEXUS character matrix.",
+                            kind="project_state",
+                        ),
+                    ),
+                    postconditions=(
+                        _tool_condition(
+                            "export_file_written",
+                            "When dryRun=false and outputPath is provided, the requested export file is written inside the project.",
+                            kind="filesystem_write",
+                        ),
+                    ),
+                ),
+    "export_concept_nexus": ChatToolSpec(
+                    name="export_concept_nexus",
+                    description=(
+                        "Export a NEXUS cognate-character matrix using the same selection model as "
+                        "export_concept_appendix_md — tagId / conceptIds / speakers — with survey-overlap "
+                        "duplicate concept ids folded into one canonical character (consolidated). Pass "
+                        "conceptIds to export exactly a curated concept set and speakers to restrict the "
+                        "taxa (dropping cognate columns that become all-absent for that subset; '?' cells "
+                        "are kept). Without outputPath returns the full NEXUS text; with outputPath writes "
+                        "inside the project. This is the NEXUS sibling of the concept appendix, so the "
+                        "matrix matches the data a reviewer verifies in the appendix."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "tagId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200,
+                                "description": "parse-tags.json tag id to restrict concepts by (e.g. custom-sk-concept-list, the thesis tag). Ignored when conceptIds is provided.",
+                            },
+                            "conceptIds": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Optional concept-id subset (concepts.csv ids). When provided, the matrix covers exactly these concepts instead of the whole tag. Omit or pass an empty list to use tagId.",
+                            },
+                            "speakers": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Optional speaker subset; project.json order is preserved. Cognate columns all-absent for the retained speakers are dropped; '?' cells are kept. Omit or pass an empty list for all speakers.",
+                            },
+                            "outputPath": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512,
+                                "description": "Project-relative or absolute path inside project root (e.g. exports/beast2/matrix.nex).",
+                            },
                             "dryRun": {"type": "boolean", "description": "Preview only — never writes."},
                         },
                     },
@@ -572,12 +633,24 @@ def nexus_readiness(nexus_text: str) -> List[str]:
         return warnings
 
 
-def _consolidated_sets(tools: "ParseChatTools", concept_tag: str) -> Tuple[Any, Dict[str, Any], Dict[str, str], List[str], Any]:
+def _consolidated_sets(
+        tools: "ParseChatTools",
+        concept_tag: str,
+        *,
+        concept_ids: Optional[Sequence[str]] = None,
+        speaker_filter: Optional[Sequence[str]] = None,
+) -> Tuple[Any, Dict[str, Any], Dict[str, str], List[str], Any]:
         """Build the consolidated (canonical-collapsed) cognate sets + speakers.
 
         Reuses ``compare.consolidated_matrix`` so survey-overlap duplicate
         concept ids fold into one canonical character. ``concept_tag`` (e.g. the
         thesis tag) restricts the matrix to that tag's concepts.
+
+        ``concept_ids`` and ``speaker_filter`` mirror ``export_concept_appendix_md``:
+        an explicit ``concept_ids`` list takes precedence over ``concept_tag`` and
+        restricts the matrix to exactly those ids; ``speaker_filter`` restricts the
+        taxa to that speaker subset (and drops cognate-group columns that become
+        all-absent for the retained speakers, while ``?`` cells are preserved).
 
         Note: this reads concepts.csv + enrichments + tags + project.json on each
         call. ``export_complete_lingpy_dataset`` therefore reads them twice (once
@@ -597,10 +670,19 @@ def _consolidated_sets(tools: "ParseChatTools", concept_tag: str) -> Tuple[Any, 
                 concepts_rows = list(_csv.DictReader(handle))
 
         enrichments = _read_json_file(tools.enrichments_path, {})
-        allowed_ids = None
-        if concept_tag:
+
+        explicit_ids = (
+            {str(c).strip() for c in concept_ids if str(c).strip()}
+            if concept_ids
+            else None
+        )
+        if explicit_ids:
+            allowed_ids = explicit_ids
+        elif concept_tag:
             tags_payload = _read_json_file(tools.tags_path, [])
             allowed_ids = tag_concept_ids(tags_payload, concept_tag)
+        else:
+            allowed_ids = None
 
         cognate_sets, meta, id_to_key = build_consolidated_cognate_sets(
             concepts_rows, enrichments, allowed_ids
@@ -608,7 +690,7 @@ def _consolidated_sets(tools: "ParseChatTools", concept_tag: str) -> Tuple[Any, 
 
         # Distinguish "tag matched nothing" from "tag has no cognate data": an
         # unknown / empty conceptTag otherwise looks like a silent empty export.
-        if concept_tag and not allowed_ids:
+        if concept_tag and not explicit_ids and not allowed_ids:
             meta.setdefault("warnings", []).insert(
                 0,
                 "conceptTag '{0}' matched 0 concepts (unknown or empty tag); "
@@ -623,6 +705,34 @@ def _consolidated_sets(tools: "ParseChatTools", concept_tag: str) -> Tuple[Any, 
             speakers = [str(s) for s in sp_block if str(s).strip()]
         else:
             speakers = []
+
+        if speaker_filter is not None:
+            wanted = [str(s).strip() for s in speaker_filter if str(s).strip()]
+            known = set(speakers)
+            unknown = [s for s in wanted if s not in known]
+            wanted_known = [s for s in speakers if s in set(wanted)]  # preserve project order
+            wanted_set = set(wanted_known)
+            # Restrict each cognate group to the retained speakers; drop groups that
+            # become empty (all-absent column) so the matrix matches the subset. A
+            # speaker with no form for a concept stays "?" via has_form in the renderer.
+            restricted: Dict[str, Dict[str, List[str]]] = {}
+            for key, groups in cognate_sets.items():
+                new_groups: Dict[str, List[str]] = {}
+                for group, members in groups.items():
+                    kept = [m for m in members if str(m) in wanted_set]
+                    if kept:
+                        new_groups[str(group)] = kept
+                if new_groups:
+                    restricted[key] = new_groups
+            cognate_sets = restricted
+            speakers = wanted_known
+            meta["concept_count"] = len(cognate_sets)
+            meta["character_count"] = sum(len(groups) for groups in cognate_sets.values())
+            if unknown:
+                meta.setdefault("warnings", []).append(
+                    "speakers not in project.json were ignored: {0}".format(", ".join(unknown))
+                )
+
         return cognate_sets, meta, id_to_key, speakers, allowed_ids
 
 
@@ -776,6 +886,71 @@ def export_nexus(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any
                 "previewOnly": True,
                 "preview": nexus_text[:2000],
                 "truncated": len(nexus_text) > 2000,
+                "totalChars": len(nexus_text),
+            })
+            return base
+
+        out_path = tools._resolve_project_path(output_path_str, allowed_roots=[tools.project_root])
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(nexus_text, encoding="utf-8")
+        base.update({"success": True, "outputPath": str(out_path), "totalChars": len(nexus_text)})
+        return base
+
+
+def export_concept_nexus(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str, Any]:
+        """NEXUS matrix using the concept-appendix selection model.
+
+        The NEXUS sibling of ``export_concept_appendix_md``: it builds the
+        *consolidated* binary cognate-character matrix (survey-overlap duplicate
+        ids folded into one canonical character) for the same ``tagId`` /
+        ``conceptIds`` / ``speakers`` selection the appendix accepts, so the data
+        a reviewer verifies in the concept appendix is exactly what the phylogenetic
+        matrix is built from. Without outputPath it returns the full NEXUS text
+        (no truncation); with outputPath it writes inside the project.
+        """
+        from compare.consolidated_matrix import build_nexus_from_sets
+
+        output_path_str = str(args.get("outputPath") or "").strip()
+        dry_run = bool(args.get("dryRun", False))
+        tag_id = str(args.get("tagId") or args.get("conceptTag") or "").strip()
+
+        concept_ids_raw = args.get("conceptIds")
+        concept_ids = (
+            [str(c).strip() for c in concept_ids_raw if str(c).strip()]
+            if isinstance(concept_ids_raw, list)
+            else None
+        )
+        speakers_raw = args.get("speakers")
+        speaker_filter = (
+            [str(s).strip() for s in speakers_raw if str(s).strip()]
+            if isinstance(speakers_raw, list)
+            else None
+        )
+
+        try:
+            cognate_sets, meta, _id_to_key, speakers, _allowed = _consolidated_sets(
+                tools, tag_id, concept_ids=concept_ids, speaker_filter=speaker_filter
+            )
+            nexus_text = build_nexus_from_sets(cognate_sets, speakers)
+        except ChatToolError:
+            raise
+        except Exception as exc:
+            raise ChatToolExecutionError("Consolidated NEXUS build failed: {0}".format(exc)) from exc
+
+        warnings = nexus_readiness(nexus_text) + list(meta.get("warnings") or [])
+        base: Dict[str, Any] = {
+            "consolidated": True,
+            "tagId": tag_id or None,
+            "consolidation": _consolidation_summary(meta),
+            "warnings": warnings,
+            "beast2_ready": not warnings,
+        }
+
+        if dry_run or not output_path_str:
+            base.update({
+                "readOnly": True,
+                "previewOnly": True,
+                "nexus": nexus_text,
                 "totalChars": len(nexus_text),
             })
             return base
@@ -1154,6 +1329,7 @@ EXPORT_TOOL_HANDLERS = {
     "export_annotations_csv": export_annotations_csv,
     "export_lingpy_tsv": export_lingpy_tsv,
     "export_nexus": export_nexus,
+    "export_concept_nexus": export_concept_nexus,
     "export_beast2_xml": export_beast2_xml,
     "export_annotations_elan": export_annotations_elan,
     "export_annotations_textgrid": export_annotations_textgrid,
@@ -1173,6 +1349,7 @@ __all__ = [
     "export_annotations_csv",
     "export_lingpy_tsv",
     "export_nexus",
+    "export_concept_nexus",
     "export_annotations_elan",
     "export_annotations_textgrid",
     "export_review_data",

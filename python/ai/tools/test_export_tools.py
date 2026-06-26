@@ -169,7 +169,10 @@ def test_export_review_data_unknown_speaker_returns_invalid_args_envelope(
 def test_export_review_data_is_registered_for_chat_and_http_mcp_catalog(
     tmp_path: pathlib.Path,
 ) -> None:
-    assert export_tools.EXPORT_TOOL_NAMES[:5] == EXISTING_EXPORT_TOOL_NAMES
+    # The historical export tools remain registered in their original relative
+    # order (newer tools such as export_concept_nexus may be interleaved).
+    historical_in_order = [n for n in export_tools.EXPORT_TOOL_NAMES if n in EXISTING_EXPORT_TOOL_NAMES]
+    assert historical_in_order == list(EXISTING_EXPORT_TOOL_NAMES)
     assert "export_review_data" in export_tools.EXPORT_TOOL_NAMES
     assert "export_review_data" in export_tools.EXPORT_TOOL_SPECS
     assert "export_review_data" in export_tools.EXPORT_TOOL_HANDLERS
