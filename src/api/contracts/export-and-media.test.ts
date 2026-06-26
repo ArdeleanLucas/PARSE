@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getCanonicalLexemesReport,
   getConceptAppendixExport,
+  getConsolidatedNEXUSExport,
   mediaUrlFromSourceWav,
   spectrogramUrl,
 } from "./export-and-media";
@@ -80,6 +81,58 @@ describe("export-and-media contracts", () => {
       }),
     ));
     await expect(getConceptAppendixExport()).rejects.toThrow(/no markdown/i);
+  });
+
+  it("posts to the concept-nexus MCP tool and unwraps result.nexus into a Blob", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      new Response(JSON.stringify({ tool: "export_concept_nexus", ok: true, result: { nexus: "#NEXUS\n" } }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const blob = await getConsolidatedNEXUSExport();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/mcp/tools/export_concept_nexus?mode=default");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({});
+    expect(blob.type).toContain("text/plain");
+    expect(await blob.text()).toBe("#NEXUS\n");
+  });
+
+  it("includes a non-empty tag / speaker / concept selection in the concept-nexus request body", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ok: true, result: { nexus: "#NEXUS\n" } }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getConsolidatedNEXUSExport({
+      tagId: "custom-sk-concept-list",
+      speakers: ["Fail01", "Kalh01"],
+      conceptIds: ["1", "3"],
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      tagId: "custom-sk-concept-list",
+      speakers: ["Fail01", "Kalh01"],
+      conceptIds: ["1", "3"],
+    });
+  });
+
+  it("throws when the concept-nexus tool envelope carries no matrix", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true, result: {} }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      }),
+    ));
+    await expect(getConsolidatedNEXUSExport()).rejects.toThrow(/no matrix/i);
   });
 
   it("omits basename-only audio hints from spectrogram URLs so the backend can use speaker fallback", () => {

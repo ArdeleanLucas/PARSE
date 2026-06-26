@@ -100,6 +100,7 @@ DEFAULT_MCP_TOOL_NAMES = LEGACY_CURATED_MCP_TOOL_NAMES + (
     "export_annotations_textgrid",
     "export_lingpy_tsv",
     "export_nexus",
+    "export_concept_nexus",
     "export_beast2_xml",
     "export_concept_appendix_md",
     "jobs_list_active",
@@ -123,6 +124,7 @@ WRITE_ALLOWED_TOOL_NAMES = frozenset({
     "export_annotations_textgrid",
     "export_lingpy_tsv",
     "export_nexus",
+    "export_concept_nexus",
     "export_beast2_xml",
     "export_concept_appendix_md",
     "export_review_data",
@@ -495,6 +497,7 @@ from ai.tools.export_tools import (
     export_annotations_textgrid as tool_export_annotations_textgrid,
     export_beast2_xml as tool_export_beast2_xml,
     export_concept_appendix_md as tool_export_concept_appendix_md,
+    export_concept_nexus as tool_export_concept_nexus,
     export_lingpy_tsv as tool_export_lingpy_tsv,
     export_nexus as tool_export_nexus,
     export_review_data as tool_export_review_data,
@@ -1312,6 +1315,9 @@ class ParseChatTools:
 
     def _tool_export_nexus(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_export_nexus(self, args)
+
+    def _tool_export_concept_nexus(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        return tool_export_concept_nexus(self, args)
 
     def _tool_export_beast2_xml(self, args: Dict[str, Any]) -> Dict[str, Any]:
         return tool_export_beast2_xml(self, args)

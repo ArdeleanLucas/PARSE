@@ -42,6 +42,36 @@ export async function getConceptAppendixExport(
   return new Blob([markdown], { type: "text/markdown;charset=utf-8" });
 }
 
+/** Build the consolidated cognate NEXUS matrix via the `export_concept_nexus`
+ *  MCP tool — the NEXUS sibling of the concept appendix, accepting the same
+ *  tagId / speakers / conceptIds selection — and return it as a downloadable
+ *  Blob. Runs with no outputPath so the full matrix comes back in the envelope. */
+export async function getConsolidatedNEXUSExport(
+  options: { tagId?: string; speakers?: string[]; conceptIds?: string[] } = {},
+): Promise<Blob> {
+  const body: Record<string, unknown> = {};
+  if (options.tagId) body.tagId = options.tagId;
+  if (options.speakers && options.speakers.length > 0) body.speakers = options.speakers;
+  if (options.conceptIds && options.conceptIds.length > 0) body.conceptIds = options.conceptIds;
+  // mode=default serves the full *safe* MCP surface (read + curated writes), which always
+  // includes this first-party export tool — matching getConceptAppendixExport above.
+  const response = await fetch("/api/mcp/tools/export_concept_nexus?mode=default", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => response.statusText);
+    throw new Error(`POST /api/mcp/tools/export_concept_nexus failed ${response.status}: ${text}`);
+  }
+  const envelope = (await response.json()) as { ok?: boolean; result?: { nexus?: unknown } };
+  const nexus = envelope?.result?.nexus;
+  if (typeof nexus !== "string") {
+    throw new Error("Consolidated NEXUS export returned no matrix");
+  }
+  return new Blob([nexus], { type: "text/plain;charset=utf-8" });
+}
+
 function normalizeWorkspaceAudioPath(value: string): string {
   return value.trim().replace(/\\/g, "/").replace(/^\/+/, "");
 }

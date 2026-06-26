@@ -10,6 +10,7 @@ vi.mock("../../api/client", () => ({
   getNEXUSExport: vi.fn(),
   getCanonicalLexemesReport: vi.fn(),
   getConceptAppendixExport: vi.fn(),
+  getConsolidatedNEXUSExport: vi.fn(),
 }));
 
 vi.mock("../../stores/enrichmentStore", () => ({
@@ -17,7 +18,7 @@ vi.mock("../../stores/enrichmentStore", () => ({
     selector({ data: mockData }),
 }));
 
-import { getLingPyExport, getNEXUSExport, getCanonicalLexemesReport, getConceptAppendixExport } from "../../api/client";
+import { getLingPyExport, getNEXUSExport, getCanonicalLexemesReport, getConceptAppendixExport, getConsolidatedNEXUSExport } from "../../api/client";
 
 const mockCreateObjectURL = vi.fn(() => "blob:mock-url");
 const mockRevokeObjectURL = vi.fn();
@@ -145,6 +146,27 @@ describe("useExport", () => {
       (call) => call.type === "return" && (call.value as HTMLElement).tagName === "A",
     )?.value as HTMLAnchorElement | undefined;
     expect(anchor?.download).toBe("concept-appendix.md");
+  });
+
+  it("exportConsolidatedNEXUS forwards the same selection and saves parse-cognates.nex", async () => {
+    const nexBlob = new Blob(["#NEXUS\n"], { type: "text/plain" });
+    vi.mocked(getConsolidatedNEXUSExport).mockResolvedValueOnce(nexBlob);
+
+    const { result } = renderHook(() => useExport());
+
+    await act(async () => {
+      await result.current.exportConsolidatedNEXUS(["Fail01", "Kalh01"], ["1", "3"]);
+    });
+
+    expect(getConsolidatedNEXUSExport).toHaveBeenCalledWith({
+      speakers: ["Fail01", "Kalh01"],
+      conceptIds: ["1", "3"],
+    });
+    expect(mockCreateObjectURL).toHaveBeenCalledWith(nexBlob);
+    const anchor = vi.mocked(document.createElement).mock.results.find(
+      (call) => call.type === "return" && (call.value as HTMLElement).tagName === "A",
+    )?.value as HTMLAnchorElement | undefined;
+    expect(anchor?.download).toBe("parse-cognates.nex");
   });
 
   it("exportNEXUS calls client.ts getNEXUSExport", async () => {
