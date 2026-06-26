@@ -2,7 +2,7 @@
 
 Hand-curated against the PARSE MCP catalog snapshot of `2026-05-28T19:43:41Z` (`mode="all"`). Skill docs are written by hand and reviewed in PRs; there is no auto-generation step.
 
-- Full/default surface: **67** tools (63 chat/task + 3 workflow + 1 adapter)
+- Full/default surface: **68** tools (64 chat/task + 3 workflow + 1 adapter)
 - Legacy explicit opt-out (`expose_all_tools=false`): **47** tools (43 chat/task + 3 workflow + 1 adapter)
 
 | Tool | Family | Mutability | Dry-run parameter | Required inputs | Catalog description |
@@ -27,6 +27,7 @@ Hand-curated against the PARSE MCP catalog snapshot of `2026-05-28T19:43:41Z` (`
 | [`export_annotations_elan`](export/export_annotations_elan.md) | `chat` | `mutating` | `dryRun` | `speaker` | Export speaker annotations to ELAN .eaf XML format for use in ELAN or other linguistic annotation tools. Without outputPath returns an XML preview (first 2000 chars); with outputPath writes inside the project. |
 | [`export_annotations_textgrid`](export/export_annotations_textgrid.md) | `chat` | `mutating` | `dryRun` | `speaker` | Export speaker annotations to Praat TextGrid format (.TextGrid). Without outputPath returns a TextGrid string preview (first 2000 chars); with outputPath writes inside the project. |
 | [`export_complete_lingpy_dataset`](export/export_complete_lingpy_dataset.md) | `workflow` | `mutating` | `dryRun` | — | Export a complete PARSE phylogenetics bundle using the existing low-level export tools. Writes LingPy TSV and NEXUS under exports/lingpy/, and can optionally refresh contact lexeme references before export. |
+| [`export_concept_nexus`](export/export_concept_nexus.md) | `chat` | `mutating` | `dryRun` | — | Export a NEXUS cognate-character matrix using the same selection model as export_concept_appendix_md — tagId / conceptIds / speakers — with survey-overlap duplicate concept ids folded into one canonical character (consolidated). Pass conceptIds to export exactly a curated concept set and speakers to restrict the taxa (dropping cognate columns that become all-absent for that subset; '?' cells are kept). Without outputPath returns the full NEXUS text; with outputPath writes inside the project. This is the NEXUS sibling of the concept appendix, so the matrix matches the data a reviewer verifies in the appendix. |
 | [`export_lingpy_tsv`](export/export_lingpy_tsv.md) | `chat` | `mutating` | `dryRun` | — | Export a LingPy-compatible wordlist TSV from enrichments + annotations for cognate analysis. Without outputPath returns first 20 lines; with outputPath writes inside the project. |
 | [`export_nexus`](export/export_nexus.md) | `chat` | `mutating` | `dryRun` | — | Export a NEXUS cognate-character matrix for BEAST2 / phylogenetic tools. Characters are (concept, cognate group) pairs; values are 1/0/? per speaker. Without outputPath returns a preview (first 2000 chars); with outputPath writes inside the project. |
 | [`export_review_data`](export/export_review_data.md) | `chat` | `mutating` | — | `workspace`, `out` | Export a PARSE workspace to the legacy review_tool v4.1 schema with optional speaker subset, contact-language config, and audio clipping controls. Writes review_data.json, timestamps, and optional audio clips to the output directory. |
