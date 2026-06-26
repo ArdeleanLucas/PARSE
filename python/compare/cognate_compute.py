@@ -1232,6 +1232,24 @@ def export_wordlist_tsv(enrichments_path: Path, annotations_dir: Path, output_pa
     if not isinstance(enrichments_data, Mapping):
         raise ValueError(f"Expected enrichments JSON object in {enrichments_path}")
 
+    # Cognate sets may be keyed by legacy row ids, concept uids, or both. Annotation
+    # forms below are keyed by the csv row concept_id, so collapse legacy<->uid into a
+    # single canonical block (uid value wins) and then re-materialise member row-id
+    # keys, so a uid-only or divergent dual-key file still resolves every form. Without
+    # this a post-uid-migration speaker is silently coded COGID 0 (no cognate).
+    if isinstance(enrichments_data, dict):
+        try:
+            from migration.concept_uid_enrichments import (
+                expand_uid_keys_for_legacy_read,
+                promote_legacy_uid_keys,
+            )
+
+            workspace = Path(enrichments_path).parent
+            promote_legacy_uid_keys(workspace, enrichments_data)
+            enrichments_data = expand_uid_keys_for_legacy_read(workspace, enrichments_data)
+        except Exception:
+            pass
+
     forms_by_concept, _speakers = load_annotations(annotations_dir)
     cognate_sets = _resolve_effective_cognate_sets(enrichments_data)
     cogid_lookup, cogid_group_by_speaker = _build_cogid_lookup(cognate_sets)

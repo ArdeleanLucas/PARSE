@@ -148,6 +148,18 @@ def build_get_export_nexus_response(
     project_root: pathlib.Path | None = None,
 ) -> BinaryResponseSpec:
     enrichments = read_json_file(enrichments_path, default_enrichments_payload())
+    # Collapse legacy row-id cognate keys into their concept uid before reading.
+    # Without this, a concept keyed both legacy (``"517"``) and uid (``"c-517"``)
+    # — e.g. after a speaker is assigned post-uid-migration — yields DUPLICATE
+    # character columns and codes the late speaker as ``?`` in the stale legacy
+    # column. Promotion merges them to one uid-keyed block (uid value wins).
+    if project_root is not None and isinstance(enrichments, dict):
+        try:
+            from migration.concept_uid_enrichments import promote_legacy_uid_keys
+
+            promote_legacy_uid_keys(project_root, enrichments)
+        except Exception:
+            pass
     overrides = enrichments.get("manual_overrides") or {}
     override_sets = overrides.get("cognate_sets") if isinstance(overrides, dict) else None
     auto_sets = enrichments.get("cognate_sets") if isinstance(enrichments, dict) else None

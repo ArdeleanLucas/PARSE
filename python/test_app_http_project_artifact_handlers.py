@@ -206,6 +206,53 @@ def test_build_get_export_nexus_response_preserves_override_precedence_and_matri
 
 
 
+def test_nexus_export_collapses_divergent_legacy_and_uid_keys(tmp_path: pathlib.Path) -> None:
+    """A concept keyed BOTH legacy (`1`) and uid (`c-1`), where the uid block
+    carries a late-added speaker, must produce ONE character block (not duplicate
+    `1_A`/`c-1_A` columns) and code the late speaker as `1`, not `?`."""
+    import csv
+
+    with (tmp_path / "concepts.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["id", "concept_en", "source_item", "source_survey", "custom_order"])
+        writer.writeheader()
+        writer.writerow({"id": "1", "concept_en": "I", "source_item": "319", "source_survey": "JBIL", "custom_order": "1"})
+    (tmp_path / "annotations").mkdir()
+    (tmp_path / "project.json").write_text(
+        json.dumps({"speakers": {"Fail01": {}, "Saha01": {}, "Khan02": {}}}),
+        encoding="utf-8",
+    )
+    (tmp_path / "parse-enrichments.json").write_text(
+        json.dumps(
+            {
+                "manual_overrides": {
+                    "cognate_sets": {
+                        "1": {"A": ["Fail01", "Saha01"]},            # legacy — stale
+                        "c-1": {"A": ["Fail01", "Saha01", "Khan02"]},  # uid — current
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = build_get_export_nexus_response(
+        enrichments_path=tmp_path / "parse-enrichments.json",
+        project_json_path=tmp_path / "project.json",
+        read_json_file=server._read_json_file,
+        default_enrichments_payload=server._default_enrichments_payload,
+        concept_sort_key=server._concept_sort_key,
+        project_root=tmp_path,
+    )
+
+    text = response.body.decode("utf-8")
+    # Exactly one cognate character — the dual keys collapsed to one concept.
+    assert "DIMENSIONS NCHAR=1;" in text, text
+    # The late-added speaker is grouped, not dropped to `?`.
+    assert "Khan02    1" in text, text
+    assert "Fail01    1" in text
+    assert "Saha01    1" in text
+
+
 def _seed_nexus_compare_workspace(tmp_path: pathlib.Path) -> None:
     import csv
 

@@ -236,6 +236,80 @@ def test_appendix_excluded_speaker_renders_question_mark_not_letter(tmp_path: pa
     assert spkb_row.rstrip().endswith("| ? |")  # excluded -> ? even though listed in set A
 
 
+def _cog_cells(md: str) -> list[str]:
+    """Return the cognate cell (last column) of every per-speaker forms row."""
+    cells: list[str] = []
+    for line in md.splitlines():
+        if not line.startswith("| Spk") and not line.startswith("| Khan") and not line.startswith("| Fail"):
+            continue
+        parts = [part.strip() for part in line.strip().strip("|").split("|")]
+        if len(parts) == 4:  # Speaker | IPA | ORTH | Cog
+            cells.append(parts[3])
+    return cells
+
+
+def test_appendix_ungrouped_form_renders_question_mark_not_middot(tmp_path: pathlib.Path) -> None:
+    """A speaker with a form but in no cognate set must export `?`, never `·`.
+
+    `·` is not a valid state in a binary cognate matrix — only a set letter or
+    the non-penalized missing state `?` may reach exported analysis data.
+    """
+    workspace = _make_workspace(tmp_path)
+    # Concept 'small' (id 3) has forms for all three speakers but NO cognate_sets
+    # entry, so every speaker is "form present, no decision" -> must be `?`.
+    result = ParseChatTools(project_root=workspace).execute("export_concept_appendix_md", {})
+    md = result["result"]["markdown"]
+
+    assert "·" not in _cog_cells(md), "no cognate cell may be the ungrouped middot"
+    # 'small' forms rows are all `?` (form present, no cognate decision).
+    small_section = md.split("### 2 · small", 1)[1].split("###", 1)[0]
+    for line in small_section.splitlines():
+        if line.startswith("| Spk"):
+            assert line.rstrip().endswith("| ? |")
+    # The cognate matrix row for 'small' carries `?` in every speaker cell, no `·`.
+    matrix_small = next(line for line in md.splitlines() if line.startswith("| 2 · small |"))
+    speaker_cells = [c.strip() for c in matrix_small.strip().strip("|").split("|")][1:-1]
+    assert speaker_cells == ["?", "?", "?"], matrix_small
+
+
+def test_appendix_merges_divergent_legacy_and_uid_keys_for_late_speaker(tmp_path: pathlib.Path) -> None:
+    """The real MC-466/MC-469 bug: a concept keyed BOTH legacy (`1`) and uid
+    (`c-1`), where the uid block carries a speaker assigned after the uid
+    migration. The exporter must resolve that late speaker into the set, not
+    let the stale legacy key shadow the current uid membership (-> `·`/`?`)."""
+    workspace = _make_workspace(tmp_path)
+    (workspace / "parse-enrichments.json").write_text(
+        json.dumps(
+            {
+                "manual_overrides": {
+                    "cognate_sets": {
+                        # legacy key — stale: written before SpkC existed
+                        "1": {"A": ["SpkA", "SpkB"]},
+                        # uid key — current: SpkC assigned after the uid migration
+                        "c-1": {"A": ["SpkA", "SpkB", "SpkC"]},
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = ParseChatTools(project_root=workspace).execute(
+        "export_concept_appendix_md", {"conceptIds": ["1"]}
+    )
+    md = result["result"]["markdown"]
+
+    assert "·" not in _cog_cells(md)
+    big_section = md.split("### 1 · big", 1)[1].split("###", 1)[0]
+    # SpkC (the late-added speaker) must resolve to set A, not `·`/`?`.
+    spkc_row = next(line for line in big_section.splitlines() if line.startswith("| SpkC |"))
+    assert spkc_row.rstrip().endswith("| A |"), spkc_row
+    for speaker in ("SpkA", "SpkB", "SpkC"):
+        row = next(line for line in big_section.splitlines() if line.startswith(f"| {speaker} |"))
+        assert row.rstrip().endswith("| A |"), row
+
+
 # ---------------------------------------------------------------------------
 # forms-only export (includeCognates=false)
 # ---------------------------------------------------------------------------
