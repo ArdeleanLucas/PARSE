@@ -21,7 +21,10 @@ letters, the accepted/split/merge verdict, borrowing flags, excluded speakers). 
 | Excluded speakers | `manual_overrides.speaker_flags[concept][speaker]` → rendered as `?` (BEAST2 missing = non-penalized) |
 
 Letter→speaker resolution mirrors `build_nexus_text()` (`export_tools.py`): override sets win
-over auto sets per concept; a speaker with a form but in no group = ungrouped (`·`).
+over auto sets per concept; a speaker with a form but in no group is **undecided → `?`** (a
+binary cognate matrix has no third "ungrouped" state — MC-469). Reads also promote legacy
+row-id keys to their concept uid first, so a uid-keyed membership is never shadowed by a stale
+legacy key.
 
 ## Neutrality (no dataset-specific text)
 
@@ -72,9 +75,10 @@ produce the plain forms-only appendix.
 ### Legend
 
 - **Cog** column / matrix cell = the form's cognate-set letter (A, B, C …).
-- `·` = form recorded but left **ungrouped** (no cognate decision for it yet).
-- `?` = **missing or excluded** — speaker has no form for the concept, or was excluded from the
-  set. `?` is BEAST2's non-penalized missing state, so excluded speakers don't bias compute.
+- `?` = **no form, undecided, or excluded** — speaker has no form, has a form but no cognate
+  decision yet, or was excluded from the set. `?` is BEAST2's non-penalized missing state, so
+  these cells don't bias compute. A binary cognate matrix has no third "ungrouped" symbol — every
+  cell is a letter or `?` (MC-469).
 - `⟳` after a letter = form flagged as a **borrowing**.
 - Verdict words: **split** (multiple sets) · **accepted** (single set kept) · **merge** (sets merged to one) · **—** (no decision yet).
 
@@ -93,10 +97,10 @@ PARSE compare mode. Forms are matched to concepts by the annotation's time-align
 
 **Surveys.** KLQ · JBIL · Oxford.   <!-- derived from the project's actual survey links, not hardcoded -->
 
-**Cognate column.** Cog letters (A, B, C …) are each form's cognate set. `·` = recorded but
-ungrouped; `?` = no form, or speaker excluded from the set (non-penalized in compute);
-`⟳` = borrowing. Per-concept verdict: split / accepted / merge / —. The next section is the
-full speaker × concept cognate matrix.
+**Cognate column.** Cog letters (A, B, C …) are each form's cognate set. `?` = no form, recorded
+but undecided, or speaker excluded from the set (all non-penalized in compute); `⟳` = borrowing.
+Per-concept verdict: split / accepted / merge / —. The next section is the full speaker × concept
+cognate matrix.
 ```
 
 ### Top-level section — the cognate matrix (concepts as rows)
@@ -112,7 +116,7 @@ full speaker × concept cognate matrix.
 | …        |   |   |   |   |   |   |   |   |   |   |       |
 ```
 
-(letter = cognate set · `·` = ungrouped · `?` = no form / excluded)
+(letter = cognate set · `?` = no form / undecided / excluded)
 
 ### Per-concept sections — forms table + cognate columns + verdict
 
@@ -140,13 +144,13 @@ Three additions vs. a plain forms appendix: a `**Cognate:**` verdict line, a `Co
 **Sets:** A = {Badr01, Fail01, Fail03} · B = {Kalh01, Kalh02, Qasr01, Qorv01} · C = {Mand01 ⟳, Saha01} · excluded: Fail02
 ```
 
-A concept with no cognate decisions yet renders `**Cognate:** —` and a `Cog` column of `·`, so
+A concept with no cognate decisions yet renders `**Cognate:** —` and a `Cog` column of `?`, so
 the export never blocks on undecided concepts.
 
 ## Build checklist
 
 1. `/create-mc-task` → MC-NNN (required before any PARSE coding task).
 2. `python/ai/tools/export_tools.py`: add spec, `build_concept_appendix_md(tools, include_cognates)` builder (reuses `build_review_data`, reads enrichments for cognate sets/decisions/borrowing/speaker flags), handler, registry entry. Surveys derived dynamically; no dataset literals.
-3. `python/ai/tools/test_export_tools.py`: tests — forms-only output when `includeCognates=false`; cognate columns/verdict/sets/matrix present when true; excluded → `?`; ungrouped → `·`; borrowing → `⟳`; undecided-concept fallback; full-markdown return when no `outputPath`.
+3. `python/ai/tools/test_export_tools.py`: tests — forms-only output when `includeCognates=false`; cognate columns/verdict/sets/matrix present when true; excluded → `?`; ungrouped → `?`; borrowing → `⟳`; undecided-concept fallback; full-markdown return when no `outputPath`.
 4. `src/components/CompareTabContent.tsx` + `src/hooks/useExport.ts`: button + download wiring; vitest coverage.
 5. `tsc` + `vitest` + `python -m pytest` + build; open PR with `[MC-NNN-x]` title and labels; self-review.

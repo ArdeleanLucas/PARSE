@@ -1022,6 +1022,17 @@ def export_beast2_xml(tools: "ParseChatTools", args: Dict[str, Any]) -> Dict[str
 def build_nexus_text(tools: "ParseChatTools") -> str:
         """Build NEXUS cognate-character matrix (mirrors server._api_get_export_nexus)."""
         enrichments = _read_json_file(tools.enrichments_path, {})
+        # Collapse legacy row-id cognate keys into their concept uid first, so a
+        # concept keyed both legacy (``"517"``) and uid (``"c-517"``) does not
+        # emit duplicate columns or drop a post-migration speaker to ``?``.
+        # Mirrors build_get_export_nexus_response and the GET /api/enrichments read.
+        if isinstance(enrichments, dict):
+            try:
+                from migration.concept_uid_enrichments import promote_legacy_uid_keys
+
+                promote_legacy_uid_keys(tools.project_root, enrichments)
+            except Exception:
+                pass
         overrides = enrichments.get("manual_overrides") or {}
         override_sets = overrides.get("cognate_sets") if isinstance(overrides, dict) else None
         auto_sets = enrichments.get("cognate_sets") if isinstance(enrichments, dict) else None

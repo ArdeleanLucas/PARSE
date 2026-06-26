@@ -112,7 +112,20 @@ def _remap_dict_keys(
     touched: list[dict[str, str]],
     unmappable: list[dict[str, str]],
 ) -> dict[str, Any]:
+    # A value already keyed by its uid (``remap[key] == key``) is authoritative:
+    # it must win over any stale legacy twin that remaps to the same uid,
+    # regardless of JSON key order. (A digit legacy key like ``"517"`` sorts
+    # before ``"c-517"`` on disk, but an in-memory payload can present the uid
+    # key first, and a plain last-writer-wins merge would then let the stale
+    # legacy block overwrite the current uid block.) Pass 1 locks uid-keyed
+    # values; pass 2 folds in legacy/bundle keys without overwriting a locked uid.
     out: dict[str, Any] = {}
+    authoritative: set[str] = set()
+    for raw_key, value in block.items():
+        key = _norm(raw_key)
+        if remap.get(key) == key and key:
+            out[key] = copy.deepcopy(value)
+            authoritative.add(key)
     for raw_key, value in block.items():
         key = _norm(raw_key)
         new_key = remap.get(key)
@@ -121,9 +134,11 @@ def _remap_dict_keys(
             if key and not key.startswith("c-"):
                 unmappable.append({"block": block_name, "key": key})
             continue
-        _store(out, new_key, value)
-        if new_key != key:
-            touched.append({"block": block_name, "old_key": key, "new_key": new_key})
+        if new_key == key:
+            continue  # already locked in pass 1
+        if new_key not in authoritative:
+            _store(out, new_key, value)
+        touched.append({"block": block_name, "old_key": key, "new_key": new_key})
     return out
 
 

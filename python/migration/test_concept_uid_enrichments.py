@@ -109,6 +109,24 @@ def test_promote_legacy_uid_keys_keeps_legacy_data_visible_before_apply(tmp_path
     assert payload["manual_overrides"]["speaker_flags"] == {"c-52": {"Saha01": True}}
 
 
+def test_promote_uid_value_wins_over_stale_legacy_regardless_of_key_order(tmp_path: Path) -> None:
+    """A concept keyed both legacy (``52``) and uid (``c-52``) must resolve to the
+    uid value (the current one) no matter which key appears first in the file —
+    the merge must not be last-writer-wins on iteration order."""
+    for cognate_sets in (
+        {"52": {"A": ["Saha01"]}, "c-52": {"A": ["Saha01", "Khan02"]}},  # legacy first
+        {"c-52": {"A": ["Saha01", "Khan02"]}, "52": {"A": ["Saha01"]}},  # uid first
+    ):
+        _seed_workspace(tmp_path, {"manual_overrides": {"cognate_sets": cognate_sets}})
+        payload = json.loads((tmp_path / "parse-enrichments.json").read_text(encoding="utf-8"))
+
+        promote_legacy_uid_keys(tmp_path, payload)
+
+        assert payload["manual_overrides"]["cognate_sets"] == {
+            "c-52": {"A": ["Saha01", "Khan02"]}
+        }, cognate_sets
+
+
 def test_expand_uid_keys_for_legacy_read_supports_row_id_readers(tmp_path: Path) -> None:
     _seed_workspace(tmp_path, {"cognate_sets": {"c-52": {"A": ["Saha01"]}}})
     payload = json.loads((tmp_path / "parse-enrichments.json").read_text(encoding="utf-8"))

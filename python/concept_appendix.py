@@ -15,9 +15,10 @@ compare-mode decisions, not just the auto cognate compute.
 Cognate cell vocabulary (per speaker, per concept):
 
 * a letter (``A``/``B``/``C`` …) — the form's cognate set
-* ``·`` — a form was recorded but left ungrouped (no cognate decision for it yet)
-* ``?`` — the speaker has no form for the concept, or was excluded from the set. ``?`` is
-  BEAST2's non-penalized missing state, so excluded speakers do not bias downstream compute.
+* ``?`` — the speaker has no form, has a form but no cognate decision yet, or was
+  excluded from the set. ``?`` is BEAST2's non-penalized missing state, so these
+  cells do not bias downstream compute. A binary cognate matrix has no third
+  "recorded but ungrouped" state — every cell is a letter or ``?``.
 * a trailing ``⟳`` — the form was flagged as a borrowing.
 
 Per-concept verdict words: ``split`` · ``accepted`` · ``merge`` · ``—`` (no decision yet).
@@ -32,7 +33,6 @@ from concept_canonical import strip_clarifier
 from concept_source_item import read_concepts_csv_rows, row_value
 from export_review_data import DEFAULT_TAG_ID, ENRICHMENTS_FILENAME, build_review_data
 
-UNGROUPED = "·"
 MISSING = "?"
 BORROW = "⟳"  # ⟳
 
@@ -76,8 +76,19 @@ def _load_enrichments_raw(workspace: Path) -> Dict[str, Any]:
     if not isinstance(data, dict):
         return {}
     try:
-        from migration.concept_uid_enrichments import expand_uid_keys_for_legacy_read
+        from migration.concept_uid_enrichments import (
+            expand_uid_keys_for_legacy_read,
+            promote_legacy_uid_keys,
+        )
 
+        # Collapse any legacy row-id keys into their concept uid FIRST, so a
+        # stale legacy block (e.g. ``cognate_sets["517"]`` predating a late-added
+        # speaker) cannot shadow the current uid block (``"c-517"``). Promotion
+        # merges legacy into uid with the uid value winning; the subsequent
+        # expand then re-materialises member-row keys from the merged uid value.
+        # Without the promote step, ``expand``'s ``setdefault`` leaves the stale
+        # legacy key in place and the late speaker is dropped from the export.
+        promote_legacy_uid_keys(workspace, data)
         return expand_uid_keys_for_legacy_read(workspace, data)
     except Exception:
         return data
@@ -127,11 +138,14 @@ class _CognateResolver:
                     return True
         return False
 
-    def letter(self, ids: Sequence[str], speaker: str, *, has_form: bool) -> str:
+    def letter(self, ids: Sequence[str], speaker: str) -> str:
         """First-letter-wins across the concept's ids (matches useExport.speakerCognateId).
 
-        Returns ``?`` when excluded or formless, the set letter when assigned, ``·`` when a
-        form exists but sits in no set.
+        Returns the set letter when the speaker is assigned, else ``?``. A binary
+        cognate matrix has only two outcomes per cell: a cognate letter (grouped)
+        or ``?`` (no form, excluded, or recorded-but-undecided). "Form present, no
+        cognate decision" is therefore ``?`` — the non-penalized missing state —
+        never a third symbol, so spurious states cannot reach the analysis matrix.
         """
         if self.is_excluded(ids, speaker):
             return MISSING
@@ -143,7 +157,7 @@ class _CognateResolver:
                 members = groups.get(letter)
                 if isinstance(members, list) and speaker in {str(m) for m in members}:
                     return str(letter)
-        return UNGROUPED if has_form else MISSING
+        return MISSING
 
     def verdict(self, ids: Sequence[str]) -> str:
         for cid in ids:
@@ -263,9 +277,9 @@ def build_concept_appendix_markdown(
         lines.append("")
         lines.append(
             "**Cognate column.** Cog letters (A, B, C …) are each form's cognate set. "
-            "`{0}` = recorded but ungrouped; `{1}` = no form, or speaker excluded from the set "
-            "(non-penalized in compute); `{2}` = borrowing. Per-concept verdict: "
-            "split / accepted / merge / —.".format(UNGROUPED, MISSING, BORROW)
+            "`{0}` = no form, recorded but undecided, or speaker excluded from the set "
+            "(all non-penalized in compute); `{1}` = borrowing. Per-concept verdict: "
+            "split / accepted / merge / —.".format(MISSING, BORROW)
         )
 
     # ---- cognate matrix (concepts as rows) ----
@@ -307,19 +321,25 @@ def build_concept_appendix_markdown(
 
         sets: "Dict[str, List[str]]" = {}
         excluded: List[str] = []
+        ungrouped: List[str] = []
         for speaker in speakers:
             form = form_by_speaker.get(speaker)
             if form is None or not _has_form(form):
                 continue
             row_cells = [_escape_cell(speaker), _escape_cell(form.get("ipa")), _escape_cell(form.get("ortho"))]
             if include_cognates and resolver is not None:
-                letter = resolver.letter(ids, speaker, has_form=True)
+                letter = resolver.letter(ids, speaker)
                 borrowed = resolver.is_borrowed(ids, speaker)
                 cog_cell = letter + ((" " + BORROW) if borrowed else "")
                 row_cells.append(cog_cell)
                 if letter == MISSING:
-                    excluded.append(speaker)
-                elif letter != UNGROUPED:
+                    # Both outcomes render `?` in the matrix; split them only for
+                    # the human-readable per-concept summary line below.
+                    if resolver.is_excluded(ids, speaker):
+                        excluded.append(speaker)
+                    else:
+                        ungrouped.append(speaker)
+                else:
                     sets.setdefault(letter, []).append(speaker + ((" " + BORROW) if borrowed else ""))
             section_lines.append("| " + " | ".join(row_cells) + " |")
 
@@ -330,6 +350,8 @@ def build_concept_appendix_markdown(
             ]
             if excluded:
                 set_parts.append("excluded: " + ", ".join(excluded))
+            if ungrouped:
+                set_parts.append("no set: " + ", ".join(ungrouped))
             if set_parts:
                 section_lines.append("")
                 section_lines.append("**Sets:** " + "  ·  ".join(set_parts))
@@ -338,9 +360,7 @@ def build_concept_appendix_markdown(
         if include_cognates and resolver is not None and speakers:
             cells = ["{0} · {1}".format(index, gloss)]
             for speaker in speakers:
-                form = form_by_speaker.get(speaker)
-                has = form is not None and _has_form(form)
-                cells.append(resolver.letter(ids, speaker, has_form=has))
+                cells.append(resolver.letter(ids, speaker))
             cells.append(resolver.verdict(ids))
             matrix_rows.append("| " + " | ".join(_escape_cell(c) for c in cells) + " |")
 

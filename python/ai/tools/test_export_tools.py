@@ -80,6 +80,43 @@ def _make_review_export_workspace(tmp_path: pathlib.Path) -> pathlib.Path:
     return workspace
 
 
+def test_build_nexus_text_collapses_divergent_legacy_and_uid_keys(tmp_path: pathlib.Path) -> None:
+    """``export_nexus`` must collapse a concept keyed both legacy (``1``) and uid
+    (``c-1``) into one character and keep the post-migration speaker grouped."""
+    workspace = _make_review_export_workspace(tmp_path)
+    # add two more speakers to the project so the matrix has columns to compare
+    (workspace / "project.json").write_text(
+        json.dumps(
+            {
+                "project_id": "review-export-test",
+                "speakers": {"TestA": {}, "TestB": {}, "Late01": {}},
+                "concepts": {"source": "concepts.csv", "id_column": "id"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (workspace / "parse-enrichments.json").write_text(
+        json.dumps(
+            {
+                "manual_overrides": {
+                    "cognate_sets": {
+                        "53": {"A": ["TestA", "TestB"]},              # legacy — stale
+                        "c-53": {"A": ["TestA", "TestB", "Late01"]},  # uid — current
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    text = export_tools.build_nexus_text(ParseChatTools(project_root=workspace))
+
+    assert "DIMENSIONS NCHAR=1;" in text, text
+    assert "Late01    1" in text, text
+    assert "TestA    1" in text
+    assert "TestB    1" in text
+
+
 def test_export_review_data_chat_tool_happy_path_writes_review_data_summary(
     tmp_path: pathlib.Path,
 ) -> None:
