@@ -1,6 +1,6 @@
-> **ARCHIVED 2026-04-26:** desktop packaging is cancelled with Option 3. This directory is preserved as historical scaffolding only; do not extend it for active rebuild work.
+> **REVIVED 2026-07-08:** the desktop direction (Option 3) is active again — PARSE is to ship as a downloadable, installable app, macOS first then Windows. This scaffold is the starting point. See `docs/desktop_product_architecture.md` (the living plan) and `docs/distribution_readiness_checklist.md` (Gate A/B/C) for the current direction and decisions.
 
-# PARSE Desktop Shell Scaffold (MC-247)
+# PARSE Desktop Shell Scaffold
 
 This directory is an **isolated Electron scaffold** for PARSE's desktop direction (Mac + Windows), while keeping the current web UI + Python backend workflow intact.
 
@@ -68,12 +68,15 @@ npm run dev -- --url http://127.0.0.1:8766/compare
 
 ## What is still missing before this is a real packaged app
 
-- Embedded/managed Python runtime per platform (instead of relying on system Python).
-- Robust backend lifecycle management (health checks, retries, readiness checks, clean shutdown guarantees).
-- Packaging pipeline (installers for macOS + Windows, signing/notarization).
-- Auto-update flow and release channels.
-- Native desktop UX polish (menus, dialogs, file associations, deep links).
-- Persistence/migration strategy for local desktop app state.
+Tracked against Gate A/B/C in `docs/distribution_readiness_checklist.md`:
+
+- **Frozen per-platform Python runtime** (PyInstaller/Nuitka against a pinned lockfile) instead of relying on system Python — this is the make-or-break item for install-and-go.
+- **Robust backend lifecycle management** (ephemeral port, readiness handshake, session token, health checks, restart, clean shutdown). The scaffold currently only spawns `python3 python/server.py` via a shell when `PARSE_AUTO_BACKEND=1`.
+- **Desktop-hardened security defaults** — the backend still defaults to `HOST = "0.0.0.0"` with wildcard CORS; desktop needs loopback-only + no wildcard CORS + a renderer↔backend token.
+- **Project lifecycle** — `/api/project` open/create/recent plus an open/create UI (neither exists yet; the root is bound to `PARSE_WORKSPACE_ROOT` at launch).
+- **Packaging pipeline** — electron-builder DMG/zip (macOS arm64 first) then NSIS (Windows), signing/notarization.
+- **Bundled + plug-and-play models** — Whisper + wav2vec2 bundled; no ORTH model; an "Add model…" install path per project (architecture §9.4).
+- Auto-update flow and release channels; native UX polish; persistence/migration for local app state.
 
 ## Scope guardrails for this wave
 
