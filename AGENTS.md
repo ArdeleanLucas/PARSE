@@ -56,19 +56,20 @@ Exceptions to this rule (cases where landing on oracle IS correct):
 
 Both exceptions require Lucas's explicit approval per task. Do not assume.
 
-## Scope: Option 1 only (Option 3 cancelled 2026-04-26)
+## Scope: Desktop (Option 3) REVIVED 2026-07-04 — supersedes the 2026-04-26 cancellation
 
-Per Lucas decision 2026-04-26: the rebuild's done-state is **Option 1 (web/React monolith decomposition + parity evidence)** complete. **Option 3 (desktop platform pivot) is dropped, not deferred.** Do not start desktop work, do not scaffold electron/tauri shells, do not extend `desktop_product_architecture.md` (archived).
+Per Lucas decision **2026-07-04**, the desktop/installable product direction (**Option 3**) is **revived**, explicitly reversing the 2026-04-26 cancellation (recorded below for history). Goal: PARSE ships as a **downloadable, installable desktop app** — macOS first, then Windows — using the Electron shell + local Python backend architecture in `docs/desktop_product_architecture.md`.
 
 Practical implications:
 
-- All implementation lanes target the React/web stack only
-- Parity evidence covers React shell + Python backend + on-disk artifacts only
-- §5.3 of `option1-parity-inventory.md` (reserved Phase-3 shell extensibility) is cancelled — no parity work for training/phonetics/broader CL workbenches
-- The `desktop/` directory in the repo (if present) is vestigial scaffolding; do not extend
-- Original plan doc `option1-separate-rebuild-to-option3-desktop-platform.md` carries a CANCELLED banner; the Option 3 sections are historical context only
+- Desktop work is back in scope. The `desktop/` Electron scaffold is the starting point — extend it, don't restart it.
+- **First**, lift the CANCELLED/ARCHIVED banners on `docs/desktop_product_architecture.md`, `desktop/README.md`, and `docs/archive/plans/option1-separate-rebuild-to-option3-desktop-platform.md`, and refresh the plan + `docs/distribution_readiness_checklist.md` against the current codebase (several old blockers are resolved; new ones — `/api/project` write contract, offset/spectrogram compute routes, `0.0.0.0`/CORS defaults, no dependency lock / managed Python runtime — are not).
+- **Option 1 (web/React) remains the foundation and stays working throughout.** Desktop packaging wraps the existing React SPA + Python backend; it does not replace them. Parity evidence still covers React shell + Python backend + on-disk artifacts.
+- Release gates follow `docs/distribution_readiness_checklist.md` (Gate A → B → C). "Downloadable and installable" means clearing at least Gate B (installers + managed Python runtime), ideally Gate C (signing/notarization).
 
-If a future Lucas decision reverses this, the cancellation banners on plan docs must be lifted explicitly — no implicit revival.
+Reversal rule retained: any future change to this direction must be recorded **here, explicitly, with a dated decision** — no implicit changes in either direction.
+
+> **Superseded (historical) — Option 1 only, 2026-04-26:** the rebuild's done-state was Option 1 complete and Option 3 (desktop) was dropped; no desktop work, no electron/tauri scaffolding, `desktop_product_architecture.md` archived. Reversed 2026-07-04 per the rule above.
 
 ### AIChat.tsx is maintenance-mode-only (added 2026-04-26)
 
