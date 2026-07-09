@@ -14,8 +14,8 @@ const path = require('path');
 
 // Name of the frozen backend directory + executable produced by the PyInstaller
 // onedir freeze (packaging/parse-backend.spec: COLLECT name="parse-backend",
-// EXE name="parse-backend"). electron-builder.yml copies `../dist/parse-backend`
-// to `backend`, so the packaged layout is:
+// EXE name="parse-backend"). electron-builder.yml copies the CONTENTS of
+// `../dist/parse-backend` to `backend/parse-backend`, so the packaged layout is:
 //   <resourcesPath>/backend/parse-backend/parse-backend
 const FROZEN_BACKEND_DIR = 'parse-backend';
 
@@ -43,9 +43,9 @@ function devBackendCommand(platform, env) {
 //   dev       -> { command, shell: true }   (python3 python/server.py, unchanged)
 //
 // The packaged executable path matches electron-builder.yml's
-// `extraResources: { from: ../dist/parse-backend, to: backend }`, so at runtime
-// the frozen onedir lives at `<resourcesPath>/backend/parse-backend` and its
-// entry executable is `<resourcesPath>/backend/parse-backend/parse-backend`.
+// `extraResources: { from: ../dist/parse-backend, to: backend/parse-backend }`,
+// so at runtime the frozen onedir lives at `<resourcesPath>/backend/parse-backend`
+// and its entry executable is `<resourcesPath>/backend/parse-backend/parse-backend`.
 function resolveBackendLauncher(isPackaged, resourcesPath, options = {}) {
   const platform = options.platform || process.platform;
 

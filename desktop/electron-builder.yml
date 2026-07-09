@@ -41,14 +41,22 @@ files:
 afterPack: ./afterPack.js
 
 # Bundle the PyInstaller onedir output into the app.
-#   from: ../dist/parse-backend  (PyInstaller writes dist/parse-backend/ at repo root)
-#   to:   backend                 (-> Contents/Resources/backend/ in the .app)
-# At runtime a packaged main.js can spawn:
-#   `${process.resourcesPath}/backend/parse-backend`
-# (that main.js change is a deliberate stacked follow-up — not in this PR).
+#   from: ../dist/parse-backend        (PyInstaller writes dist/parse-backend/ at repo root)
+#   to:   backend/parse-backend         (-> Contents/Resources/backend/parse-backend/ in the .app)
+#
+# IMPORTANT — electron-builder copies the CONTENTS of the `from` directory into
+# `to`, NOT the `from` directory itself. So `from: ../dist/parse-backend` +
+# `to: backend` would land the onedir contents directly in `Resources/backend/`,
+# putting the entry exe at `Resources/backend/parse-backend`. But both
+# backend-launcher.js (runtime) and afterPack.js (packaging) expect the nested
+# `Resources/backend/parse-backend/parse-backend`. Setting `to:
+# backend/parse-backend` re-creates that intermediate directory so the exe lands
+# at `Resources/backend/parse-backend/parse-backend` — matching both files.
+# At runtime a packaged main.js spawns:
+#   `${process.resourcesPath}/backend/parse-backend/parse-backend`
 extraResources:
   - from: ../dist/parse-backend
-    to: backend
+    to: backend/parse-backend
     filter:
       - "**/*"
 

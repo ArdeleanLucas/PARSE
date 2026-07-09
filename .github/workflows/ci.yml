@@ -85,8 +85,12 @@ jobs:
       # Root vitest excludes desktop/** and the macOS packaging workflow only
       # runs on its own branch, so without this job the desktop/ tests never run
       # on a PR and a regression there would pass CI green.
+      # --test-force-exit (Node 22+) forces the runner to exit after tests
+      # finish even if a stray handle lingers, so a leaked child can never hang
+      # the job to its timeout. It is belt-and-suspenders — the tests still tear
+      # down every spawned child/server explicitly (see backend-supervisor.test.js).
       - name: Run desktop unit tests
-        run: cd desktop && node --test "test/**/*.test.js"
+        run: cd desktop && node --test --test-force-exit "test/**/*.test.js"
 
   frontend:
     name: Frontend CI
