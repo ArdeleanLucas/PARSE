@@ -11,6 +11,7 @@
 
 const net = require('net');
 const http = require('http');
+const fs = require('fs');
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 
@@ -96,10 +97,18 @@ class BackendSupervisor extends EventEmitter {
   constructor(options = {}) {
     super();
 
+    // The backend can be spawned two ways:
+    //   1. Dev / scaffold: a shell command STRING (`python3 python/server.py`),
+    //      spawned via `shell: true`. This is `backendCommand`.
+    //   2. Packaged: a DIRECT executable path plus argv, spawned WITHOUT a shell
+    //      (no `python`). This is `backendExecutable` + `backendArgs`.
+    // When `backendExecutable` is set it takes precedence over `backendCommand`.
     this._options = {
       projectRoot: options.projectRoot || process.cwd(),
       userDataRoot: options.userDataRoot || '',
       backendCommand: options.backendCommand || defaultBackendCommand(),
+      backendExecutable: options.backendExecutable || null,
+      backendArgs: options.backendArgs || [],
       pollIntervalMs: options.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS,
       readinessTimeoutMs: options.readinessTimeoutMs || DEFAULT_READINESS_TIMEOUT_MS,
       shutdownTimeoutMs: options.shutdownTimeoutMs || DEFAULT_SHUTDOWN_TIMEOUT_MS,
@@ -112,6 +121,12 @@ class BackendSupervisor extends EventEmitter {
     this._url = null;
     this._ready = false;
     this._stopping = false;
+    // True when the child was spawned as a POSIX process-group leader
+    // (`detached: true`). This happens only for the dev/shell-spawn form, where
+    // the immediate child is a shell wrapper and the real server is its
+    // grandchild. `stop()` must signal the whole group (negative pid) so the
+    // grandchild dies with it instead of orphaning and holding the port.
+    this._spawnedDetached = false;
     // Records the last child exit so late `stop()` calls stay idempotent and
     // waitForReady can react to a child that dies mid-handshake.
     this._lastExit = null;
@@ -151,6 +166,64 @@ class BackendSupervisor extends EventEmitter {
     return this;
   }
 
+  // Resolve how to spawn the backend for this run. Returns the `child_process`
+  // spawn arguments plus a human-readable description for logs.
+  //
+  // Packaged: a direct executable + argv, NO shell. The executable is verified
+  // to exist first; a missing frozen binary throws a clear error instead of
+  // letting spawn fall through to something unexpected.
+  //
+  // Dev: the shell command string, spawned via `shell: true` (unchanged).
+  _resolveSpawn(env) {
+    const baseOptions = {
+      cwd: this._options.projectRoot,
+      env,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    };
+
+    const executable = this._options.backendExecutable;
+
+    if (executable) {
+      // Guard: fail loudly if the frozen backend is missing so we never quietly
+      // spawn `python` as a fallback.
+      try {
+        fs.accessSync(executable, fs.constants.X_OK);
+      } catch (error) {
+        throw new Error(
+          `Frozen PARSE backend is missing or not executable at ${executable} ` +
+            `(${error.code || error.message}).`
+        );
+      }
+
+      const args = this._options.backendArgs || [];
+      return {
+        // Direct frozen executable: a single process, no shell wrapper. Its own
+        // SIGTERM already reaches the real server, so we do NOT detach it —
+        // `child.kill()` in `stop()` is correct and simplest here.
+        spawnArg: { file: executable, args },
+        spawnOptions: baseOptions,
+        detached: false,
+        describe: `${executable} ${args.join(' ')}`.trim(),
+      };
+    }
+
+    const command = this._options.backendCommand;
+    // Dev/shell form: the command runs under a shell (`/bin/sh -c ...`), so the
+    // immediate child is the shell and the real server is its grandchild. On
+    // POSIX, spawn with `detached: true` so the child becomes a new
+    // process-group leader; `stop()` then signals the whole group (negative
+    // pid) to kill the grandchild too. Windows uses `taskkill /t` for the tree,
+    // so detach is POSIX-only.
+    const detached = process.platform !== 'win32';
+    return {
+      spawnArg: { file: command, args: [] },
+      spawnOptions: { ...baseOptions, shell: true, detached },
+      detached,
+      describe: command,
+    };
+  }
+
   async start() {
     if (this._child) {
       throw new Error('Backend supervisor is already started.');
@@ -174,18 +247,21 @@ class BackendSupervisor extends EventEmitter {
       ...this._options.env,
     };
 
-    const command = this._options.backendCommand;
+    // Choose the spawn form: a direct frozen executable (packaged) or the dev
+    // shell command string. `_resolveSpawn` also guards a missing/unusable
+    // frozen executable so a failed packaged launch never silently falls back
+    // to spawning `python`.
+    const { spawnArg, spawnOptions, detached, describe } = this._resolveSpawn(env);
 
-    this._log(`starting backend on 127.0.0.1:${port}: ${command}\n`, 'stdout');
+    this._log(`starting backend on 127.0.0.1:${port}: ${describe}\n`, 'stdout');
 
-    const child = spawn(command, {
-      cwd: this._options.projectRoot,
-      shell: true,
-      env,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const child = spawn(spawnArg.file, spawnArg.args, spawnOptions);
 
+    // Record whether this child leads its own process group so `stop()` can
+    // signal the group (negative pid) instead of just the shell wrapper.
+    // We intentionally do NOT call `child.unref()` — piped stdio still works
+    // when detached, and we want to keep managing/awaiting this child.
+    this._spawnedDetached = Boolean(detached);
     this._child = child;
 
     if (child.stdout) {
@@ -284,7 +360,37 @@ class BackendSupervisor extends EventEmitter {
     });
   }
 
-  // Graceful shutdown: SIGTERM (taskkill on win32), wait, then SIGKILL.
+  // Send `signal` to the backend. For a detached POSIX child (dev/shell form)
+  // this targets the whole process GROUP via a negative pid, so the shell
+  // wrapper AND its grandchild server both receive the signal. For the direct
+  // executable path it targets just the single child. `ESRCH` (no such
+  // process) means the target is already gone — treat as success.
+  _signalBackend(child, pid, signal) {
+    if (this._spawnedDetached && process.platform !== 'win32' && pid) {
+      try {
+        process.kill(-pid, signal);
+        return;
+      } catch (error) {
+        if (error.code === 'ESRCH') {
+          return; // Group already gone.
+        }
+        this._log(`process-group ${signal} failed: ${error.message}\n`, 'stderr');
+        // Fall through to a plain child.kill as a best effort.
+      }
+    }
+
+    try {
+      child.kill(signal);
+    } catch (error) {
+      if (error.code === 'ESRCH') {
+        return;
+      }
+      this._log(`${signal} failed: ${error.message}\n`, 'stderr');
+    }
+  }
+
+  // Graceful shutdown: SIGTERM (taskkill on win32; process-group signal for
+  // detached dev/shell backends), wait, then SIGKILL.
   // Idempotent: safe to call when never started or already stopped.
   async stop() {
     const child = this._child;
@@ -309,11 +415,7 @@ class BackendSupervisor extends EventEmitter {
         stdio: 'ignore',
       });
     } else {
-      try {
-        child.kill('SIGTERM');
-      } catch (error) {
-        this._log(`SIGTERM failed: ${error.message}\n`, 'stderr');
-      }
+      this._signalBackend(child, pid, 'SIGTERM');
     }
 
     const timedOut = await Promise.race([
@@ -323,16 +425,20 @@ class BackendSupervisor extends EventEmitter {
 
     if (timedOut && this._child) {
       this._log('graceful shutdown timed out; sending SIGKILL\n', 'stderr');
-      try {
-        this._child.kill('SIGKILL');
-      } catch (error) {
-        this._log(`SIGKILL failed: ${error.message}\n`, 'stderr');
+      if (process.platform === 'win32' && pid) {
+        spawn('taskkill', ['/pid', String(pid), '/f', '/t'], {
+          windowsHide: true,
+          stdio: 'ignore',
+        });
+      } else {
+        this._signalBackend(this._child, pid, 'SIGKILL');
       }
       await exited;
     }
 
     this._child = null;
     this._stopping = false;
+    this._spawnedDetached = false;
   }
 
   async restart() {

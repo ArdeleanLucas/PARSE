@@ -6,6 +6,7 @@ const { spawn } = require('child_process');
 const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
 
 const { createBackendSupervisor } = require('./backend-supervisor');
+const { resolveBackendLauncher } = require('./backend-launcher');
 const projectStore = require('./project-store');
 
 // Resolved project root for desktop-runtime mode (the folder passed to the
@@ -394,10 +395,23 @@ async function resolveProjectRoot() {
 
 async function startSupervisedBackend() {
   if (!supervisor) {
+    // Packaged builds spawn the frozen backend executable directly (no shell,
+    // no python); dev builds keep the existing `python3 python/server.py` shell
+    // command. resolveBackendLauncher() encapsulates that choice.
+    const launcher = resolveBackendLauncher(app.isPackaged, process.resourcesPath);
+
     supervisor = createBackendSupervisor({
       projectRoot: selectedProjectRoot || getBackendCwd(),
       userDataRoot: app.getPath('userData'),
-      backendCommand: getBackendCommand(),
+      // Dev mode gets the python shell command; packaged mode passes NO python
+      // fallback (null). When packaged, the frozen executable is what runs, so a
+      // python command must never be handed to the supervisor — otherwise a
+      // future refactor could silently spawn `python`. The supervisor prefers
+      // `backendExecutable`, and with `backendCommand: null` a missing or
+      // unusable frozen binary fails loudly instead of quietly falling back.
+      backendCommand: launcher.command || null,
+      backendExecutable: launcher.executable || null,
+      backendArgs: launcher.args || [],
       onLog: desktopBackendLog,
     });
 

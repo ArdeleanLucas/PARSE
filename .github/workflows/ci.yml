@@ -66,6 +66,32 @@ jobs:
               )
           PY
 
+  desktop-unit-tests:
+    name: Desktop unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # The desktop/ tests use only Node built-ins (node:test / node:fs /
+      # node:http / node:path), so no `npm ci` is needed — keep this job fast.
+      # Root vitest excludes desktop/** and the macOS packaging workflow only
+      # runs on its own branch, so without this job the desktop/ tests never run
+      # on a PR and a regression there would pass CI green.
+      # --test-force-exit (Node 22+) forces the runner to exit after tests
+      # finish even if a stray handle lingers, so a leaked child can never hang
+      # the job to its timeout. It is belt-and-suspenders — the tests still tear
+      # down every spawned child/server explicitly (see backend-supervisor.test.js).
+      - name: Run desktop unit tests
+        run: cd desktop && node --test --test-force-exit "test/**/*.test.js"
+
   frontend:
     name: Frontend CI
     runs-on: ubuntu-latest
