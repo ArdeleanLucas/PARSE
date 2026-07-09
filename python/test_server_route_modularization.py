@@ -12,8 +12,9 @@ def test_server_py_is_thin_orchestrator() -> None:
     server_path = pathlib.Path(server.__file__).resolve()
     line_count = len(server_path.read_text(encoding="utf-8").splitlines())
     # Budget raised to absorb compare-bundle dispatch entries added by PR #368 (MC-368-B),
-    # then again for atomic _write_json_file (tmp+fsync+os.replace) durability hardening (MC-463-B).
-    assert line_count < 2070, f"python/server.py should be <2070 LoC after decomposition, got {line_count}"
+    # then again for atomic _write_json_file (tmp+fsync+os.replace) durability hardening (MC-463-B),
+    # then again for the Gate A desktop-runtime wiring (loopback host resolve + origin-aware CORS + /api/health).
+    assert line_count < 2100, f"python/server.py should be <2100 LoC after decomposition, got {line_count}"
 
 
 def test_route_binding_installer_is_exposed() -> None:
