@@ -44,6 +44,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from shared.ffmpeg_discovery import (
+    FFMPEG_OVERRIDE_ENV,
+    FfmpegNotFoundError,
+    discover_ffmpeg,
+)
 from concept_canonical import strip_clarifier
 from concept_source_item import (
     parse_cue_name,
@@ -731,6 +736,49 @@ def _audio_filename(
     gloss_token = _slug_for_filename(gloss) or "concept"
     speaker_token = _slug_for_filename(speaker)
     return f"{survey}_{item}_{variant_token}_{gloss_token}_{speaker_token}.wav"
+
+
+def _verify_ffmpeg_binary(candidate: str) -> bool:
+    """Return True if `candidate -version` runs and exits 0."""
+    try:
+        probe = subprocess.run(
+            [candidate, "-version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return False
+    return probe.returncode == 0
+
+
+def resolve_ffmpeg_binary(cli_ffmpeg: str) -> str:
+    """Resolve an ffmpeg binary using the cross-platform discovery policy.
+
+    The CLI ``--ffmpeg`` flag stays the highest-priority override: if set but not
+    executable it fails fast rather than auto-discovering. When omitted, ffmpeg
+    is resolved via the shared ordered policy (env override -> bundled/frozen dir
+    -> PATH -> common per-OS locations).
+    """
+    candidate = cli_ffmpeg.strip()
+    if candidate:
+        if _verify_ffmpeg_binary(candidate):
+            return candidate
+        print(f"error: --ffmpeg is set but not executable: {candidate}", file=sys.stderr)
+        raise SystemExit(1)
+
+    try:
+        return discover_ffmpeg(verify=_verify_ffmpeg_binary)
+    except FfmpegNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        print(
+            f"You can also pass --ffmpeg /path/to/ffmpeg, or set "
+            f"{FFMPEG_OVERRIDE_ENV}=/path/to/ffmpeg.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
 
 
 def _clip_wav(
@@ -1541,8 +1589,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--ffmpeg",
-        default="ffmpeg",
-        help="ffmpeg binary path (default: %(default)s).",
+        default="",
+        help=(
+            "ffmpeg binary path (highest priority). When omitted, ffmpeg is "
+            "auto-discovered via the PARSE_FFMPEG environment variable, a "
+            "bundled/frozen desktop directory, PATH, and common per-OS install "
+            "locations. Only needed when audio clips are materialized "
+            "(i.e. not --skip-audio)."
+        ),
     )
     parser.add_argument(
         "--contact-config",
@@ -1627,13 +1681,21 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
+    # Only resolve ffmpeg when audio clips will actually be materialized. This
+    # keeps --skip-audio (and empty clip plans) runnable without ffmpeg present.
+    if args.skip_audio or not clip_plan:
+        ffmpeg_bin = args.ffmpeg.strip() or "ffmpeg"
+    else:
+        ffmpeg_bin = resolve_ffmpeg_binary(args.ffmpeg)
+
     summary = write_outputs(
         workspace=workspace,
         out_dir=out_dir,
         review_data=review_data,
         clip_plan=clip_plan,
         skip_audio=args.skip_audio,
-        ffmpeg_bin=args.ffmpeg,
+        ffmpeg_bin=ffmpeg_bin,
     )
 
     print(json.dumps(summary, indent=2))

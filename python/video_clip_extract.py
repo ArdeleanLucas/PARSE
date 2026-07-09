@@ -34,6 +34,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+from shared.ffmpeg_discovery import (
+    FFMPEG_OVERRIDE_ENV,
+    FfmpegNotFoundError,
+    discover_ffmpeg,
+    discover_ffprobe,
+)
+
 
 _FORCE_OVERWRITE = False
 _VIDEO_DURATION_CACHE = {}
@@ -42,6 +49,48 @@ _VIDEO_DURATION_CACHE = {}
 def _eprint(message: str) -> None:
     """Print a message to stderr."""
     print(message, file=sys.stderr)
+
+
+def _verify_ffmpeg_binary(candidate: str) -> bool:
+    """Return True if `candidate -version` runs and exits 0."""
+    try:
+        probe = subprocess.run(
+            [candidate, "-version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return False
+    return probe.returncode == 0
+
+
+def resolve_ffmpeg_binary(cli_ffmpeg: str) -> str:
+    """Resolve an ffmpeg binary using the cross-platform discovery policy.
+
+    The CLI ``--ffmpeg`` flag stays the highest-priority override: if set but not
+    executable it fails fast rather than auto-discovering. When omitted, ffmpeg
+    is resolved via the shared ordered policy (env override -> bundled/frozen dir
+    -> PATH -> common per-OS locations).
+    """
+    candidate = cli_ffmpeg.strip()
+    if candidate:
+        if _verify_ffmpeg_binary(candidate):
+            return candidate
+        _eprint(f"ERROR: --ffmpeg is set but not executable: {candidate}")
+        raise SystemExit(1)
+
+    try:
+        return discover_ffmpeg(verify=_verify_ffmpeg_binary)
+    except FfmpegNotFoundError as exc:
+        _eprint(f"ERROR: {exc}")
+        _eprint(
+            f"You can also pass --ffmpeg /path/to/ffmpeg, or set "
+            f"{FFMPEG_OVERRIDE_ENV}=/path/to/ffmpeg."
+        )
+        raise SystemExit(1) from exc
 
 
 def _safe_float(value: object, default: float = 0.0) -> float:
@@ -260,8 +309,24 @@ def _resolve_video_path(
     return candidates[0]
 
 
-def _infer_ffprobe_path(ffmpeg_path: str) -> str:
-    """Infer ffprobe executable from ffmpeg path."""
+def _infer_ffprobe_path(ffmpeg_path: str, *, explicit: bool = True) -> str:
+    """Resolve an ffprobe path to pair with a resolved ffmpeg path.
+
+    For an explicit ``--ffmpeg`` (``explicit=True``) the historical sibling
+    inference is preserved. When ffmpeg was auto-discovered, ffprobe is resolved
+    through the shared cross-platform policy so a bundled/frozen ffprobe is
+    located the same way.
+    """
+    if not explicit:
+        try:
+            return discover_ffprobe(
+                ffmpeg_path=ffmpeg_path,
+                verify=_verify_ffmpeg_binary,
+            )
+        except FfmpegNotFoundError:
+            # Non-fatal here: the caller warns and skips duration clamping.
+            return "ffprobe"
+
     ffmpeg_name = Path(ffmpeg_path).name
     lower_name = ffmpeg_name.lower()
 
@@ -277,13 +342,17 @@ def _infer_ffprobe_path(ffmpeg_path: str) -> str:
     return "ffprobe"
 
 
-def _probe_video_duration(video_path: Path, ffmpeg_path: str) -> float:
+def _probe_video_duration(
+    video_path: Path,
+    ffmpeg_path: str,
+    ffprobe_explicit: bool = True,
+) -> float:
     """Read video duration with ffprobe; returns <=0 when unknown."""
     cache_key = str(video_path.resolve(strict=False))
     if cache_key in _VIDEO_DURATION_CACHE:
         return _VIDEO_DURATION_CACHE[cache_key]
 
-    ffprobe_path = _infer_ffprobe_path(ffmpeg_path)
+    ffprobe_path = _infer_ffprobe_path(ffmpeg_path, explicit=ffprobe_explicit)
     command = [
         ffprobe_path,
         "-v",
@@ -344,6 +413,7 @@ def _compute_clip_window(
     end_sec: float,
     ffmpeg_path: str,
     padding_sec: float,
+    ffprobe_explicit: bool = True,
 ) -> tuple:
     """Apply padding and clamp clip boundaries to video duration."""
     if end_sec <= start_sec:
@@ -365,7 +435,9 @@ def _compute_clip_window(
         )
         clip_start = 0.0
 
-    video_duration = _probe_video_duration(video_path, ffmpeg_path)
+    video_duration = _probe_video_duration(
+        video_path, ffmpeg_path, ffprobe_explicit=ffprobe_explicit
+    )
     if video_duration > 0.0:
         if clip_start > video_duration:
             _eprint(
@@ -443,6 +515,7 @@ def extract_clip(
     output_path: Path,
     ffmpeg_path: str = "ffmpeg",
     padding_sec: float = 0.5,
+    ffprobe_explicit: bool = True,
 ) -> bool:
     """Extract one video clip. Returns True on success."""
     clip_window = _compute_clip_window(
@@ -451,6 +524,7 @@ def extract_clip(
         end_sec=end_sec,
         ffmpeg_path=ffmpeg_path,
         padding_sec=padding_sec,
+        ffprobe_explicit=ffprobe_explicit,
     )
     if not clip_window:
         return False
@@ -496,6 +570,7 @@ def extract_speaker_clips(
     ffmpeg_path: str = "ffmpeg",
     padding_sec: float = 0.5,
     dry_run: bool = False,
+    ffprobe_explicit: bool = True,
 ) -> dict:
     """
     Extract all annotated clips for a speaker.
@@ -608,6 +683,7 @@ def extract_speaker_clips(
                 end_sec=mapped_end,
                 ffmpeg_path=ffmpeg_path,
                 padding_sec=padding_sec,
+                ffprobe_explicit=ffprobe_explicit,
             )
             if not clip_window:
                 results["errors"] += 1
@@ -632,6 +708,7 @@ def extract_speaker_clips(
             output_path=output_path,
             ffmpeg_path=ffmpeg_path,
             padding_sec=padding_sec,
+            ffprobe_explicit=ffprobe_explicit,
         ):
             results["extracted"] += 1
         else:
@@ -710,8 +787,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ffmpeg",
         type=str,
-        default="ffmpeg",
-        help="Path to ffmpeg executable (default: ffmpeg)",
+        default="",
+        help=(
+            "Path to ffmpeg executable (highest priority). When omitted, ffmpeg "
+            "and its sibling ffprobe are auto-discovered via the PARSE_FFMPEG "
+            "environment variable, a bundled/frozen desktop directory, PATH, and "
+            "common per-OS install locations."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -747,6 +829,17 @@ def main() -> int:
     global _FORCE_OVERWRITE
     _FORCE_OVERWRITE = bool(args.force)
 
+    ffmpeg_explicit = bool(args.ffmpeg.strip())
+    if args.dry_run and not ffmpeg_explicit:
+        # Dry-run never spawns ffmpeg, so best-effort discover a display path but
+        # do not fail when nothing is installed (preserves offline dry-run use).
+        try:
+            ffmpeg_path = discover_ffmpeg(verify=_verify_ffmpeg_binary)
+        except FfmpegNotFoundError:
+            ffmpeg_path = "ffmpeg"
+    else:
+        ffmpeg_path = resolve_ffmpeg_binary(args.ffmpeg)
+
     output_dir = Path(args.output)
     if not args.dry_run:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -770,9 +863,10 @@ def main() -> int:
                 annotation_path=annotation_path,
                 sync_path=sync_path,
                 output_dir=output_dir,
-                ffmpeg_path=args.ffmpeg,
+                ffmpeg_path=ffmpeg_path,
                 padding_sec=args.padding,
                 dry_run=args.dry_run,
+                ffprobe_explicit=ffmpeg_explicit,
             )
             total_extracted += stats["extracted"]
             total_skipped += stats["skipped"]
@@ -807,9 +901,10 @@ def main() -> int:
                 annotation_path=annotation_path,
                 sync_path=sync_path,
                 output_dir=output_dir,
-                ffmpeg_path=args.ffmpeg,
+                ffmpeg_path=ffmpeg_path,
                 padding_sec=args.padding,
                 dry_run=args.dry_run,
+                ffprobe_explicit=ffmpeg_explicit,
             )
             total_extracted += stats["extracted"]
             total_skipped += stats["skipped"]

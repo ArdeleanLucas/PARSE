@@ -18,6 +18,13 @@ import sys
 
 import numpy as np
 
+from shared.ffmpeg_discovery import (
+    FFMPEG_OVERRIDE_ENV,
+    FfmpegNotFoundError,
+    discover_ffmpeg,
+    discover_ffprobe,
+)
+
 try:
     from scipy.signal import fftconvolve as _scipy_fftconvolve
 except Exception:
@@ -47,6 +54,48 @@ def print_warning(message: str) -> None:
 
 
 
+def _verify_ffmpeg_binary(candidate: str) -> bool:
+    """Return True if `candidate -version` runs and exits 0."""
+    try:
+        probe = subprocess.run(
+            [candidate, "-version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=15,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return False
+    return probe.returncode == 0
+
+
+def resolve_ffmpeg_binary(cli_ffmpeg: str) -> str:
+    """Resolve an ffmpeg binary using the cross-platform discovery policy.
+
+    The CLI ``--ffmpeg`` flag stays the highest-priority override: if it is set
+    but does not verify, this fails fast rather than silently falling through to
+    auto-discovery. When it is omitted, resolution follows the ordered policy in
+    ``shared.ffmpeg_discovery`` (env override -> bundled/frozen dir -> PATH ->
+    common per-OS locations).
+    """
+    candidate = cli_ffmpeg.strip()
+    if candidate:
+        if _verify_ffmpeg_binary(candidate):
+            return candidate
+        print_error(f"--ffmpeg is set but not executable: {candidate}")
+        raise SystemExit(1)
+
+    try:
+        return discover_ffmpeg(verify=_verify_ffmpeg_binary)
+    except FfmpegNotFoundError as exc:
+        print_error(str(exc))
+        print_error(
+            f"You can also pass --ffmpeg /path/to/ffmpeg, or set "
+            f"{FFMPEG_OVERRIDE_ENV}=/path/to/ffmpeg."
+        )
+        raise SystemExit(1) from exc
+
+
 def _require_input_file(path: Path, label: str) -> None:
     """Validate that a required input path exists and is a file."""
     if not path.exists():
@@ -56,15 +105,31 @@ def _require_input_file(path: Path, label: str) -> None:
 
 
 
-def _resolve_ffprobe_path(ffmpeg_path: str) -> str:
-    """Infer ffprobe path from ffmpeg path when possible."""
+def _resolve_ffprobe_path(ffmpeg_path: str, *, explicit: bool = True) -> str:
+    """Resolve an ffprobe path to pair with a resolved ffmpeg path.
+
+    When the caller passed an explicit ``--ffmpeg`` (``explicit=True``), keep the
+    historical behavior of inferring a sibling ``ffprobe`` next to it. When the
+    ffmpeg binary was auto-discovered, resolve ffprobe through the shared
+    cross-platform policy so a bundled/frozen ffprobe is found the same way.
+    """
     ffmpeg_binary = ffmpeg_path.strip()
-    ffmpeg_name = Path(ffmpeg_binary).name.lower()
-    if ffmpeg_name == "ffmpeg":
-        return str(Path(ffmpeg_binary).with_name("ffprobe"))
-    if ffmpeg_name == "ffmpeg.exe":
-        return str(Path(ffmpeg_binary).with_name("ffprobe.exe"))
-    return "ffprobe"
+    if explicit:
+        ffmpeg_name = Path(ffmpeg_binary).name.lower()
+        if ffmpeg_name == "ffmpeg":
+            return str(Path(ffmpeg_binary).with_name("ffprobe"))
+        if ffmpeg_name == "ffmpeg.exe":
+            return str(Path(ffmpeg_binary).with_name("ffprobe.exe"))
+        return "ffprobe"
+
+    try:
+        return discover_ffprobe(
+            ffmpeg_path=ffmpeg_binary,
+            verify=_verify_ffmpeg_binary,
+        )
+    except FfmpegNotFoundError as exc:
+        print_error(str(exc))
+        raise SystemExit(1) from exc
 
 
 
@@ -352,6 +417,7 @@ def _collect_sync_points(
     audio_path: Path,
     n_points: int,
     ffmpeg_path: str,
+    ffprobe_explicit: bool = True,
 ) -> list[dict]:
     """Collect offset measurements at evenly spaced points across the overlap."""
     if n_points < 1:
@@ -360,7 +426,7 @@ def _collect_sync_points(
     _require_input_file(video_path, "Video file")
     _require_input_file(audio_path, "Audio file")
 
-    ffprobe_path = _resolve_ffprobe_path(ffmpeg_path)
+    ffprobe_path = _resolve_ffprobe_path(ffmpeg_path, explicit=ffprobe_explicit)
     video_duration_sec = _probe_duration_seconds(video_path, ffprobe_path)
     audio_duration_sec = _probe_duration_seconds(audio_path, ffprobe_path)
 
@@ -466,6 +532,7 @@ def _detect_offset_with_points(
     audio_path: Path,
     n_points: int,
     ffmpeg_path: str,
+    ffprobe_explicit: bool = True,
 ) -> dict:
     """Internal detect_offset implementation with configurable drift points."""
     anchor_points = _collect_sync_points(
@@ -473,12 +540,14 @@ def _detect_offset_with_points(
         audio_path=audio_path,
         n_points=ANCHOR_POINTS,
         ffmpeg_path=ffmpeg_path,
+        ffprobe_explicit=ffprobe_explicit,
     )
     drift_points = _collect_sync_points(
         video_path=video_path,
         audio_path=audio_path,
         n_points=max(1, n_points),
         ffmpeg_path=ffmpeg_path,
+        ffprobe_explicit=ffprobe_explicit,
     )
 
     slope_sec_per_sec, _ols_intercept, residual_std = _fit_offset_line(drift_points)
@@ -502,17 +571,23 @@ def _detect_offset_with_points(
 
 
 
-def detect_offset(video_path: Path, audio_path: Path, ffmpeg_path: str = "ffmpeg") -> dict:
+def detect_offset(video_path: Path, audio_path: Path, ffmpeg_path: str = "") -> dict:
     """
     Detect time offset between video and reference WAV.
 
+    ``ffmpeg_path`` stays the highest-priority override; when omitted the binary
+    is auto-discovered via the shared cross-platform policy.
+
     Returns: {"offset_sec": float, "drift_rate": float, "confidence": float, "method": "fft_auto"}
     """
+    explicit = bool(ffmpeg_path.strip())
+    resolved_ffmpeg = resolve_ffmpeg_binary(ffmpeg_path)
     return _detect_offset_with_points(
         video_path=video_path,
         audio_path=audio_path,
         n_points=DEFAULT_DRIFT_POINTS,
-        ffmpeg_path=ffmpeg_path,
+        ffmpeg_path=resolved_ffmpeg,
+        ffprobe_explicit=explicit,
     )
 
 
@@ -521,18 +596,24 @@ def sync_points(
     video_path: Path,
     audio_path: Path,
     n_points: int = 5,
-    ffmpeg_path: str = "ffmpeg",
+    ffmpeg_path: str = "",
 ) -> list[dict]:
     """
     Measure offset at N evenly spaced points through the recording.
 
+    ``ffmpeg_path`` stays the highest-priority override; when omitted the binary
+    is auto-discovered via the shared cross-platform policy.
+
     Returns list of {"time_sec": float, "offset_sec": float} dicts.
     """
+    explicit = bool(ffmpeg_path.strip())
+    resolved_ffmpeg = resolve_ffmpeg_binary(ffmpeg_path)
     points = _collect_sync_points(
         video_path=video_path,
         audio_path=audio_path,
         n_points=n_points,
-        ffmpeg_path=ffmpeg_path,
+        ffmpeg_path=resolved_ffmpeg,
+        ffprobe_explicit=explicit,
     )
     return [
         {
@@ -624,8 +705,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--ffmpeg",
-        default="ffmpeg",
-        help="Path to ffmpeg executable (default: ffmpeg from PATH)",
+        default="",
+        help=(
+            "Path to ffmpeg executable (highest priority). When omitted, ffmpeg "
+            "and its sibling ffprobe are auto-discovered via the PARSE_FFMPEG "
+            "environment variable, a bundled/frozen desktop directory, PATH, and "
+            "common per-OS install locations."
+        ),
     )
     return parser
 
@@ -641,12 +727,16 @@ def main() -> int:
     if args.points < 1:
         parser.error("--points must be >= 1")
 
+    ffmpeg_explicit = bool(args.ffmpeg.strip())
+    ffmpeg_path = resolve_ffmpeg_binary(args.ffmpeg)
+
     try:
         sync_data = _detect_offset_with_points(
             video_path=args.video,
             audio_path=args.audio,
             n_points=args.points,
-            ffmpeg_path=args.ffmpeg,
+            ffmpeg_path=ffmpeg_path,
+            ffprobe_explicit=ffmpeg_explicit,
         )
     except (RuntimeError, ValueError) as exc:
         print_error(str(exc))
