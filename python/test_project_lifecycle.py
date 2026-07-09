@@ -6,6 +6,9 @@ No server.py, no torch/faster-whisper, so these run locally on any machine.
 from __future__ import annotations
 
 import json
+import os
+
+import pytest
 
 from app.services.project_lifecycle import (
     STANDARD_SUBDIRS,
@@ -170,3 +173,96 @@ def test_describe_after_bootstrap_is_valid(tmp_path):
     assert desc["hasProjectJson"] is True
     assert desc["valid"] is True
     assert desc["name"] == "proj"
+    assert desc["corrupt"] is False
+
+
+def test_describe_corrupt_project_json_is_invalid_and_flagged(tmp_path):
+    project_root = tmp_path / "Corrupt"
+    project_root.mkdir()
+    (project_root / "project.json").write_text("{ not json", encoding="utf-8")
+
+    desc = describe_project(project_root)
+
+    assert desc["hasProjectJson"] is True
+    assert desc["valid"] is False
+    assert desc["corrupt"] is True
+    # Name resolution tolerates the failed parse and falls back to the dir name.
+    assert desc["name"] == "Corrupt"
+
+
+def test_bootstrap_leaves_corrupt_project_json_untouched(tmp_path):
+    # A corrupt file may be manually recoverable; bootstrap must not overwrite it.
+    project_root = tmp_path / "Corrupt"
+    project_root.mkdir()
+    corrupt_text = "{ not json"
+    (project_root / "project.json").write_text(corrupt_text, encoding="utf-8")
+
+    summary = bootstrap_project(project_root)
+
+    assert summary["created"] is False
+    assert summary["error"] is None
+    assert (project_root / "project.json").read_text(encoding="utf-8") == corrupt_text
+
+
+def test_bootstrap_atomic_write_result_and_no_leftover_temp(tmp_path):
+    project_root = tmp_path / "Atomic"
+    project_root.mkdir()
+
+    summary = bootstrap_project(project_root)
+
+    assert summary["created"] is True
+    assert summary["error"] is None
+    # The written file parses to the expected minimal dict.
+    payload = _read_project_json(project_root)
+    assert payload == {"name": "Atomic", "version": 1, "speakers": {}}
+    # No leftover atomic-write temp file.
+    assert not (project_root / "project.json.tmp").exists()
+    leftovers = [p.name for p in project_root.iterdir() if p.name.endswith(".tmp")]
+    assert leftovers == []
+
+
+def test_describe_hidden_file_only_dir_is_valid(tmp_path):
+    # A freshly-picked macOS folder containing only .DS_Store is still valid.
+    project_root = tmp_path / "FreshPick"
+    project_root.mkdir()
+    (project_root / ".DS_Store").write_text("cruft", encoding="utf-8")
+
+    desc = describe_project(project_root)
+
+    assert desc["hasProjectJson"] is False
+    assert desc["valid"] is True
+    assert desc["corrupt"] is False
+
+
+def test_bootstrap_whitespace_only_name_falls_back_to_dir_name(tmp_path):
+    project_root = tmp_path / "WhitespaceName"
+    project_root.mkdir()
+    (project_root / "project.json").write_text(
+        json.dumps({"name": "   ", "speakers": {}}) + "\n",
+        encoding="utf-8",
+    )
+
+    summary = bootstrap_project(project_root)
+    assert summary["name"] == "WhitespaceName"
+
+    desc = describe_project(project_root)
+    assert desc["name"] == "WhitespaceName"
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0 if hasattr(os, "geteuid") else True,
+    reason="chmod-based permission denial is ineffective as root / on non-POSIX",
+)
+def test_bootstrap_on_unwritable_dir_returns_error_and_does_not_raise(tmp_path):
+    parent = tmp_path / "readonly"
+    parent.mkdir()
+    os.chmod(parent, 0o500)  # r-x: cannot create children
+    try:
+        target = parent / "child-project"
+        summary = bootstrap_project(target)
+    finally:
+        os.chmod(parent, 0o700)  # restore so tmp_path cleanup succeeds
+
+    assert summary["created"] is False
+    assert summary["error"] is not None
+    assert not target.exists()

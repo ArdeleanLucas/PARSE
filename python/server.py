@@ -2046,8 +2046,9 @@ def main() -> None:
     # Desktop mode: a freshly-picked empty folder becomes a valid project on
     # startup. Idempotent + non-destructive, so it is safe every boot. Web/dev
     # mode is left untouched (no implicit project.json creation).
-    if _app_is_desktop_mode():
-        _app_bootstrap_project(serve_dir)
+    if _app_is_desktop_mode() and (_boot := _app_bootstrap_project(serve_dir)).get("error"):
+        print("[WARN] project bootstrap failed for {0}: {1} (continuing)".format(
+            serve_dir, _boot["error"]), file=sys.stderr, flush=True)
     _require_route_export("_cleanup_stale_locks_on_startup")()
     _install_route_bindings(); _require_route_export("_load_job_snapshots")()
 
