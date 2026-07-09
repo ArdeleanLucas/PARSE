@@ -26,7 +26,10 @@ set -euo pipefail
 # the arm64 mac target lands the unpacked app under the mac-arm64 subdir. The exe
 # tail matches electron-builder.yml (to: backend/parse-backend) + the PyInstaller
 # onedir layout + afterPack.js's resolvePackedBackendExe().
-APP="desktop/build/dist/mac-arm64/PARSE.app"
+# Absolute paths: the launch step below `cd`s into a temp project dir, so a
+# relative EXE would no longer resolve. Anchor to the repo root.
+REPO_ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
+APP="${REPO_ROOT}/desktop/build/dist/mac-arm64/PARSE.app"
 EXE="${APP}/Contents/Resources/backend/parse-backend/parse-backend"
 
 if [ ! -d "${APP}" ]; then
