@@ -3,9 +3,14 @@
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
 
 const { createBackendSupervisor } = require('./backend-supervisor');
+const projectStore = require('./project-store');
+
+// Resolved project root for desktop-runtime mode (the folder passed to the
+// backend as PARSE_WORKSPACE_ROOT). Null until the user has chosen one.
+let selectedProjectRoot = null;
 
 const DEFAULT_APP_URL = 'http://127.0.0.1:5173/';
 
@@ -16,6 +21,14 @@ let backendProcess = null;
 let supervisor = null;
 let supervisorUrl = null;
 let backendLogStream = null;
+
+// Re-entrancy guard for switchProject(). Two quick fires (menu accelerator +
+// pick-project IPC, or a double click) can otherwise interleave stop()/start()
+// calls on the supervisor and orphan a Python backend process. While a switch
+// is in flight, subsequent switch attempts are no-ops, and did-fail-load
+// recovery rendering is suppressed so a torn-down backend's in-flight request
+// can't flash the failure page over the splash screen.
+let switching = false;
 
 function isDesktopRuntime() {
   return process.env.PARSE_DESKTOP === '1';
@@ -31,6 +44,11 @@ function getAppUrl() {
 
 function getBackendCwd() {
   return process.env.PARSE_PROJECT_ROOT || path.resolve(__dirname, '..');
+}
+
+// Path to the desktop settings file (recent projects + last project).
+function getSettingsPath() {
+  return path.join(app.getPath('userData'), 'settings.json');
 }
 
 function getBackendCommand() {
@@ -231,6 +249,60 @@ function buildBackendFailurePage(errorMessage) {
 </html>`;
 }
 
+function buildNoProjectPage() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PARSE Desktop</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0b1320;
+      color: #d7e3ff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .card {
+      width: min(620px, 100%);
+      background: #121d30;
+      border: 1px solid #294066;
+      border-radius: 14px;
+      padding: 28px;
+      box-sizing: border-box;
+      text-align: center;
+    }
+    h1 { margin-top: 0; }
+    p { line-height: 1.5; opacity: 0.9; }
+    button {
+      margin-top: 12px;
+      padding: 11px 22px;
+      font-size: 15px;
+      color: #0b1320;
+      background: #6ea8ff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button:hover { background: #8bbcff; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Choose a PARSE project</h1>
+    <p>PARSE needs a project folder to open. Pick an existing project, or create
+       a new empty folder and PARSE will set it up for you.</p>
+    <button onclick="window.parseDesktop && window.parseDesktop.pickProject && window.parseDesktop.pickProject()">Open or create a project folder</button>
+  </div>
+</body>
+</html>`;
+}
+
 function renderHtml(html) {
   if (!mainWindow) {
     return Promise.resolve();
@@ -271,10 +343,59 @@ function desktopBackendLog(chunk, stream) {
   }
 }
 
+// Show the native folder picker ("Open or create a PARSE project folder").
+// Returns the chosen absolute path, or null if the user cancelled.
+async function showProjectPicker() {
+  const result = await dialog.showOpenDialog({
+    title: 'Open or create a PARSE project folder',
+    message: 'Choose an existing PARSE project, or create a new empty folder.',
+    buttonLabel: 'Open Project',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+
+  if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+}
+
+// Persist a chosen project into settings (recent + last) and record it as the
+// active project root.
+function commitSelectedProject(projectPath) {
+  selectedProjectRoot = projectPath;
+  try {
+    const settingsPath = getSettingsPath();
+    const settings = projectStore.readSettings(settingsPath);
+    const next = projectStore.addRecentProject(settings, projectPath);
+    projectStore.writeSettings(settingsPath, next);
+  } catch (error) {
+    console.error(`[parse-desktop] could not persist project selection: ${error.message}`);
+  }
+  return projectPath;
+}
+
+// Resolve the project root to hand the supervisor. Reuse a valid last project
+// when present; otherwise prompt with the native picker. Returns the chosen
+// path, or null if the user declined and there is no valid fallback.
+async function resolveProjectRoot() {
+  const settings = projectStore.readSettings(getSettingsPath());
+
+  if (settings.lastProject && projectStore.isValidProjectDir(settings.lastProject)) {
+    return commitSelectedProject(settings.lastProject);
+  }
+
+  const chosen = await showProjectPicker();
+  if (chosen && projectStore.isValidProjectDir(chosen)) {
+    return commitSelectedProject(chosen);
+  }
+
+  return null;
+}
+
 async function startSupervisedBackend() {
   if (!supervisor) {
     supervisor = createBackendSupervisor({
-      projectRoot: getBackendCwd(),
+      projectRoot: selectedProjectRoot || getBackendCwd(),
       userDataRoot: app.getPath('userData'),
       backendCommand: getBackendCommand(),
       onLog: desktopBackendLog,
@@ -294,6 +415,16 @@ async function startSupervisedBackend() {
 }
 
 async function launchDesktopRuntime() {
+  // Choose the project folder BEFORE booting the backend so it comes up bound
+  // to the right PARSE_WORKSPACE_ROOT.
+  const projectRoot = await resolveProjectRoot();
+  if (!projectRoot) {
+    // User cancelled and there is no valid last project: show the friendly
+    // no-project page with a button to re-open the picker.
+    await renderHtml(buildNoProjectPage());
+    return;
+  }
+
   await renderHtml(buildSplashPage('Launching the local PARSE backend...'));
 
   try {
@@ -305,6 +436,157 @@ async function launchDesktopRuntime() {
     console.error(`[parse-desktop] backend supervision failed: ${error.message}`);
     await renderHtml(buildBackendFailurePage(error.message));
   }
+}
+
+// Tear down the running backend, then boot it against `targetPath` and load
+// the new URL. Shared by switchProject() (native picker) and the Open Recent
+// menu (an explicit already-known path). Callers are responsible for the
+// `switching` re-entrancy guard.
+async function switchToProjectPath(targetPath) {
+  await renderHtml(buildSplashPage('Switching PARSE project...'));
+
+  try {
+    if (supervisor) {
+      await supervisor.stop();
+    }
+    // Drop the supervisor so it re-reads the new project root on next create.
+    supervisor = null;
+    supervisorUrl = null;
+
+    commitSelectedProject(targetPath);
+    // Refresh the menu so "Open Recent" reflects the just-updated order.
+    installDesktopMenu();
+
+    const url = await startSupervisedBackend();
+    if (mainWindow) {
+      await mainWindow.loadURL(url);
+    }
+    return { ok: true, url };
+  } catch (error) {
+    console.error(`[parse-desktop] switch project failed: ${error.message}`);
+    await renderHtml(buildBackendFailurePage(error.message));
+    return { ok: false, reason: error.message };
+  }
+}
+
+// Tear down the running backend, prompt for a new project, then boot the
+// backend against it and load the new URL. Used by the Switch Project menu item
+// and by the pick-project IPC (recovery / no-project page).
+//
+// Guarded against re-entrancy: reachable from both the Switch Project menu
+// accelerator (CmdOrCtrl+Shift+O) and the parse-desktop:pick-project IPC, with
+// no natural mutual exclusion otherwise. Two quick fires could interleave
+// supervisor stop()/start() calls and orphan a Python backend process.
+async function switchProject() {
+  if (!isDesktopRuntime()) {
+    return { ok: false, reason: 'not-desktop-runtime' };
+  }
+
+  if (switching) {
+    return { ok: false, reason: 'switch-in-progress' };
+  }
+
+  switching = true;
+  try {
+    const chosen = await showProjectPicker();
+    if (!chosen || !projectStore.isValidProjectDir(chosen)) {
+      // Cancelled: leave the current session (if any) untouched.
+      return { ok: false, reason: 'cancelled' };
+    }
+
+    return await switchToProjectPath(chosen);
+  } finally {
+    switching = false;
+  }
+}
+
+// Switch directly to a known, already-validated project path (no picker
+// dialog). Used by the Open Recent submenu. Shares the same re-entrancy guard
+// as switchProject() since both ultimately tear down/rebuild the supervisor.
+async function switchToRecentProject(targetPath) {
+  if (!isDesktopRuntime()) {
+    return { ok: false, reason: 'not-desktop-runtime' };
+  }
+
+  if (switching) {
+    return { ok: false, reason: 'switch-in-progress' };
+  }
+
+  if (!projectStore.isValidProjectDir(targetPath)) {
+    return { ok: false, reason: 'invalid-project-dir' };
+  }
+
+  switching = true;
+  try {
+    return await switchToProjectPath(targetPath);
+  } finally {
+    switching = false;
+  }
+}
+
+// Build the "Open Recent" submenu from persisted settings. Each entry
+// switches directly to that project path (via switchToRecentProject, which
+// shares the switchProject re-entrancy guard). Shown disabled with a
+// placeholder item when there are no recent projects yet.
+function buildOpenRecentSubmenu() {
+  let recentProjects = [];
+  try {
+    recentProjects = projectStore.readSettings(getSettingsPath()).recentProjects || [];
+  } catch (error) {
+    console.error(`[parse-desktop] could not read recent projects: ${error.message}`);
+  }
+
+  if (recentProjects.length === 0) {
+    return [{ label: 'No Recent Projects', enabled: false }];
+  }
+
+  return recentProjects.map((projectPath) => ({
+    label: projectPath,
+    click: () => {
+      void switchToRecentProject(projectPath);
+    },
+  }));
+}
+
+// Build a minimal application menu in desktop-runtime mode, adding
+// "Switch Project..." and "Open Recent" items. In dev/scaffold mode the menu
+// is left untouched.
+function installDesktopMenu() {
+  if (!isDesktopRuntime()) {
+    return;
+  }
+
+  const isMac = process.platform === 'darwin';
+  const template = [];
+
+  if (isMac) {
+    template.push({ role: 'appMenu' });
+  }
+
+  template.push({
+    label: 'File',
+    submenu: [
+      {
+        label: 'Switch Project...',
+        accelerator: 'CmdOrCtrl+Shift+O',
+        click: () => {
+          void switchProject();
+        },
+      },
+      {
+        label: 'Open Recent',
+        submenu: buildOpenRecentSubmenu(),
+      },
+      { type: 'separator' },
+      isMac ? { role: 'close' } : { role: 'quit' },
+    ],
+  });
+
+  template.push({ role: 'editMenu' });
+  template.push({ role: 'viewMenu' });
+  template.push({ role: 'windowMenu' });
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 function startBackendProcess() {
@@ -410,6 +692,15 @@ function createMainWindow() {
       return;
     }
 
+    // A project switch in progress is already tearing down/rebuilding the
+    // backend and driving its own splash/failure rendering. An in-flight
+    // request against the old (now-stopped) backend can fail-load right as
+    // that happens; without this guard it would flash the generic failure
+    // page over the switch's own splash/result UI.
+    if (switching) {
+      return;
+    }
+
     const failedUrl = validatedUrl || getAppUrl();
     const errorLabel = `${errorDescription} (${errorCode})`;
     const html = buildLoadFailurePage(failedUrl, errorLabel);
@@ -449,6 +740,12 @@ ipcMain.handle('parse-desktop:get-config', () => {
 
 ipcMain.handle('parse-desktop:ping', () => {
   return 'pong';
+});
+
+// Picker affordance for the no-project / recovery page and any renderer that
+// wants to switch projects. Mirrors the retry-backend pattern.
+ipcMain.handle('parse-desktop:pick-project', async () => {
+  return switchProject();
 });
 
 // Retry affordance for the recovery page: re-run supervised backend startup.
@@ -497,6 +794,7 @@ app.whenReady().then(() => {
   if (!isDesktopRuntime()) {
     startBackendProcess();
   }
+  installDesktopMenu();
   createMainWindow();
 
   app.on('activate', () => {
