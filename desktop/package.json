@@ -11,6 +11,7 @@
     "check": "node --check main.js && node --check preload.js && node --check dev-launch.js && node --check backend-supervisor.js && node --check project-store.js"
   },
   "devDependencies": {
-    "electron": "^30.0.0"
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
   }
 }
