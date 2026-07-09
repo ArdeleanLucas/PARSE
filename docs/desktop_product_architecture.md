@@ -1,12 +1,12 @@
-> **ARCHIVED 2026-04-26** — Option 3 (desktop platform pivot) is cancelled per Lucas decision. This document is preserved for historical context only; do not implement against it. The rebuild lane focuses exclusively on Option 1 (web/React monolith decomposition + parity evidence) until further notice.
-
 # PARSE Desktop Product Architecture (Living Plan)
 
-> **Historical archived document:** Option 3 (desktop platform pivot) is cancelled. This file is preserved for context only and should not be treated as the active PARSE architecture reference.
+> **UN-ARCHIVED 2026-07-08** — Option 3 (desktop platform pivot) was revived by Lucas decision **2026-07-04** (see AGENTS.md "Scope: Desktop (Option 3) REVIVED 2026-07-04", and the "Desktop / installable product" section in `CLAUDE.md`). This document was un-archived and reconciled against current code on 2026-07-08. The goal is a downloadable, installable desktop app — macOS first, then Windows — that a fieldwork linguist can install and use without today's terminal / Linux-WSL launcher. The existing React SPA + Python backend stay working throughout; desktop packaging wraps them, it does not replace them.
 >
-> **Last updated:** 2026-03-27
-> **Status:** Archived historical plan
-> **Scope:** Local desktop product foundation for macOS + Windows (Electron shell + local Python engine)
+> **Last updated:** 2026-07-08
+> **Status:** Active living plan (revived)
+> **Scope:** Local desktop product foundation for macOS + Windows (Electron shell + frozen local Python engine)
+>
+> **2026-07-08 reconciliation note:** this plan was refreshed against the current codebase after ~4 months archived. Corrections from that pass: the offset/spectrogram compute routes are now **implemented** (`/api/spectrogram`, `/api/offset/detect`, `/api/offset/detect-from-pair`, `/api/offset/apply`), so §17 blocker #4 is resolved; the project-lifecycle gap is reframed (neither frontend nor backend exposes a project open/create flow today — the root is bound to `PARSE_WORKSPACE_ROOT` at launcher time). The remaining genuine blockers are runtime/dependency packaging, security defaults, the packaging pipeline itself, and the project-lifecycle contract.
 
 ---
 
@@ -219,24 +219,26 @@ Use Electron `app.getPath('userData')` as root.
 
 ## 8) Python runtime strategy
 
+**Decision (2026-07-08): freeze the backend per platform.** The backend and its heavy stack (`torch`, `torchaudio`, `transformers`, `faster-whisper`/ctranslate2, `silero-vad`, `phonemizer`) are packaged into a self-contained per-platform runtime (PyInstaller or Nuitka) against a pinned lockfile. A normal user never installs Python or runs `pip`. This costs a larger installer (order 1–3 GB once torch is included) but delivers true install-and-go, fully offline, which is the product goal for non-technical fieldwork users.
+
 ## 8.1 Target strategy by milestone
 
-### Alpha (internal)
-- Allow system Python for speed of iteration.
+### Alpha (internal spike)
+- System Python is acceptable **only** for the Gate A shell/lifecycle spike, to move fast.
 - Desktop preflight checks required at startup.
 
 ### Beta
-- Bundle managed Python runtime per OS/arch.
-- Bundle core wheels (offline install capability).
+- Frozen per-OS/arch runtime is the deliverable (no system Python dependency).
+- Lockfile + wheelhouse drive a reproducible freeze; offline-capable.
 
 ### Public
-- Ship fully managed Python runtime with deterministic dependency set.
-- No external Python requirement for normal users.
+- Frozen runtime with deterministic dependency set, signed and notarized.
+- No external Python requirement for any user.
 
 ## 8.2 Runtime management requirements
 
-1. Runtime version pinned (example: Python 3.11.x target; final pin TBD).
-2. Dependency installation deterministic (lockfile + wheelhouse).
+1. Runtime version pinned to **Python 3.10–3.12** (the range `python/requirements.txt` currently supports). Python 3.13+ is blocked until `python/server.py` stops importing the removed `cgi` module; that removal is a prerequisite for pinning a newer runtime.
+2. Dependency installation deterministic (lockfile + wheelhouse). `python/requirements.txt` today uses floor pins (`>=`) with no lockfile — producing a release-grade lock is a Gate B prerequisite (see §9.1 and the readiness checklist B2).
 3. Backend startup must emit explicit diagnostics when dependency missing.
 4. Runtime integrity check on app startup (version + hash metadata).
 
@@ -258,17 +260,47 @@ Use Electron `app.getPath('userData')` as root.
 3. **Cloud AI optional**
    - OpenAI/xAI/Ollama connectors (provider-dependent)
 
-## 9.2 Model strategy
+## 9.2 Model strategy — bundled baseline + plug-and-play registry
 
-- Maintain a **model manifest** (name, version, checksum, size, license, min runtime).
-- User-selectable model cache location (default in app user-data models dir).
-- Download manager with pause/resume + checksum verification.
-- Clear fallback when preferred model unavailable.
+**Decision (2026-07-08):**
 
-## 9.3 Known model portability requirement
+- **Bundle as standard:** a general STT model (Whisper via `faster-whisper`) and the wav2vec2 IPA/alignment model. These ship in the installer so a fresh install can transcribe and produce IPA fully offline on first run.
+- **Do not bundle any orthography (ORTH) model.** ORTH is inherently language-specific — there is no sensible default. `config/phonetic_rules.json` / SK presets ship as named presets, not defaults (this dovetails with the Beta linguistic-portability lane, checklist B6).
+- **Plug-and-play models are a first-class design goal, not a nice-to-have.** A survey linguist working on a language PARSE has never seen must be able to obtain a model (for example `razhan/whisper-base-sdh` for Southern Kurdish) and "plug it in" per project/language without editing code or config files by hand. This needs deliberate design — see §9.4.
 
-- The `razhan/whisper-base-sdh` faster-whisper path must use a CT2-compatible model artifact in production flow.
-- Do **not** depend on ad-hoc local HF cache structure.
+## 9.3 Model manifest and cache
+
+- Maintain a **model manifest** (name, version, checksum, size, license, min runtime, task type STT/ORTH/IPA, and `(language, script)` applicability).
+- User-selectable model cache location (default in the app user-data `models/` dir).
+- Download/import manager with checksum verification and a clear fallback when a preferred model is unavailable.
+
+## 9.4 Plug-and-play model design (open design task)
+
+The goal: a linguist finds a model and installs it into PARSE the way they install a font or a Praat plugin — no terminal.
+
+Design surface to specify before Beta:
+
+1. **A model package contract** — what a "pluggable PARSE model" is on disk (the model artifact + a manifest entry declaring task, `(language, script)`, runtime, license, checksum). CT2-compatible artifacts for the faster-whisper path; do **not** depend on ad-hoc local HF cache structure.
+2. **An install path** — "Add model…" in Settings > Models that accepts a local file/folder (offline field use) and, optionally, a curated download source. Verify checksum, register in the manifest, surface license.
+3. **Per-project binding** — a project selects which STT/ORTH/IPA model it uses; selection is not hardcoded (see the Beta linguistic-portability lane, checklist B6 — "STT model is selected per project, not hardcoded to `razhan/whisper-base-sdh`").
+4. **Discoverability** — a lightweight, community-extensible catalog of known models per language so survey linguists have a starting point, without PARSE having to bundle or endorse every one.
+
+This subsection is the anchor for that design work; it is intentionally not yet a finished spec.
+
+## 9.5 Local AI + MCP tool surface (offline)
+
+**Decision (2026-07-08): the offline desktop build ships an MCP server that a local AI model can drive.** PARSE's ~67-tool surface is already exposed two ways in the current codebase, and both carry into the frozen desktop app:
+
+- **stdio MCP server** — `python/adapters/mcp_adapter.py` (`main()` → `run_stdio_async()`). This is the standard transport a local MCP client/agent spawns as a subprocess. It must be reachable in the frozen build without system Python — expose it as an explicit entrypoint of the packaged binary (e.g. a `--mcp-stdio` subcommand) or a second bundled launcher, so a local MCP client can spawn it.
+- **loopback HTTP MCP bridge** — `/api/mcp/exposure`, `/api/mcp/tools`, `/api/mcp/tools/{toolName}` on the backend HTTP server. Because the frozen backend already runs this server, any local process (including a local agent) can call the tools over `127.0.0.1` for free.
+
+A local LLM path already exists: `OllamaProvider` (`python/ai/providers/ollama.py`, `http://localhost:11434`). So a fully-offline loop — local model ↔ PARSE MCP tools, entirely on the machine — is coherent today at the code level.
+
+Design points to settle before Beta:
+
+1. **Security interaction.** Desktop hardening adds a renderer↔backend session token and loopback-only bind (§14). That hardening must not lock out a legitimate local MCP client. Define how a local agent authenticates to the HTTP MCP bridge (e.g. a readable local token file in user-data, or a scoped localhost allowance for the MCP bridge). The stdio adapter is process-spawned and sidesteps the HTTP token question.
+2. **Frozen stdio entrypoint.** Confirm the packaged app can launch the stdio adapter as a child process from a local MCP client config with no system Python.
+3. **Bundling a local model runtime is a separate, optional decision.** PARSE talks to an Ollama instance if one is present; whether the installer also bundles/installs a local model runtime for turnkey offline AI is a scope question tracked separately. The MCP *server* (PARSE's tools) is available regardless of which model, if any, is installed.
 
 ---
 
@@ -457,11 +489,10 @@ Annotate + Compare are unified in `src/ParseUI.tsx` (React SPA), sharing stores,
 
 2. ~~Annotate mode is still monolithic/localStorage-first~~ — **resolved as a portability blocker.** Annotate + Compare now live in the unified React shell with shared Zustand stores; remaining workflow hardening is follow-up polish rather than a legacy-architecture blocker.
 
-3. **Project API contract mismatch**
-   - Frontend modules call `/api/project` and `/project.json` save paths, but backend currently does not expose `/api/project` write route.
+3. **No project-lifecycle contract or UI** (reframed 2026-07-08)
+   - There is no `/api/project` create/open/recent route, and no open/create/recent-project UI in `src/`. The project root is bound to `PARSE_WORKSPACE_ROOT` at launcher time. A desktop app needs a UI-driven open/create flow and a backend that can switch project roots at runtime. (The older "frontend calls `/api/project` but backend doesn't expose it" framing is itself stale — neither side has it now.) `project.json` is written today only as a side effect of speaker registration (`python/server_routes/media.py`).
 
-4. **Compute endpoint expectation mismatch**
-   - Frontend expects offset/spectrogram compute routes; backend currently supports cognate compute flow only.
+4. ~~Compute endpoint expectation mismatch~~ — **resolved (2026-07-08).** `/api/spectrogram`, `/api/offset/detect`, `/api/offset/detect-from-pair`, and `/api/offset/apply` are all implemented in the current backend.
 
 5. **No formal dependency lock/packaging manifests**
    - Python dependency footprint is non-trivial (audio, STT, NLP, optional providers), but there is no release-grade manifest/lockfile strategy in repo yet.
@@ -489,6 +520,17 @@ Annotate + Compare are unified in `src/ParseUI.tsx` (React SPA), sharing stores,
 ---
 
 ## 19) Concrete recommended next tasks (buildable sequence)
+
+### Staged build sequence (2026-07-08 revival, macOS first → Windows next)
+
+Each stage gates on both its Gate A/B/C criteria (see the readiness checklist) and this repo's test suite. The existing web/Python app keeps working throughout — all desktop hardening sits behind a desktop-runtime flag so the browser/Vite dev flow is untouched.
+
+- **Stage 0 — Refresh the plan (docs only).** This document + the readiness checklist + `desktop/README.md`, un-archived and reconciled. *(This stage.)*
+- **Stage 1 — Gate A shell + lifecycle spike (macOS).** Desktop-runtime backend hardening (loopback default, no wildcard CORS, per-session renderer↔backend token), ephemeral port + readiness handshake, Electron supervises the backend process (spawn → health → restart → clean shutdown).
+- **Stage 2 — Gate A project lifecycle.** `/api/project` open/create/recent + a front-end open/create screen; backend accepts a project root at runtime.
+- **Stage 3 — Gate B packaging (macOS).** Dependency lockfile + wheelhouse; frozen per-platform runtime (§8); electron-builder DMG/zip for arm64; ffmpeg/ffprobe policy; CPU-only default with GPU auto-fallback; bundled Whisper + wav2vec2 and the plug-and-play model install path (§9.4). Install-test the unsigned build.
+- **Stage 4 — Gate C (macOS).** Code signing + notarization (Lucas's identity — a required pause point), update channel, migration/backup, QA smoke matrix.
+- **Then Windows.** Replay Stages 3–4 with an NSIS installer, win-x64, ffmpeg bundling, and signing.
 
 ## Foundation contracts (no disruptive rewrites)
 
@@ -526,6 +568,11 @@ Annotate + Compare are unified in `src/ParseUI.tsx` (React SPA), sharing stores,
 | 2026-03-27 | Desktop direction = Electron shell + local Python backend | **Accepted (planning)** |
 | 2026-03-27 | Boundary preference = localhost HTTP for core API, IPC only for native shell ops | **Accepted (planning)** |
 | 2026-03-27 | This document is canonical living desktop plan | **Accepted** |
+| 2026-07-08 | Option 3 desktop direction revived; macOS first, then Windows | **Accepted (revived)** |
+| 2026-07-08 | Python runtime packaging = freeze per platform (PyInstaller/Nuitka) against a pinned lockfile; no user Python | **Accepted** |
+| 2026-07-08 | Ship Whisper (STT) + wav2vec2 (IPA) as standard bundled models; ship no ORTH model; make models plug-and-play per project/language (§9.4) | **Accepted** |
+| 2026-07-08 | Offset/spectrogram compute routes confirmed implemented; §17 blocker #4 closed | **Verified** |
+| 2026-07-08 | Offline desktop build ships an MCP server (stdio adapter + loopback HTTP bridge) a local AI model can drive; local-LLM path already exists via OllamaProvider (§9.5) | **Accepted** |
 
 ---
 

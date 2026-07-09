@@ -1,7 +1,7 @@
 # PARSE Desktop Distribution Readiness Checklist
 
 This checklist is the release gate companion to:
-- `docs/archive/desktop_product_architecture.md` (historical architecture reference; Option 3 is cancelled)
+- `docs/desktop_product_architecture.md` (the active living architecture plan; Option 3 revived 2026-07-08)
 - `docs/plans/generalize-beyond-southern-kurdish.md` (linguistic portability work tied to the Beta gate)
 
 Use this file to track practical readiness for shipping PARSE Desktop on macOS + Windows.
@@ -19,9 +19,10 @@ Use this file to track practical readiness for shipping PARSE Desktop on macOS +
 
 ## Status snapshot (update per milestone)
 
-- **Current target milestone:** Pre-implementation planning
-- **Overall readiness:** Not started
-- **Blocker count:** TBD
+- **Current target milestone:** Gate A — Internal Alpha (macOS), revived 2026-07-08
+- **Overall readiness:** Plan refreshed; no packaging work started yet
+- **Open blockers (2026-07-08):** frozen Python runtime + dependency lock; desktop-hardened security defaults (`0.0.0.0`/CORS today); packaging pipeline (no electron-builder/freeze config); project-lifecycle contract + UI. Offset/spectrogram compute-route mismatch is **resolved** (routes implemented).
+- **Key decisions:** runtime = freeze per platform (PyInstaller/Nuitka); bundle Whisper + wav2vec2, no ORTH model, models plug-and-play per project (see architecture §9.2–§9.4).
 
 ---
 
@@ -76,13 +77,15 @@ Goal: usable by external testers on macOS + Windows with managed runtime.
 
 ## B2) Python runtime/dependencies
 
-- [ ] Managed Python runtime strategy implemented (no required manual Python install).
-- [ ] Deterministic dependency set documented (manifest/lock).
+- [ ] Frozen per-platform Python runtime implemented (PyInstaller/Nuitka; no required manual Python install). Pin inside Python 3.10–3.12 (3.13 blocked by the `cgi` import in `python/server.py`).
+- [ ] Deterministic dependency set produced (lockfile + wheelhouse). Today `python/requirements.txt` is floor-pinned (`>=`) with no lock — this is a Gate B prerequisite.
 - [ ] Runtime preflight checks surface missing optional dependencies clearly.
-- [ ] ffmpeg/ffprobe availability policy is implemented and documented.
+- [ ] ffmpeg/ffprobe availability policy is implemented and documented (today `python/normalize_audio.py` falls back to a hardcoded Windows Chocolatey path).
 
 ## B3) Data/model management
 
+- [ ] Whisper (STT) and wav2vec2 (IPA) ship bundled so a fresh install transcribes and produces IPA offline. No ORTH model is bundled.
+- [ ] Plug-and-play model install path implemented — a linguist can add a model (e.g. `razhan/whisper-base-sdh`) per project without editing code/config by hand (see architecture §9.4).
 - [ ] Model cache location configurable.
 - [ ] Model download/install flow includes integrity checks.
 - [ ] CPU-only mode works without GPU dependencies.
@@ -116,6 +119,7 @@ See `docs/plans/generalize-beyond-southern-kurdish.md` for the full work breakdo
 - [ ] Navigation hardening blocks unexpected external page loads.
 - [ ] IPC surface uses allowlisted channels only.
 - [ ] No mandatory remote CDN dependency in packaged desktop build.
+- [ ] Local MCP access preserved under hardening: PARSE's MCP tool surface (stdio adapter + loopback HTTP bridge) remains usable by a local AI model in the frozen build, and the session-token/loopback hardening does not lock out a legitimate local MCP client (see architecture §9.5).
 
 ---
 
@@ -194,8 +198,8 @@ These items should be tracked continuously, not only at gate boundaries.
 
 ## Known current blockers to clear before beta/public
 
-- [ ] Frontend/Backend project save contract mismatch (`/api/project` expectations vs implementation).
-- [ ] Compute endpoint mismatch for offset/spectrogram flows.
+- [ ] No project-lifecycle contract or UI: no `/api/project` create/open/recent route and no open/create/recent-project UI; project root is bound to `PARSE_WORKSPACE_ROOT` at launcher time.
+- [x] ~~Compute endpoint mismatch for offset/spectrogram flows~~ — resolved 2026-07-08; `/api/spectrogram` and the three `/api/offset/*` routes are implemented.
 - [x] ~~Legacy vanilla-JS entrypoints still in the repo — Stage 3 of docs audit 2026-04-20.~~ Cleared in PR #58.
 - [x] ~~Legacy launcher scripts (`start_parse.sh`, `Start Review Tool.bat`) still reference legacy paths — cleared in Stage 3.~~ Cleared in PR #58.
 - [ ] Desktop security defaults not yet hardened (`0.0.0.0`/CORS policy in current backend defaults).
