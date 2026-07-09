@@ -1,0 +1,69 @@
+# electron-builder configuration — PARSE desktop app (macOS, Gate B).
+#
+# This is a STANDALONE config (passed via `--config electron-builder.yml`) so we
+# do NOT have to add a `build` block to desktop/package.json. Keeping it separate
+# avoids conflicting with in-flight PRs that touch package.json.
+#
+# What this produces: an unsigned macOS `.dmg` + `.zip` for arm64 that bundles
+# the PyInstaller-frozen backend under `Contents/Resources/backend/`.
+#
+# Signing/notarization is Gate C, intentionally OFF here. The CI workflow sets
+# `CSC_IDENTITY_AUTO_DISCOVERY=false` so electron-builder never tries to sign,
+# and no signing identity is referenced anywhere in this file.
+
+appId: org.parse.desktop
+productName: PARSE
+
+# electron-builder runs from the `desktop/` directory (CI does `cd desktop`),
+# so all paths below are relative to `desktop/`.
+directories:
+  output: build/dist        # artifacts (.dmg/.zip) land in desktop/build/dist/
+  buildResources: build/resources
+
+# Files copied into the app's app.asar (the Electron JS shell). The frozen
+# Python backend is NOT here — it goes in via `extraResources` below so it stays
+# an unpacked, directly-spawnable directory tree.
+files:
+  - main.js
+  - preload.js
+  - backend-supervisor.js
+  - package.json
+  - "!test/**"
+  - "!dev-launch.js"
+  - "!electron-builder.yml"
+
+# Bundle the PyInstaller onedir output into the app.
+#   from: ../dist/parse-backend  (PyInstaller writes dist/parse-backend/ at repo root)
+#   to:   backend                 (-> Contents/Resources/backend/ in the .app)
+# At runtime a packaged main.js can spawn:
+#   `${process.resourcesPath}/backend/parse-backend`
+# (that main.js change is a deliberate stacked follow-up — not in this PR).
+extraResources:
+  - from: ../dist/parse-backend
+    to: backend
+    filter:
+      - "**/*"
+
+# --- macOS target ---------------------------------------------------------- #
+mac:
+  category: public.app-category.education
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
+  # Signing is Gate C. Leave identity unset; the workflow also exports
+  # CSC_IDENTITY_AUTO_DISCOVERY=false so electron-builder does an unsigned build.
+  # hardenedRuntime / notarization are deliberately omitted until Gate C.
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+
+dmg:
+  # Simple default DMG layout; a custom background/window is a later polish item.
+  title: "${productName} ${version}"
+
+# Never publish to a release provider from CI — artifacts are uploaded via the
+# workflow's upload-artifact step instead. The workflow also passes
+# `--publish never` explicitly as a belt-and-suspenders guard.
+publish: null

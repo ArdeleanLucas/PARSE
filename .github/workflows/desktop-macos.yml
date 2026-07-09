@@ -1,0 +1,182 @@
+name: Desktop macOS Packaging
+
+# Gate B: freeze the Python backend with PyInstaller and assemble a macOS DMG/zip
+# via electron-builder, all on a real arm64 macOS runner. This is CI-driven
+# packaging (not local builds) — the freeze needs the heavy ML stack installed,
+# which only happens here.
+#
+# Triggers:
+#   * workflow_dispatch — manual runs (`gh workflow run desktop-macos.yml`).
+#   * push on the packaging branch — so iterating on the spec/config re-runs CI.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - desktop-stage3-packaging-macos
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "18"
+  PYTHON_VERSION: "3.12"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  package-macos:
+    name: Freeze backend + build macOS DMG
+    runs-on: macos-14 # arm64 (Apple silicon) runner.
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # --- Frontend: build the React SPA into dist/ (server + app both serve it). --- #
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # Mirror ci.yml: cache the fully materialized node_modules so repeat runs
+      # can skip `npm ci` for the frontend build.
+      - name: Restore node_modules cache
+        id: node-modules-cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-modules-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-modules-
+
+      - name: Install frontend dependencies
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      # --- Backend: install the heavy stack + PyInstaller, then freeze. --- #
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Restore pip cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-py${{ env.PYTHON_VERSION }}-pip-${{ hashFiles('python/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-py${{ env.PYTHON_VERSION }}-pip-
+
+      - name: Install backend dependencies + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r python/requirements.txt
+          python -m pip install pyinstaller
+
+      # Deterministic-lock deliverable: capture the resolved dependency set from
+      # this real macOS/py3.12 build. Uploaded as an artifact below.
+      - name: Capture resolved dependency lock
+        run: |
+          pip freeze > python/requirements.lock.macos-py312.txt
+          echo "Captured $(wc -l < python/requirements.lock.macos-py312.txt) pinned packages."
+
+      - name: Upload dependency lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: requirements-lock-macos-py312
+          path: python/requirements.lock.macos-py312.txt
+          if-no-files-found: error
+
+      # --- Freeze the backend into dist/parse-backend/. --- #
+      - name: Freeze backend with PyInstaller
+        run: |
+          pyinstaller --noconfirm --clean packaging/parse-backend.spec
+          echo "--- dist/parse-backend/ ---"
+          ls -la dist/parse-backend/ | head -40
+
+      # --- Smoke test: the frozen backend must actually boot and answer health. --- #
+      # This proves the freeze pulled in every runtime dependency. If the binary
+      # never becomes healthy, FAIL the job (no continue-on-error anywhere here).
+      - name: Smoke-test frozen backend (/api/health)
+        run: |
+          set -euo pipefail
+          PORT=8799
+          export PARSE_DESKTOP=1
+          export PARSE_API_PORT="${PORT}"
+          "./dist/parse-backend/parse-backend" >/tmp/parse-backend-smoke.log 2>&1 &
+          backend_pid=$!
+          cleanup() {
+            kill "${backend_pid}" 2>/dev/null || true
+            wait "${backend_pid}" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          healthy=0
+          for _ in $(seq 1 60); do
+            if curl -sf "http://127.0.0.1:${PORT}/api/health" >/tmp/parse-backend-health.json 2>/dev/null; then
+              healthy=1
+              break
+            fi
+            if ! kill -0 "${backend_pid}" 2>/dev/null; then
+              echo "::error::frozen backend exited before serving /api/health"
+              cat /tmp/parse-backend-smoke.log || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          if [ "${healthy}" -ne 1 ]; then
+            echo "::error::frozen backend never became healthy within 60s"
+            cat /tmp/parse-backend-smoke.log || true
+            exit 1
+          fi
+
+          echo "Health response:"
+          cat /tmp/parse-backend-health.json
+          echo
+          echo "Frozen backend health smoke test PASSED."
+
+      - name: Upload frozen backend smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frozen-backend-smoke-log
+          path: /tmp/parse-backend-smoke.log
+          if-no-files-found: ignore
+
+      # --- Package: electron-builder assembles the DMG/zip and bundles the freeze. --- #
+      - name: Install desktop shell dependencies
+        run: |
+          cd desktop
+          npm ci
+
+      - name: Build macOS DMG + zip (unsigned)
+        env:
+          # Signing/notarization is Gate C. Force an unsigned build so
+          # electron-builder does not attempt to discover a signing identity.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          cd desktop
+          npx electron-builder --config electron-builder.yml --mac --arm64 --publish never
+
+      - name: Upload macOS installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: parse-desktop-macos-arm64
+          path: |
+            desktop/build/dist/*.dmg
+            desktop/build/dist/*.zip
+          if-no-files-found: error
