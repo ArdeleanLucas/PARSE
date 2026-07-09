@@ -53,6 +53,17 @@ REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, os.pardir))  # noqa: F821 (SP
 PYTHON_DIR = os.path.join(REPO_ROOT, "python")
 ENTRY_SCRIPT = os.path.join(PYTHON_DIR, "server.py")
 
+# CRITICAL: put the backend dir on ``sys.path`` at spec-evaluation time.
+# ``collect_submodules`` / ``collect_*`` import the target package via the LIVE
+# interpreter's ``sys.path`` while this spec is being evaluated — they do NOT
+# honor PyInstaller's ``pathex`` (that only affects the frozen import graph).
+# Without this, ``collect_submodules('server_routes')`` (and every other
+# first-party package) silently returns an empty list, and dynamically imported
+# modules like ``server_routes.progress_ipc`` get dropped from the freeze.
+for _p in (PYTHON_DIR, REPO_ROOT):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 # ``pathex`` must include ``python/`` so first-party imports resolve
 # (``import server``, ``from ai.chat_tools import ...``, ``app.http.*``,
 # ``compare.*``, ``server_routes.*``, ``shared.*``, ``external_api.*``, ...).
@@ -121,9 +132,44 @@ for pkg in FIRST_PARTY_PACKAGES:
     if not os.path.isdir(pkg_path):
         continue
     try:
-        hiddenimports += collect_submodules(pkg)
+        # Exclude test modules: now that collect_submodules actually enumerates
+        # submodules (see the sys.path fix above), it would otherwise pull in
+        # ``test_*.py`` modules (e.g. ``ai/tools/test_*.py``), which can drag in
+        # the excluded ``pytest`` dev dep or fail on test-only imports.
+        pkg_submodules = collect_submodules(
+            pkg,
+            filter=lambda name: not name.rsplit(".", 1)[-1].startswith("test_") and ".tests" not in name,
+        )
+        if not pkg_submodules:
+            # A first-party package that yields zero submodules almost always
+            # means the collection silently failed (e.g. sys.path regression) —
+            # make it loud so a future silent-miss shows up in the CI freeze log.
+            print(
+                f"[parse-backend.spec] WARNING: collect_submodules({pkg!r}) returned 0 modules",
+                file=sys.stderr,
+            )
+        hiddenimports += pkg_submodules
     except Exception as exc:  # noqa: BLE001
         print(f"[parse-backend.spec] collect_submodules skipped {pkg!r}: {exc}", file=sys.stderr)
+
+# --------------------------------------------------------------------------- #
+# Belt-and-suspenders: top-level single-file first-party modules that live
+# directly under ``python/`` (not inside a package). Dynamic imports —
+# ``importlib.import_module("<topmodule>")`` — may reference these by bare name,
+# and they are not covered by the package-level ``collect_submodules`` above.
+# The entry ``server.py`` is frozen as ``__main__`` and is intentionally skipped.
+# --------------------------------------------------------------------------- #
+try:
+    for _fname in os.listdir(PYTHON_DIR):
+        if not _fname.endswith(".py"):
+            continue
+        if _fname.startswith("test_") or _fname.startswith("__") or _fname == "server.py":
+            continue
+        if not os.path.isfile(os.path.join(PYTHON_DIR, _fname)):
+            continue
+        hiddenimports.append(_fname[:-3])  # strip ".py" -> bare module name
+except Exception as exc:  # noqa: BLE001 - defensive: never let this optional walk abort the freeze.
+    print(f"[parse-backend.spec] top-level module walk skipped: {exc}", file=sys.stderr)
 
 # --------------------------------------------------------------------------- #
 # Extra data files that ``collect_all`` may not associate with a top-level
