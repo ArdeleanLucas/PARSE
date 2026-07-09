@@ -70,6 +70,7 @@ export default defineConfig({
       // (and fail with React-null errors against each worktree's own deps).
       '**/.claude/**',
       'src/__tests__/apiRegression*.test.ts',  // live integration tests — run with: npx vitest run --config vitest.integration.ts
+      'desktop/**', // desktop/ uses Node's built-in node:test runner, not vitest
     ],
   },
   build: {
