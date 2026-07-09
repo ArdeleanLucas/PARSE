@@ -98,6 +98,12 @@ from app.http.media_search_handlers import (
     build_get_lexeme_search_response as _app_build_get_lexeme_search_response,
     build_get_spectrogram_response as _app_build_get_spectrogram_response,
 )
+from app.http.desktop_runtime import (
+    build_health_payload as _app_build_health_payload,
+    is_desktop_mode as _app_is_desktop_mode,
+    resolve_cors_headers as _app_resolve_cors_headers,
+    resolve_host as _app_resolve_host,
+)
 from app.http.speech_annotation_handlers import (
     SpeechAnnotationHandlerError as _app_SpeechAnnotationHandlerError,
     build_get_stt_segments_response as _app_build_get_stt_segments_response,
@@ -1012,6 +1018,16 @@ def _compute_checkpoint(label: str, **kv: Any) -> None:
         pass
 
 
+def _resolve_host() -> str:
+    """Resolve the bind host, honoring desktop-mode loopback + PARSE_HOST.
+
+    Default (non-desktop) behavior returns the module ``HOST`` constant
+    (``0.0.0.0``) unchanged; desktop mode (``PARSE_DESKTOP=1``) defaults to
+    loopback ``127.0.0.1`` unless ``PARSE_HOST`` is explicitly set.
+    """
+    return _app_resolve_host(HOST)
+
+
 def _resolve_http_port() -> int:
     for env_key in ("PARSE_PORT", "PARSE_API_PORT"):
         raw = str(os.environ.get(env_key) or "").strip()
@@ -1290,8 +1306,17 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         self._add_cors_headers()
         super().end_headers()
 
+    def _cors_headers_for_request(self) -> Dict[str, str]:
+        """CORS headers for this request.
+
+        Default (non-desktop) mode returns ``CORS_HEADERS`` verbatim (wildcard
+        ``*``). Desktop mode (``PARSE_DESKTOP=1``) drops the wildcard and
+        reflects only loopback ``Origin`` values.
+        """
+        return _app_resolve_cors_headers(CORS_HEADERS, origin=self.headers.get("Origin"))
+
     def _add_cors_headers(self) -> None:
-        for key, value in CORS_HEADERS.items():
+        for key, value in self._cors_headers_for_request().items():
             self.send_header(key, value)
 
     def _request_path(self) -> str:
@@ -1323,6 +1348,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _send_json(self, status: HTTPStatus, payload: Dict[str, Any]) -> None:
         _app_send_json_response(self, status, payload)
+
+    def _api_get_health(self) -> None:
+        """Cheap, side-effect-free readiness probe (polled by the desktop shell)."""
+        self._send_json(HTTPStatus.OK, _app_build_health_payload())
 
     def _send_text(self, status: HTTPStatus, body: str, *, content_type: str) -> None:
         encoded = body.encode("utf-8")
@@ -1425,6 +1454,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._api_get_enrichments()
             return
 
+        if request_path == "/api/health": self._api_get_health(); return
         if request_path == "/api/config": self._api_get_config(); return
         if request_path == "/api/survey-overlap": self._api_get_survey_overlap(); return
 
@@ -2017,11 +2047,12 @@ def main() -> None:
     _install_route_bindings(); _require_route_export("_load_job_snapshots")()
 
     http_port = _resolve_http_port()
-    server_address = (HOST, http_port)
+    bind_host = _resolve_host()
+    server_address = (bind_host, http_port)
     httpd = _BoundedThreadHTTPServer(server_address, RangeRequestHandler)
 
     try:
-        _start_websocket_sidecar(host=HOST, port=_resolve_ws_port())
+        _start_websocket_sidecar(host=bind_host, port=_resolve_ws_port())
     except Exception as exc:
         print(
             "[WARN] WebSocket streaming disabled: {0}".format(exc),

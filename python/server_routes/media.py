@@ -1211,7 +1211,7 @@ def _api_get_spectrogram(self) -> None:
     """Return (or generate) a PNG spectrogram for a clip; cached on disk."""
     import spectrograms as spectro_module
     try:
-        response = _server._app_build_get_spectrogram_response(self.path, spectro_module=spectro_module, normalize_speaker_id=_server._normalize_speaker_id, resolve_project_path=_server._resolve_project_path, project_root=_server._project_root(), annotation_primary_source_wav=_server._annotation_primary_source_wav, cors_headers=_server.CORS_HEADERS)
+        response = _server._app_build_get_spectrogram_response(self.path, spectro_module=spectro_module, normalize_speaker_id=_server._normalize_speaker_id, resolve_project_path=_server._resolve_project_path, project_root=_server._project_root(), annotation_primary_source_wav=_server._annotation_primary_source_wav, cors_headers=self._cors_headers_for_request())
     except _server._app_MediaSearchHandlerError as exc:
         raise _server.ApiError(exc.status, exc.message) from exc
     self.send_response(response.status)
