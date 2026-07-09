@@ -69,3 +69,20 @@ test('resolveBackendLauncher uses parse-backend.exe on win32 when packaged', () 
     `expected a .exe suffix, got ${launcher.executable}`
   );
 });
+
+test('packaged launcher carries no python fallback command (main.js wires backendCommand: null)', () => {
+  // main.js computes `backendCommand: launcher.command || null` — so when
+  // packaged the supervisor must receive NO python string. Assert the launcher
+  // itself never surfaces a python command in packaged mode, on either OS.
+  for (const platform of ['darwin', 'win32']) {
+    const launcher = resolveBackendLauncher(true, '/RES', { platform });
+    assert.equal(launcher.command, undefined, `${platform}: no shell command when packaged`);
+    // Mirror the exact expression main.js uses; it must collapse to null.
+    assert.equal(launcher.command || null, null, `${platform}: main.js backendCommand resolves to null`);
+    assert.ok(launcher.executable, `${platform}: packaged launcher must set an executable`);
+    assert.ok(
+      !/python/i.test(launcher.executable),
+      `${platform}: packaged executable must not be python (${launcher.executable})`
+    );
+  }
+});

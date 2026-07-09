@@ -8,7 +8,7 @@
     "start": "electron .",
     "dev": "node dev-launch.js",
     "test": "node --test \"test/**/*.test.js\"",
-    "check": "node --check main.js && node --check preload.js && node --check dev-launch.js && node --check backend-supervisor.js && node --check backend-launcher.js && node --check project-store.js"
+    "check": "node --check main.js && node --check preload.js && node --check dev-launch.js && node --check backend-supervisor.js && node --check backend-launcher.js && node --check project-store.js && node --check afterPack.js"
   },
   "devDependencies": {
     "electron": "^30.0.0",

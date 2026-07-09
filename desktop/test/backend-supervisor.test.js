@@ -223,3 +223,51 @@ test('start() fails loudly when the packaged executable is missing (no python fa
   );
   assert.equal(supervisor.isRunning, false);
 });
+
+test('packaged mode with backendCommand:null + a valid executable spawns the exe (no python fallback)', async () => {
+  // Mirror exactly what main.js passes when packaged: backendCommand is null,
+  // and the frozen executable is the only spawn source. This proves the null
+  // command never triggers a `python` fallback when an executable is present.
+  const { dir, exePath } = writeStubExecutable();
+
+  const supervisor = createBackendSupervisor({
+    backendCommand: null,
+    backendExecutable: exePath,
+    backendArgs: [],
+    pollIntervalMs: 100,
+    readinessTimeoutMs: 8000,
+    shutdownTimeoutMs: 3000,
+    onLog: () => {},
+  });
+
+  const result = await supervisor.start();
+  assert.equal(supervisor.isReady, true);
+  assert.equal(await isPortListening(result.port), true, 'frozen exe should be listening');
+
+  await supervisor.stop();
+  assert.equal(supervisor.isRunning, false);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('packaged mode with backendCommand:null + a missing executable fails loudly (no python fallback)', async () => {
+  // The dangerous case: packaged, null command, and the frozen binary absent.
+  // The supervisor must throw the missing-exe guard rather than quietly
+  // spawning `python`.
+  const missing = path.join(os.tmpdir(), 'parse-frozen-null-cmd-missing', 'parse-backend');
+
+  const supervisor = createBackendSupervisor({
+    backendCommand: null,
+    backendExecutable: missing,
+    backendArgs: [],
+    pollIntervalMs: 100,
+    readinessTimeoutMs: 2000,
+    onLog: () => {},
+  });
+
+  await assert.rejects(
+    () => supervisor.start(),
+    /Frozen PARSE backend is missing or not executable/
+  );
+  assert.equal(supervisor.isRunning, false);
+});

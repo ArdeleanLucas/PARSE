@@ -403,7 +403,13 @@ async function startSupervisedBackend() {
     supervisor = createBackendSupervisor({
       projectRoot: selectedProjectRoot || getBackendCwd(),
       userDataRoot: app.getPath('userData'),
-      backendCommand: launcher.command || getBackendCommand(),
+      // Dev mode gets the python shell command; packaged mode passes NO python
+      // fallback (null). When packaged, the frozen executable is what runs, so a
+      // python command must never be handed to the supervisor — otherwise a
+      // future refactor could silently spawn `python`. The supervisor prefers
+      // `backendExecutable`, and with `backendCommand: null` a missing or
+      // unusable frozen binary fails loudly instead of quietly falling back.
+      backendCommand: launcher.command || null,
       backendExecutable: launcher.executable || null,
       backendArgs: launcher.args || [],
       onLog: desktopBackendLog,

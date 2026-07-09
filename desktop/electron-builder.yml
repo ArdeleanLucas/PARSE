@@ -28,10 +28,17 @@ files:
   - preload.js
   - backend-supervisor.js
   - backend-launcher.js
+  - project-store.js
+  - afterPack.js
   - package.json
   - "!test/**"
   - "!dev-launch.js"
   - "!electron-builder.yml"
+
+# Guarantee the frozen backend's executable bit survives the extraResources copy
+# (see afterPack.js). Without it, a dropped +x bit makes the shipped .app trip
+# the supervisor's missing-exe guard and never launch its backend.
+afterPack: ./afterPack.js
 
 # Bundle the PyInstaller onedir output into the app.
 #   from: ../dist/parse-backend  (PyInstaller writes dist/parse-backend/ at repo root)
