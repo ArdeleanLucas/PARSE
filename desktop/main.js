@@ -22,6 +22,14 @@ let supervisor = null;
 let supervisorUrl = null;
 let backendLogStream = null;
 
+// Re-entrancy guard for switchProject(). Two quick fires (menu accelerator +
+// pick-project IPC, or a double click) can otherwise interleave stop()/start()
+// calls on the supervisor and orphan a Python backend process. While a switch
+// is in flight, subsequent switch attempts are no-ops, and did-fail-load
+// recovery rendering is suppressed so a torn-down backend's in-flight request
+// can't flash the failure page over the splash screen.
+let switching = false;
+
 function isDesktopRuntime() {
   return process.env.PARSE_DESKTOP === '1';
 }
@@ -430,20 +438,11 @@ async function launchDesktopRuntime() {
   }
 }
 
-// Tear down the running backend, prompt for a new project, then boot the
-// backend against it and load the new URL. Used by the Switch Project menu item
-// and by the pick-project IPC (recovery / no-project page).
-async function switchProject() {
-  if (!isDesktopRuntime()) {
-    return { ok: false, reason: 'not-desktop-runtime' };
-  }
-
-  const chosen = await showProjectPicker();
-  if (!chosen || !projectStore.isValidProjectDir(chosen)) {
-    // Cancelled: leave the current session (if any) untouched.
-    return { ok: false, reason: 'cancelled' };
-  }
-
+// Tear down the running backend, then boot it against `targetPath` and load
+// the new URL. Shared by switchProject() (native picker) and the Open Recent
+// menu (an explicit already-known path). Callers are responsible for the
+// `switching` re-entrancy guard.
+async function switchToProjectPath(targetPath) {
   await renderHtml(buildSplashPage('Switching PARSE project...'));
 
   try {
@@ -454,7 +453,9 @@ async function switchProject() {
     supervisor = null;
     supervisorUrl = null;
 
-    commitSelectedProject(chosen);
+    commitSelectedProject(targetPath);
+    // Refresh the menu so "Open Recent" reflects the just-updated order.
+    installDesktopMenu();
 
     const url = await startSupervisedBackend();
     if (mainWindow) {
@@ -468,8 +469,88 @@ async function switchProject() {
   }
 }
 
-// Build a minimal application menu in desktop-runtime mode, adding a
-// "Switch Project..." item. In dev/scaffold mode the menu is left untouched.
+// Tear down the running backend, prompt for a new project, then boot the
+// backend against it and load the new URL. Used by the Switch Project menu item
+// and by the pick-project IPC (recovery / no-project page).
+//
+// Guarded against re-entrancy: reachable from both the Switch Project menu
+// accelerator (CmdOrCtrl+Shift+O) and the parse-desktop:pick-project IPC, with
+// no natural mutual exclusion otherwise. Two quick fires could interleave
+// supervisor stop()/start() calls and orphan a Python backend process.
+async function switchProject() {
+  if (!isDesktopRuntime()) {
+    return { ok: false, reason: 'not-desktop-runtime' };
+  }
+
+  if (switching) {
+    return { ok: false, reason: 'switch-in-progress' };
+  }
+
+  switching = true;
+  try {
+    const chosen = await showProjectPicker();
+    if (!chosen || !projectStore.isValidProjectDir(chosen)) {
+      // Cancelled: leave the current session (if any) untouched.
+      return { ok: false, reason: 'cancelled' };
+    }
+
+    return await switchToProjectPath(chosen);
+  } finally {
+    switching = false;
+  }
+}
+
+// Switch directly to a known, already-validated project path (no picker
+// dialog). Used by the Open Recent submenu. Shares the same re-entrancy guard
+// as switchProject() since both ultimately tear down/rebuild the supervisor.
+async function switchToRecentProject(targetPath) {
+  if (!isDesktopRuntime()) {
+    return { ok: false, reason: 'not-desktop-runtime' };
+  }
+
+  if (switching) {
+    return { ok: false, reason: 'switch-in-progress' };
+  }
+
+  if (!projectStore.isValidProjectDir(targetPath)) {
+    return { ok: false, reason: 'invalid-project-dir' };
+  }
+
+  switching = true;
+  try {
+    return await switchToProjectPath(targetPath);
+  } finally {
+    switching = false;
+  }
+}
+
+// Build the "Open Recent" submenu from persisted settings. Each entry
+// switches directly to that project path (via switchToRecentProject, which
+// shares the switchProject re-entrancy guard). Shown disabled with a
+// placeholder item when there are no recent projects yet.
+function buildOpenRecentSubmenu() {
+  let recentProjects = [];
+  try {
+    recentProjects = projectStore.readSettings(getSettingsPath()).recentProjects || [];
+  } catch (error) {
+    console.error(`[parse-desktop] could not read recent projects: ${error.message}`);
+  }
+
+  if (recentProjects.length === 0) {
+    return [{ label: 'No Recent Projects', enabled: false }];
+  }
+
+  return recentProjects.map((projectPath) => ({
+    label: projectPath,
+    click: () => {
+      void switchToRecentProject(projectPath);
+    },
+  }));
+}
+
+// Build a minimal application menu in desktop-runtime mode, adding
+// "Switch Project..." and "Open Recent" items. In dev/scaffold mode the menu
+// is left untouched.
 function installDesktopMenu() {
   if (!isDesktopRuntime()) {
     return;
@@ -491,6 +572,10 @@ function installDesktopMenu() {
         click: () => {
           void switchProject();
         },
+      },
+      {
+        label: 'Open Recent',
+        submenu: buildOpenRecentSubmenu(),
       },
       { type: 'separator' },
       isMac ? { role: 'close' } : { role: 'quit' },
@@ -604,6 +689,15 @@ function createMainWindow() {
 
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
     if (!isMainFrame || !mainWindow) {
+      return;
+    }
+
+    // A project switch in progress is already tearing down/rebuilding the
+    // backend and driving its own splash/failure rendering. An in-flight
+    // request against the old (now-stopped) backend can fail-load right as
+    // that happens; without this guard it would flash the generic failure
+    // page over the switch's own splash/result UI.
+    if (switching) {
       return;
     }
 

@@ -79,6 +79,10 @@ function writeSettings(settingsPath, obj) {
 
 // Return a new settings object with `projectPath` moved/added to the front of
 // the recent list (deduped, capped) and recorded as lastProject.
+//
+// The incoming path is normalized with path.resolve() before dedup/storage so
+// that equivalent paths that differ only by a trailing separator (or relative
+// segments) collapse to a single recent entry instead of duplicating.
 function addRecentProject(settings, projectPath) {
   const normalized = normalizeSettings(settings);
 
@@ -86,12 +90,14 @@ function addRecentProject(settings, projectPath) {
     return normalized;
   }
 
-  const deduped = normalized.recentProjects.filter((entry) => entry !== projectPath);
-  const recentProjects = [projectPath, ...deduped].slice(0, RECENT_PROJECTS_CAP);
+  const resolvedPath = path.resolve(projectPath);
+
+  const deduped = normalized.recentProjects.filter((entry) => entry !== resolvedPath);
+  const recentProjects = [resolvedPath, ...deduped].slice(0, RECENT_PROJECTS_CAP);
 
   return {
     recentProjects,
-    lastProject: projectPath,
+    lastProject: resolvedPath,
   };
 }
 
@@ -101,12 +107,16 @@ function addRecentProject(settings, projectPath) {
 function removeRecentProject(settings, projectPath) {
   const normalized = normalizeSettings(settings);
 
+  const resolvedPath = typeof projectPath === 'string' && projectPath.length > 0
+    ? path.resolve(projectPath)
+    : projectPath;
+
   const recentProjects = normalized.recentProjects.filter(
-    (entry) => entry !== projectPath
+    (entry) => entry !== resolvedPath
   );
 
   let lastProject = normalized.lastProject;
-  if (lastProject === projectPath) {
+  if (lastProject === resolvedPath) {
     lastProject = recentProjects.length > 0 ? recentProjects[0] : null;
   }
 
@@ -116,12 +126,16 @@ function removeRecentProject(settings, projectPath) {
 // A directory is a valid project target when it exists and is a directory.
 // A brand-new project is just an empty/new dir the backend will initialize, so
 // validity here does NOT require project.json — see hasProjectJson for that.
+//
+// The input is resolved/normalized before the filesystem check so a
+// hand-edited or otherwise relative `lastProject` value is still handled
+// consistently with the normalized paths written by addRecentProject.
 function isValidProjectDir(dirPath) {
   if (typeof dirPath !== 'string' || dirPath.length === 0) {
     return false;
   }
   try {
-    return fs.statSync(dirPath).isDirectory();
+    return fs.statSync(path.resolve(dirPath)).isDirectory();
   } catch (error) {
     return false;
   }

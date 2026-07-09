@@ -112,6 +112,29 @@ test('addRecentProject ignores empty/non-string paths', () => {
   assert.deepEqual(settings, defaultSettings());
 });
 
+test('addRecentProject normalizes paths so trailing-slash variants dedup', () => {
+  let settings = defaultSettings();
+
+  settings = addRecentProject(settings, '/foo');
+  assert.deepEqual(settings.recentProjects, ['/foo']);
+  assert.equal(settings.lastProject, '/foo');
+
+  // Same directory, trailing slash: should collapse to the single normalized
+  // entry rather than duplicating.
+  settings = addRecentProject(settings, '/foo/');
+  assert.deepEqual(settings.recentProjects, ['/foo']);
+  assert.equal(settings.lastProject, '/foo');
+  assert.equal(settings.recentProjects.length, 1);
+});
+
+test('addRecentProject stores a resolved/normalized path, not the raw input', () => {
+  const settings = addRecentProject(defaultSettings(), '/foo/bar/../baz/');
+
+  assert.deepEqual(settings.recentProjects, [path.resolve('/foo/bar/../baz/')]);
+  assert.equal(settings.recentProjects[0], '/foo/baz');
+  assert.equal(settings.lastProject, '/foo/baz');
+});
+
 test('removeRecentProject drops the entry and resets lastProject when needed', () => {
   let settings = defaultSettings();
   settings = addRecentProject(settings, '/proj/a');
