@@ -100,8 +100,8 @@ If nothing verifies, an actionable error names the override env vars and how to 
 - [ ] Plug-and-play model install path implemented — a linguist can add a model (e.g. `razhan/whisper-base-sdh`) per project without editing code/config by hand (see architecture §9.4).
 - [ ] Model cache location configurable.
 - [ ] Model download/install flow includes integrity checks.
-- [ ] CPU-only mode works without GPU dependencies.
-- [ ] GPU detection + automatic fallback to CPU implemented.
+- [x] CPU-only mode works without GPU dependencies. Device resolution defaults to CPU when no CUDA is present: `resolve_compute_device(stage, config_device=, section_default="auto")` in `python/ai/device.py` maps `"auto"` → `"cuda"` only when `torch.cuda.is_available()`, else `"cpu"`. wav2vec2 IPA is CPU-safe through the same resolver (`python/ai/forced_align.py`, `resolve_compute_device("ipa", ...)`; torch on CPU needs no compute_type). faster-whisper `compute_type` is now device-aware: on a CPU-resolved device `float16` is coerced to `int8` before model load (`python/ai/providers/local_whisper.py`), because ctranslate2 supports `int8`/`int8_float32`/`int16`/`float32` on CPU but not `float16` (which would otherwise silently degrade to `float32` — slower, higher memory). Any other explicit CPU compute_type is honored; GPU keeps `float16`. This lets a frozen CPU-only build run STT/ORTH offline with a supported, low-memory compute type. Covered by `python/test_local_whisper_cpu_compute_type.py`.
+- [x] GPU detection + automatic fallback to CPU implemented. `resolve_compute_device` falls back proactively (an explicit `"cuda"` request on a machine without CUDA resolves to `"cpu"` with a warning) and the faster-whisper loader falls back reactively (a CUDA runtime failure at model load retries `device="cpu"`, `compute_type="int8"`; `python/ai/providers/local_whisper.py`). GPU behavior is otherwise unchanged (`device` startswith `"cuda"` keeps `float16`).
 
 ## B4) Update infrastructure
 

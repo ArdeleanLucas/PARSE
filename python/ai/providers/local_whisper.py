@@ -190,6 +190,29 @@ class LocalWhisperProvider(provider_module.AIProvider):
                 )
             self.compute_type = "int8"
 
+        # Device-aware compute_type coercion for CPU-resolved runs.
+        # ctranslate2 / faster-whisper support int8, int8_float32, int16,
+        # and float32 on CPU, but NOT float16 — a float16 request on CPU is
+        # silently coerced to float32 (slower, higher memory) rather than
+        # PARSE's established CPU convention int8. When ``device`` resolves
+        # to "cpu" (e.g. a CUDA-less machine, including the frozen desktop
+        # build) coerce the one invalid value float16 → int8. Any other
+        # explicit CPU compute_type (int8, float32, int16, int8_float32, …)
+        # is a deliberate user choice and is left untouched. This
+        # generalizes the STT-only, env-gated PARSE_STT_FORCE_CPU coercion
+        # above to the broader resolved-device case, for both stt and ortho
+        # sections; if FORCE_CPU already set int8 the float16 guard simply
+        # does not fire (no double-print). GPU (device startswith "cuda")
+        # keeps float16 unchanged.
+        if self.device == "cpu" and self.compute_type == "float16":
+            print(
+                "[device] Resolved device is CPU; faster-whisper does not "
+                "support compute_type 'float16' on CPU — coercing to 'int8' "
+                "(supported, low-memory) before model load.",
+                file=sys.stderr,
+            )
+            self.compute_type = "int8"
+
         self._whisper_model: Optional[Any] = None
         self._model_source: Optional[str] = None
         self._effective_device: Optional[str] = None
