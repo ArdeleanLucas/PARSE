@@ -1,15 +1,31 @@
 'use strict';
 
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
+
+const { createBackendSupervisor } = require('./backend-supervisor');
 
 const DEFAULT_APP_URL = 'http://127.0.0.1:5173/';
 
 let mainWindow = null;
 let backendProcess = null;
 
+// Desktop-runtime supervisor state (only used when PARSE_DESKTOP === '1').
+let supervisor = null;
+let supervisorUrl = null;
+let backendLogStream = null;
+
+function isDesktopRuntime() {
+  return process.env.PARSE_DESKTOP === '1';
+}
+
 function getAppUrl() {
+  // In desktop-runtime mode the supervisor decides the URL (ephemeral port).
+  if (supervisorUrl) {
+    return supervisorUrl;
+  }
   return process.env.PARSE_APP_URL || DEFAULT_APP_URL;
 }
 
@@ -107,6 +123,190 @@ function buildLoadFailurePage(url, errorMessage) {
 </html>`;
 }
 
+function buildSplashPage(message) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PARSE Desktop</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0b1320;
+      color: #d7e3ff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .card {
+      text-align: center;
+    }
+    h1 { margin: 0 0 12px; font-size: 20px; }
+    p { margin: 0; opacity: 0.8; }
+    .spinner {
+      margin: 24px auto 0;
+      width: 32px;
+      height: 32px;
+      border: 3px solid #294066;
+      border-top-color: #6ea8ff;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Starting PARSE</h1>
+    <p>${escapeHtml(message)}</p>
+    <div class="spinner"></div>
+  </div>
+</body>
+</html>`;
+}
+
+function buildBackendFailurePage(errorMessage) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PARSE Desktop</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0b1320;
+      color: #d7e3ff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .card {
+      width: min(760px, 100%);
+      background: #121d30;
+      border: 1px solid #294066;
+      border-radius: 14px;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+    h1 { margin-top: 0; }
+    code {
+      display: block;
+      margin: 8px 0;
+      padding: 10px;
+      border-radius: 8px;
+      background: #0a101b;
+      border: 1px solid #233755;
+      overflow-wrap: anywhere;
+    }
+    button {
+      margin-top: 12px;
+      padding: 10px 18px;
+      font-size: 15px;
+      color: #0b1320;
+      background: #6ea8ff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button:hover { background: #8bbcff; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>PARSE backend could not start</h1>
+    <p>The desktop shell is running, but the local PARSE backend did not come up.</p>
+    <p><strong>Error:</strong> ${escapeHtml(errorMessage)}</p>
+    <code>Check the backend log at userData/logs/backend.log for details.</code>
+    <button onclick="window.parseDesktop && window.parseDesktop.retryBackend && window.parseDesktop.retryBackend()">Retry</button>
+  </div>
+</body>
+</html>`;
+}
+
+function renderHtml(html) {
+  if (!mainWindow) {
+    return Promise.resolve();
+  }
+  return mainWindow
+    .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+    .catch(() => {
+      // Ignore fallback rendering failures.
+    });
+}
+
+function getBackendLogPath() {
+  return path.join(app.getPath('userData'), 'logs', 'backend.log');
+}
+
+function openBackendLogStream() {
+  if (backendLogStream) {
+    return backendLogStream;
+  }
+  try {
+    const logPath = getBackendLogPath();
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    backendLogStream = fs.createWriteStream(logPath, { flags: 'a' });
+  } catch (error) {
+    console.error(`[parse-desktop] could not open backend log: ${error.message}`);
+    backendLogStream = null;
+  }
+  return backendLogStream;
+}
+
+function desktopBackendLog(chunk, stream) {
+  const target = stream === 'stderr' ? process.stderr : process.stdout;
+  target.write(`[parse-backend] ${chunk}`);
+
+  const logStream = openBackendLogStream();
+  if (logStream) {
+    logStream.write(chunk);
+  }
+}
+
+async function startSupervisedBackend() {
+  if (!supervisor) {
+    supervisor = createBackendSupervisor({
+      projectRoot: getBackendCwd(),
+      userDataRoot: app.getPath('userData'),
+      backendCommand: getBackendCommand(),
+      onLog: desktopBackendLog,
+    });
+
+    supervisor.onExit(({ code, signal }) => {
+      // Backend died after being ready: show recovery UI.
+      supervisorUrl = null;
+      const label = `Backend exited unexpectedly (code=${code}, signal=${signal || 'none'}).`;
+      void renderHtml(buildBackendFailurePage(label));
+    });
+  }
+
+  const { url } = await supervisor.start();
+  supervisorUrl = url;
+  return url;
+}
+
+async function launchDesktopRuntime() {
+  await renderHtml(buildSplashPage('Launching the local PARSE backend...'));
+
+  try {
+    const url = await startSupervisedBackend();
+    if (mainWindow) {
+      await mainWindow.loadURL(url);
+    }
+  } catch (error) {
+    console.error(`[parse-desktop] backend supervision failed: ${error.message}`);
+    await renderHtml(buildBackendFailurePage(error.message));
+  }
+}
+
 function startBackendProcess() {
   if (!shouldAutoLaunchBackend() || backendProcess) {
     return;
@@ -168,8 +368,6 @@ function stopBackendProcess() {
 }
 
 function createMainWindow() {
-  const appUrl = getAppUrl();
-
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 940,
@@ -212,7 +410,7 @@ function createMainWindow() {
       return;
     }
 
-    const failedUrl = validatedUrl || appUrl;
+    const failedUrl = validatedUrl || getAppUrl();
     const errorLabel = `${errorDescription} (${errorCode})`;
     const html = buildLoadFailurePage(failedUrl, errorLabel);
 
@@ -223,6 +421,16 @@ function createMainWindow() {
       });
   });
 
+  if (isDesktopRuntime()) {
+    // Desktop-runtime mode: show a splash, supervise the backend, then load its
+    // ephemeral-port URL once the /api/health handshake succeeds.
+    void launchDesktopRuntime();
+    return;
+  }
+
+  // Dev / scaffold mode: preserve the existing behavior exactly — attach to the
+  // configured PARSE_APP_URL (Vite dev target or built-UI target).
+  const appUrl = getAppUrl();
   mainWindow.loadURL(appUrl).catch((error) => {
     console.error(`[parse-desktop] failed to load ${appUrl}: ${error.message}`);
   });
@@ -243,8 +451,52 @@ ipcMain.handle('parse-desktop:ping', () => {
   return 'pong';
 });
 
+// Retry affordance for the recovery page: re-run supervised backend startup.
+ipcMain.handle('parse-desktop:retry-backend', async () => {
+  if (!isDesktopRuntime()) {
+    return { ok: false, reason: 'not-desktop-runtime' };
+  }
+
+  await renderHtml(buildSplashPage('Restarting the local PARSE backend...'));
+
+  try {
+    supervisorUrl = null;
+    const url = supervisor ? await supervisor.restart() : await startSupervisedBackend();
+    const finalUrl = typeof url === 'string' ? url : url && url.url;
+    supervisorUrl = finalUrl || supervisorUrl;
+    if (mainWindow && supervisorUrl) {
+      await mainWindow.loadURL(supervisorUrl);
+    }
+    return { ok: true, url: supervisorUrl };
+  } catch (error) {
+    await renderHtml(buildBackendFailurePage(error.message));
+    return { ok: false, reason: error.message };
+  }
+});
+
+async function shutdownBackend() {
+  if (supervisor) {
+    try {
+      await supervisor.stop();
+    } catch (error) {
+      console.error(`[parse-desktop] supervisor stop failed: ${error.message}`);
+    }
+  } else {
+    stopBackendProcess();
+  }
+
+  if (backendLogStream) {
+    backendLogStream.end();
+    backendLogStream = null;
+  }
+}
+
 app.whenReady().then(() => {
-  startBackendProcess();
+  // In desktop-runtime mode the supervisor owns the backend lifecycle; the
+  // legacy PARSE_AUTO_BACKEND launcher only runs in dev/scaffold mode.
+  if (!isDesktopRuntime()) {
+    startBackendProcess();
+  }
   createMainWindow();
 
   app.on('activate', () => {
@@ -254,8 +506,19 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('before-quit', () => {
-  stopBackendProcess();
+let quitting = false;
+
+app.on('before-quit', (event) => {
+  if (quitting) {
+    return;
+  }
+
+  event.preventDefault();
+  quitting = true;
+
+  shutdownBackend().finally(() => {
+    app.quit();
+  });
 });
 
 app.on('window-all-closed', () => {
