@@ -1019,12 +1019,7 @@ def _compute_checkpoint(label: str, **kv: Any) -> None:
 
 
 def _resolve_host() -> str:
-    """Resolve the bind host, honoring desktop-mode loopback + PARSE_HOST.
-
-    Default (non-desktop) behavior returns the module ``HOST`` constant
-    (``0.0.0.0``) unchanged; desktop mode (``PARSE_DESKTOP=1``) defaults to
-    loopback ``127.0.0.1`` unless ``PARSE_HOST`` is explicitly set.
-    """
+    """Bind host: ``HOST`` normally, desktop-mode loopback + ``PARSE_HOST`` override. See app/http/desktop_runtime.py."""
     return _app_resolve_host(HOST)
 
 
@@ -1307,12 +1302,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def _cors_headers_for_request(self) -> Dict[str, str]:
-        """CORS headers for this request.
-
-        Default (non-desktop) mode returns ``CORS_HEADERS`` verbatim (wildcard
-        ``*``). Desktop mode (``PARSE_DESKTOP=1``) drops the wildcard and
-        reflects only loopback ``Origin`` values.
-        """
+        """CORS headers for this request; origin-aware in desktop mode. See app/http/desktop_runtime.py."""
         return _app_resolve_cors_headers(CORS_HEADERS, origin=self.headers.get("Origin"))
 
     def _add_cors_headers(self) -> None:
@@ -1350,7 +1340,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         _app_send_json_response(self, status, payload)
 
     def _api_get_health(self) -> None:
-        """Cheap, side-effect-free readiness probe (polled by the desktop shell)."""
+        """Side-effect-free readiness probe polled by the desktop shell."""
         self._send_json(HTTPStatus.OK, _app_build_health_payload())
 
     def _send_text(self, status: HTTPStatus, body: str, *, content_type: str) -> None:
