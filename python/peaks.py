@@ -21,6 +21,8 @@ import sys
 import numpy as np
 import soundfile as sf
 
+from shared.ffmpeg_discovery import FfmpegNotFoundError, cached_ffmpeg
+
 
 DEFAULT_SAMPLES_PER_PIXEL = 512
 DEFAULT_FFMPEG_SAMPLE_RATE = 44100
@@ -158,8 +160,16 @@ def generate_peaks_with_ffmpeg_mp3(
 ) -> tuple[int, list[int], int]:
     """Fallback MP3 decoder using ffmpeg raw float32 mono output."""
     sample_rate = DEFAULT_FFMPEG_SAMPLE_RATE
+    # Resolve ffmpeg via the shared discovery policy (env > bundled/frozen dir >
+    # PATH > common per-OS locations), cached across calls, so a packaged
+    # desktop app that ships ffmpeg off-PATH still decodes MP3. Discovery
+    # failure degrades exactly like the historical bare-"ffmpeg" not-found path.
+    try:
+        ffmpeg_bin = cached_ffmpeg()
+    except FfmpegNotFoundError as exc:
+        raise RuntimeError("ffmpeg not found for MP3 fallback") from exc
     command = [
-        "ffmpeg",
+        ffmpeg_bin,
         "-v",
         "error",
         "-i",
