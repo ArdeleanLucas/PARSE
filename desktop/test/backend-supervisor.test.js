@@ -4,6 +4,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const http = require('node:http');
 const net = require('node:net');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const {
   createBackendSupervisor,
@@ -149,4 +152,74 @@ test('start() resolves with the right url and stop() terminates the backend', as
   // The backend bound the supervisor-assigned port; it must be free now.
   const stillListening = await isPortListening(result.port);
   assert.equal(stillListening, false, 'backend port should be closed after stop()');
+});
+
+// Write a tiny executable "backend" (a node script with a shebang, chmod +x) to
+// a temp dir. This stands in for the frozen `parse-backend` binary: the
+// supervisor spawns it as a DIRECT executable (no shell, no command string).
+function writeStubExecutable() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'parse-frozen-'));
+  const exePath = path.join(dir, 'parse-backend');
+  const nodeBin = process.execPath;
+
+  const script = [
+    `#!${nodeBin}`,
+    'const http=require("http");',
+    'const port=Number(process.env.PARSE_API_PORT);',
+    'http.createServer((req,res)=>{',
+    '  if(req.url==="/api/health"){res.writeHead(200);res.end("{\\"status\\":\\"ok\\"}");return;}',
+    '  res.writeHead(404);res.end();',
+    '}).listen(port,"127.0.0.1");',
+    '',
+  ].join('\n');
+
+  fs.writeFileSync(exePath, script, { mode: 0o755 });
+  return { dir, exePath };
+}
+
+test('start() can spawn a DIRECT executable (packaged form) and stop() terminates it', async () => {
+  const { dir, exePath } = writeStubExecutable();
+
+  const supervisor = createBackendSupervisor({
+    // No backendCommand: exercise the executable + args path exclusively.
+    backendExecutable: exePath,
+    backendArgs: [],
+    pollIntervalMs: 100,
+    readinessTimeoutMs: 8000,
+    shutdownTimeoutMs: 3000,
+    onLog: () => {},
+  });
+
+  const result = await supervisor.start();
+
+  assert.ok(result.url.startsWith('http://127.0.0.1:'), 'url should be loopback');
+  assert.equal(result.url, `http://127.0.0.1:${result.port}/`);
+  assert.equal(supervisor.isReady, true);
+  assert.equal(await isPortListening(result.port), true, 'executable backend should be listening');
+
+  await supervisor.stop();
+  assert.equal(supervisor.isRunning, false);
+
+  const stillListening = await isPortListening(result.port);
+  assert.equal(stillListening, false, 'executable backend port should be closed after stop()');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('start() fails loudly when the packaged executable is missing (no python fallback)', async () => {
+  const missing = path.join(os.tmpdir(), 'parse-frozen-missing', 'parse-backend');
+
+  const supervisor = createBackendSupervisor({
+    backendExecutable: missing,
+    backendArgs: [],
+    pollIntervalMs: 100,
+    readinessTimeoutMs: 2000,
+    onLog: () => {},
+  });
+
+  await assert.rejects(
+    () => supervisor.start(),
+    /Frozen PARSE backend is missing or not executable/
+  );
+  assert.equal(supervisor.isRunning, false);
 });

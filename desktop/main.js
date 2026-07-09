@@ -6,6 +6,7 @@ const { spawn } = require('child_process');
 const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
 
 const { createBackendSupervisor } = require('./backend-supervisor');
+const { resolveBackendLauncher } = require('./backend-launcher');
 const projectStore = require('./project-store');
 
 // Resolved project root for desktop-runtime mode (the folder passed to the
@@ -394,10 +395,17 @@ async function resolveProjectRoot() {
 
 async function startSupervisedBackend() {
   if (!supervisor) {
+    // Packaged builds spawn the frozen backend executable directly (no shell,
+    // no python); dev builds keep the existing `python3 python/server.py` shell
+    // command. resolveBackendLauncher() encapsulates that choice.
+    const launcher = resolveBackendLauncher(app.isPackaged, process.resourcesPath);
+
     supervisor = createBackendSupervisor({
       projectRoot: selectedProjectRoot || getBackendCwd(),
       userDataRoot: app.getPath('userData'),
-      backendCommand: getBackendCommand(),
+      backendCommand: launcher.command || getBackendCommand(),
+      backendExecutable: launcher.executable || null,
+      backendArgs: launcher.args || [],
       onLog: desktopBackendLog,
     });
 

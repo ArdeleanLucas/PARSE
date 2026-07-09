@@ -27,6 +27,7 @@ files:
   - main.js
   - preload.js
   - backend-supervisor.js
+  - backend-launcher.js
   - package.json
   - "!test/**"
   - "!dev-launch.js"

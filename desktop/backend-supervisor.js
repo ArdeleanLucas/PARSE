@@ -11,6 +11,7 @@
 
 const net = require('net');
 const http = require('http');
+const fs = require('fs');
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 
@@ -96,10 +97,18 @@ class BackendSupervisor extends EventEmitter {
   constructor(options = {}) {
     super();
 
+    // The backend can be spawned two ways:
+    //   1. Dev / scaffold: a shell command STRING (`python3 python/server.py`),
+    //      spawned via `shell: true`. This is `backendCommand`.
+    //   2. Packaged: a DIRECT executable path plus argv, spawned WITHOUT a shell
+    //      (no `python`). This is `backendExecutable` + `backendArgs`.
+    // When `backendExecutable` is set it takes precedence over `backendCommand`.
     this._options = {
       projectRoot: options.projectRoot || process.cwd(),
       userDataRoot: options.userDataRoot || '',
       backendCommand: options.backendCommand || defaultBackendCommand(),
+      backendExecutable: options.backendExecutable || null,
+      backendArgs: options.backendArgs || [],
       pollIntervalMs: options.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS,
       readinessTimeoutMs: options.readinessTimeoutMs || DEFAULT_READINESS_TIMEOUT_MS,
       shutdownTimeoutMs: options.shutdownTimeoutMs || DEFAULT_SHUTDOWN_TIMEOUT_MS,
@@ -151,6 +160,52 @@ class BackendSupervisor extends EventEmitter {
     return this;
   }
 
+  // Resolve how to spawn the backend for this run. Returns the `child_process`
+  // spawn arguments plus a human-readable description for logs.
+  //
+  // Packaged: a direct executable + argv, NO shell. The executable is verified
+  // to exist first; a missing frozen binary throws a clear error instead of
+  // letting spawn fall through to something unexpected.
+  //
+  // Dev: the shell command string, spawned via `shell: true` (unchanged).
+  _resolveSpawn(env) {
+    const baseOptions = {
+      cwd: this._options.projectRoot,
+      env,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    };
+
+    const executable = this._options.backendExecutable;
+
+    if (executable) {
+      // Guard: fail loudly if the frozen backend is missing so we never quietly
+      // spawn `python` as a fallback.
+      try {
+        fs.accessSync(executable, fs.constants.X_OK);
+      } catch (error) {
+        throw new Error(
+          `Frozen PARSE backend is missing or not executable at ${executable} ` +
+            `(${error.code || error.message}).`
+        );
+      }
+
+      const args = this._options.backendArgs || [];
+      return {
+        spawnArg: { file: executable, args },
+        spawnOptions: baseOptions,
+        describe: `${executable} ${args.join(' ')}`.trim(),
+      };
+    }
+
+    const command = this._options.backendCommand;
+    return {
+      spawnArg: { file: command, args: [] },
+      spawnOptions: { ...baseOptions, shell: true },
+      describe: command,
+    };
+  }
+
   async start() {
     if (this._child) {
       throw new Error('Backend supervisor is already started.');
@@ -174,17 +229,15 @@ class BackendSupervisor extends EventEmitter {
       ...this._options.env,
     };
 
-    const command = this._options.backendCommand;
+    // Choose the spawn form: a direct frozen executable (packaged) or the dev
+    // shell command string. `_resolveSpawn` also guards a missing/unusable
+    // frozen executable so a failed packaged launch never silently falls back
+    // to spawning `python`.
+    const { spawnArg, spawnOptions, describe } = this._resolveSpawn(env);
 
-    this._log(`starting backend on 127.0.0.1:${port}: ${command}\n`, 'stdout');
+    this._log(`starting backend on 127.0.0.1:${port}: ${describe}\n`, 'stdout');
 
-    const child = spawn(command, {
-      cwd: this._options.projectRoot,
-      shell: true,
-      env,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const child = spawn(spawnArg.file, spawnArg.args, spawnOptions);
 
     this._child = child;
 
