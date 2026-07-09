@@ -16,14 +16,17 @@ Examples:
 
 import argparse
 import json
-import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 from audio_pipeline_paths import build_normalized_output_path
+from shared.ffmpeg_discovery import (
+    FFMPEG_OVERRIDE_ENV,
+    FfmpegNotFoundError,
+    discover_ffmpeg,
+)
 
 
 TARGET_I = "-16"
@@ -41,9 +44,6 @@ SUPPORTED_EXTENSIONS = {
     ".aac",
     ".flac",
 }
-
-CHOCO_FFMPEG = Path("C:/ProgramData/chocolatey/bin/ffmpeg.exe")
-
 
 def print_error(message: str) -> None:
     print(message, file=sys.stderr)
@@ -155,6 +155,14 @@ def verify_ffmpeg_binary(candidate: str) -> bool:
 
 
 def resolve_ffmpeg_binary(cli_ffmpeg: str) -> str:
+    """Resolve an ffmpeg binary using the cross-platform discovery policy.
+
+    The CLI ``--ffmpeg`` flag stays the highest-priority override: if it is set
+    but does not verify, this fails fast (as before) rather than silently
+    falling through to auto-discovery. Otherwise resolution follows the ordered
+    policy in ``shared.ffmpeg_discovery`` (env override -> bundled/frozen dir ->
+    PATH -> common per-OS locations).
+    """
     candidate = cli_ffmpeg.strip()
     if candidate:
         if verify_ffmpeg_binary(candidate):
@@ -162,32 +170,16 @@ def resolve_ffmpeg_binary(cli_ffmpeg: str) -> str:
         print_error(f"ERROR: --ffmpeg is set but not executable: {candidate}")
         raise SystemExit(1)
 
-    env_candidate = os.environ.get("FFMPEG_PATH", "").strip()
-    if env_candidate:
-        if verify_ffmpeg_binary(env_candidate):
-            return env_candidate
-        print(f"[normalize] WARNING: ignoring invalid FFMPEG_PATH: {env_candidate}")
-
-    path_candidate = shutil.which("ffmpeg")
-    if path_candidate and verify_ffmpeg_binary(path_candidate):
-        return path_candidate
-
-    choco_candidate = str(CHOCO_FFMPEG)
-    if CHOCO_FFMPEG.exists() and verify_ffmpeg_binary(choco_candidate):
-        return choco_candidate
-
-    print_error("ERROR: Could not find a working ffmpeg binary.")
-    print_error("Checked in this order:")
-    print_error("  1) --ffmpeg argument")
-    print_error("  2) FFMPEG_PATH environment variable")
-    print_error("  3) ffmpeg on system PATH")
-    print_error(f"  4) {choco_candidate}")
-    print_error("")
-    print_error("Install ffmpeg and try one of:")
-    print_error("  - pass --ffmpeg /path/to/ffmpeg")
-    print_error("  - set FFMPEG_PATH=/path/to/ffmpeg")
-    print_error("  - add ffmpeg to your system PATH")
-    raise SystemExit(1)
+    try:
+        return discover_ffmpeg(verify=verify_ffmpeg_binary)
+    except FfmpegNotFoundError as exc:
+        print_error(f"ERROR: {exc}")
+        print_error("")
+        print_error(
+            "You can also pass --ffmpeg /path/to/ffmpeg, or set "
+            f"{FFMPEG_OVERRIDE_ENV}=/path/to/ffmpeg."
+        )
+        raise SystemExit(1) from exc
 
 
 def collect_audio_files(speaker_input_dir: Path) -> list:

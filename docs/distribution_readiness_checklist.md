@@ -80,7 +80,19 @@ Goal: usable by external testers on macOS + Windows with managed runtime.
 - [ ] Frozen per-platform Python runtime implemented (PyInstaller/Nuitka; no required manual Python install). Pin inside Python 3.10–3.12 (3.13 blocked by the `cgi` import in `python/server.py`).
 - [ ] Deterministic dependency set produced (lockfile + wheelhouse). Today `python/requirements.txt` is floor-pinned (`>=`) with no lock — this is a Gate B prerequisite.
 - [ ] Runtime preflight checks surface missing optional dependencies clearly.
-- [ ] ffmpeg/ffprobe availability policy is implemented and documented (today `python/normalize_audio.py` falls back to a hardcoded Windows Chocolatey path).
+- [x] ffmpeg/ffprobe availability policy is implemented and documented. Resolver: `python/shared/ffmpeg_discovery.py` (`discover_ffmpeg` / `discover_ffprobe`), used by `python/normalize_audio.py`. Discovery order and env vars are documented in the "ffmpeg/ffprobe discovery policy" note below.
+
+### ffmpeg/ffprobe discovery policy (B2 evidence)
+
+`python/shared/ffmpeg_discovery.py` resolves `ffmpeg` (and `ffprobe`) by trying candidates in this order and returning the first that verifies via a `-version` probe:
+
+1. **Explicit path argument** — a caller-supplied path (e.g. the `normalize_audio.py --ffmpeg` CLI flag). Highest priority; a set-but-invalid `--ffmpeg` fails fast rather than silently auto-discovering.
+2. **`PARSE_FFMPEG` / `PARSE_FFPROBE`** override env vars (with the legacy `FFMPEG_PATH` honored below the new `PARSE_FFMPEG` var, for back-compat).
+3. **Bundled desktop location** — the `PARSE_BUNDLED_BIN` directory (set by the desktop shell) and paths relative to a frozen executable (`sys._MEIPASS` / `sys.executable`'s dir). This makes discovery ready for a future packaging step that ships ffmpeg alongside the frozen backend; nothing is bundled today.
+4. **`PATH`** via `shutil.which` (covers Homebrew / apt / system installs on macOS/Linux and Windows `PATH`).
+5. **Common per-OS install locations** — macOS: `/opt/homebrew/bin`, `/usr/local/bin`; Linux: `/usr/bin`, `/usr/local/bin`; Windows: `%ProgramFiles%\ffmpeg\bin` plus the Chocolatey path (`C:\ProgramData\chocolatey\bin`) as one fallback among others, not the primary.
+
+If nothing verifies, an actionable error names the override env vars and how to install ffmpeg. `ffprobe` additionally prefers a sibling next to a resolved `ffmpeg` before falling back to `PATH`/common locations. The module is stdlib-only so it stays importable in a frozen build and in hermetic tests (`python/test_ffmpeg_discovery.py`).
 
 ## B3) Data/model management
 
