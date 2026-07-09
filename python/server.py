@@ -132,6 +132,10 @@ from app.http.static_paths import (
     static_request_parts as _app_static_request_parts,
 )
 from app.services.workspace_config import build_workspace_frontend_config as _app_build_workspace_frontend_config
+from app.services.project_lifecycle import (
+    bootstrap_project as _app_bootstrap_project,
+    describe_project as _app_describe_project,
+)
 from audio_pipeline_paths import build_normalized_output_path
 from external_api.streaming import JobStreamingSidecar
 # Route modules import `server` by name; when launched as a script, register the in-flight module under that name so route helpers do not dual-load a second copy.
@@ -1343,6 +1347,10 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         """Side-effect-free readiness probe polled by the desktop shell."""
         self._send_json(HTTPStatus.OK, _app_build_health_payload())
 
+    def _api_get_project(self) -> None:
+        """Describe the current workspace root for the desktop project picker."""
+        self._send_json(HTTPStatus.OK, _app_describe_project(_project_root()))
+
     def _send_text(self, status: HTTPStatus, body: str, *, content_type: str) -> None:
         encoded = body.encode("utf-8")
         self.send_response(status)
@@ -1445,6 +1453,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         if request_path == "/api/health": self._api_get_health(); return
+        if request_path == "/api/project": self._api_get_project(); return
         if request_path == "/api/config": self._api_get_config(); return
         if request_path == "/api/survey-overlap": self._api_get_survey_overlap(); return
 
@@ -2033,7 +2042,13 @@ def main() -> None:
         print("=" * 60, file=sys.stderr)
         sys.exit(1)
 
-    os.chdir(serve_dir); _require_route_export("_cleanup_stale_locks_on_startup")()
+    os.chdir(serve_dir)
+    # Desktop mode: a freshly-picked empty folder becomes a valid project on
+    # startup. Idempotent + non-destructive, so it is safe every boot. Web/dev
+    # mode is left untouched (no implicit project.json creation).
+    if _app_is_desktop_mode():
+        _app_bootstrap_project(serve_dir)
+    _require_route_export("_cleanup_stale_locks_on_startup")()
     _install_route_bindings(); _require_route_export("_load_job_snapshots")()
 
     http_port = _resolve_http_port()
