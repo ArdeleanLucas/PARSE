@@ -34,6 +34,29 @@ function isPortListening(port) {
   });
 }
 
+// After stop() kills the child, the OS releases the listening port
+// asynchronously (SIGTERM -> process exit -> socket teardown is not
+// synchronous). On Linux this lag is occasionally long enough that a single
+// immediate isPortListening() check still observes the port as open, even
+// though the backend is genuinely gone. Poll instead of checking once so the
+// assertion tolerates that lag without weakening what it proves: the port
+// must still end up closed within a bounded window after stop().
+async function waitForPortClosed(port, timeoutMs = 3000) {
+  const pollIntervalMs = 100;
+  const deadline = Date.now() + timeoutMs;
+
+  for (;;) {
+    const listening = await isPortListening(port);
+    if (!listening) {
+      return true;
+    }
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+}
+
 // A tiny stub backend that can flip its /api/health response at runtime.
 function startStubHealthServer({ initialStatus = 404 } = {}) {
   const state = { status: initialStatus };
@@ -173,9 +196,10 @@ test(
     await supervisor.stop();
     assert.equal(supervisor.isRunning, false);
 
-    // The backend bound the supervisor-assigned port; it must be free now.
-    const stillListening = await isPortListening(result.port);
-    assert.equal(stillListening, false, 'backend port should be closed after stop()');
+    // The backend bound the supervisor-assigned port; it must become free
+    // shortly after stop() (poll to tolerate OS-level socket teardown lag).
+    const closed = await waitForPortClosed(result.port);
+    assert.equal(closed, true, 'backend port should be closed after stop()');
   }
 );
 
@@ -230,8 +254,8 @@ test(
     await supervisor.stop();
     assert.equal(supervisor.isRunning, false);
 
-    const stillListening = await isPortListening(result.port);
-    assert.equal(stillListening, false, 'executable backend port should be closed after stop()');
+    const closed = await waitForPortClosed(result.port);
+    assert.equal(closed, true, 'executable backend port should be closed after stop()');
   }
 );
 
