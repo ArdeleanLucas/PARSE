@@ -61,6 +61,7 @@ def _verify_ffmpeg_binary(candidate: str) -> bool:
             [candidate, "-version"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            text=True,
             check=False,
             timeout=15,
         )
