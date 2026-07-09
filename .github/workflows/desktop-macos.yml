@@ -14,6 +14,12 @@ on:
   push:
     branches:
       - desktop-stage3-packaging-macos
+    paths:
+      - "packaging/**"
+      - "desktop/**"
+      - ".github/workflows/desktop-macos.yml"
+      - "python/requirements.txt"
+      - "python/requirements.lock*.txt"
 
 permissions:
   contents: read
@@ -23,7 +29,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: "18"
+  NODE_VERSION: "22"
   PYTHON_VERSION: "3.12"
 
 defaults:
@@ -76,29 +82,35 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-py${{ env.PYTHON_VERSION }}-pip-${{ hashFiles('python/requirements.txt') }}
+          key: ${{ runner.os }}-py${{ env.PYTHON_VERSION }}-pip-${{ hashFiles('python/requirements.lock.macos-py312.txt') }}
           restore-keys: |
             ${{ runner.os }}-py${{ env.PYTHON_VERSION }}-pip-
 
-      - name: Install backend dependencies + PyInstaller
+      # Install from the committed, fully-pinned lock (not the floor-pinned
+      # python/requirements.txt) so the freeze is reproducible build-to-build.
+      # The lock already pins pyinstaller, so no separate install line for it.
+      - name: Install backend dependencies + PyInstaller (from lock)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r python/requirements.txt
-          python -m pip install pyinstaller
+          python -m pip install -r python/requirements.lock.macos-py312.txt
 
-      # Deterministic-lock deliverable: capture the resolved dependency set from
-      # this real macOS/py3.12 build. Uploaded as an artifact below.
-      - name: Capture resolved dependency lock
+      # Drift snapshot: capture what this real macOS/py3.12 build actually
+      # resolved. This is NOT the lock (python/requirements.lock.macos-py312.txt,
+      # committed to the repo, is) — it's a diff surface for detecting when the
+      # committed lock has drifted from what a fresh resolve would produce, e.g.
+      # after bumping a floor pin in python/requirements.txt.
+      - name: Capture dependency drift snapshot
         run: |
-          pip freeze > python/requirements.lock.macos-py312.txt
-          echo "Captured $(wc -l < python/requirements.lock.macos-py312.txt) pinned packages."
+          pip freeze > /tmp/requirements.drift-snapshot.macos-py312.txt
+          echo "Captured $(wc -l < /tmp/requirements.drift-snapshot.macos-py312.txt) resolved packages."
 
-      - name: Upload dependency lock
+      - name: Upload dependency drift snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: requirements-lock-macos-py312
-          path: python/requirements.lock.macos-py312.txt
+          name: requirements-drift-snapshot-macos-py312
+          path: /tmp/requirements.drift-snapshot.macos-py312.txt
           if-no-files-found: error
+          retention-days: 7
 
       # --- Freeze the backend into dist/parse-backend/. --- #
       - name: Freeze backend with PyInstaller
@@ -156,6 +168,7 @@ jobs:
           name: frozen-backend-smoke-log
           path: /tmp/parse-backend-smoke.log
           if-no-files-found: ignore
+          retention-days: 7
 
       # --- Package: electron-builder assembles the DMG/zip and bundles the freeze. --- #
       - name: Install desktop shell dependencies
@@ -180,3 +193,4 @@ jobs:
             desktop/build/dist/*.dmg
             desktop/build/dist/*.zip
           if-no-files-found: error
+          retention-days: 7
