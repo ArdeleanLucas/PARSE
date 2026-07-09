@@ -9,10 +9,15 @@ local builds are not the path here.
 ## What the pipeline does
 
 1. Builds the React frontend (`npm run build` → `dist/`).
-2. Installs the backend deps (`python/requirements.txt`) plus PyInstaller on
-   Python 3.12 (3.13+ is blocked — `server.py` imports the stdlib `cgi` module).
-3. Captures a deterministic dependency lock (`pip freeze`) from the real macOS
-   build and uploads it as an artifact.
+2. Installs the backend deps from the committed, fully-pinned lock
+   (`python/requirements.lock.macos-py312.txt`, which already pins PyInstaller)
+   on Python 3.12 (3.13+ is blocked — `server.py` imports the stdlib `cgi`
+   module). `python/requirements.txt` stays the human-edited floor manifest
+   and is not installed from directly in CI.
+3. Captures a `pip freeze` **drift snapshot** from the real macOS build and
+   uploads it as an artifact — this is not the lock itself (the committed
+   `python/requirements.lock.macos-py312.txt` is), it's a diff surface for
+   detecting when the committed lock needs regenerating.
 4. Freezes `python/server.py` into a **onedir** bundle at
    `dist/parse-backend/parse-backend` using `packaging/parse-backend.spec`.
 5. Smoke-tests the frozen backend: launches it with `PARSE_DESKTOP=1
@@ -36,9 +41,12 @@ gh workflow run desktop-macos.yml
 Uploaded as GitHub Actions build artifacts on the run:
 
 - `parse-desktop-macos-arm64` — the `.dmg` and `.zip` installers.
-- `requirements-lock-macos-py312` — `python/requirements.lock.macos-py312.txt`,
-  the resolved dependency lock from the real macOS/py3.12 build.
+- `requirements-drift-snapshot-macos-py312` — a `pip freeze` drift snapshot
+  from the real macOS/py3.12 build, for comparing against the committed
+  `python/requirements.lock.macos-py312.txt` lock. It is not the lock itself.
 - `frozen-backend-smoke-log` — stdout/stderr of the frozen backend's boot.
+
+All artifacts are retained for 7 days.
 
 ## Freeze strategy
 

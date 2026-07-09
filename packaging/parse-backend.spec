@@ -158,12 +158,22 @@ for pkg in FIRST_PARTY_PACKAGES:
 # ``importlib.import_module("<topmodule>")`` — may reference these by bare name,
 # and they are not covered by the package-level ``collect_submodules`` above.
 # The entry ``server.py`` is frozen as ``__main__`` and is intentionally skipped.
+# ``conftest.py`` and ``*_test.py`` are pytest-only fixtures/helpers (like
+# ``test_*.py``) and must be excluded too — ``conftest.py`` does ``import
+# pytest``, which is excluded from the freeze (see ``excludes`` below), so
+# pulling it in as a hidden import would break the build.
 # --------------------------------------------------------------------------- #
 try:
     for _fname in os.listdir(PYTHON_DIR):
         if not _fname.endswith(".py"):
             continue
-        if _fname.startswith("test_") or _fname.startswith("__") or _fname == "server.py":
+        if (
+            _fname.startswith("test_")
+            or _fname.startswith("__")
+            or _fname == "server.py"
+            or _fname == "conftest.py"
+            or _fname.endswith("_test.py")
+        ):
             continue
         if not os.path.isfile(os.path.join(PYTHON_DIR, _fname)):
             continue
