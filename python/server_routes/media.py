@@ -4,6 +4,11 @@ from __future__ import annotations
 import logging
 
 import server as _server
+from shared.ffmpeg_discovery import (
+    FFMPEG_OVERRIDE_ENV,
+    FfmpegNotFoundError,
+    cached_ffmpeg,
+)
 from concept_source_item import concept_row_from_item, read_concepts_csv_rows, source_item_from_audition_row
 from concept_registry import concept_label_key, load_concept_registry, merge_concepts_into_root_csv, resolve_or_allocate_concept_id
 from speaker_delete import SpeakerDeleteError, delete_speaker
@@ -962,11 +967,19 @@ def _run_normalize_job(job_id: str, speaker: str, source_wav: str) -> None:
         working_root = _server._project_root() / 'audio' / 'working'
         _server._set_job_progress(job_id, 5.0, message='Checking ffmpeg availability')
         try:
-            _server.subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=10)
-        except FileNotFoundError:
-            raise RuntimeError('ffmpeg is not installed or not on PATH')
+            # Resolve once via the shared discovery policy (env > bundled/frozen
+            # dir > PATH > common per-OS locations), not a bare PATH-only lookup,
+            # so a packaged desktop app that ships ffmpeg off-PATH still works.
+            # cached_ffmpeg() runs the `-version` probe internally and reuses the
+            # result across requests, so this replaces the old explicit check.
+            ffmpeg_bin = cached_ffmpeg()
+        except FfmpegNotFoundError:
+            raise RuntimeError(
+                'ffmpeg is not installed or not on PATH. Install ffmpeg, add it '
+                'to PATH, or set {0}=/path/to/ffmpeg.'.format(FFMPEG_OVERRIDE_ENV)
+            )
         _server._set_job_progress(job_id, 10.0, message='Scanning loudness (pass 1)')
-        measure_cmd = ['ffmpeg', '-i', str(audio_path), '-af', 'loudnorm=print_format=json', '-f', 'null', '-']
+        measure_cmd = [ffmpeg_bin, '-i', str(audio_path), '-af', 'loudnorm=print_format=json', '-f', 'null', '-']
         measure_result = _server.subprocess.run(measure_cmd, capture_output=True, text=True, timeout=600)
         stderr_text = measure_result.stderr or ''
         measured_i = None
@@ -999,7 +1012,7 @@ def _run_normalize_job(job_id: str, speaker: str, source_wav: str) -> None:
         normalize_filter = 'loudnorm=I={target}'.format(target=_server.NORMALIZE_LUFS_TARGET)
         if measured_i and measured_tp and measured_lra and measured_thresh:
             normalize_filter = 'loudnorm=I={target}:measured_I={mi}:measured_TP={mtp}:measured_LRA={mlra}:measured_thresh={mt}:linear=true'.format(target=_server.NORMALIZE_LUFS_TARGET, mi=measured_i, mtp=measured_tp, mlra=measured_lra, mt=measured_thresh)
-        normalize_cmd = ['ffmpeg', '-y', '-i', str(audio_path), '-af', normalize_filter, '-ar', _server.NORMALIZE_SAMPLE_RATE, '-ac', _server.NORMALIZE_CHANNELS, '-c:a', _server.NORMALIZE_AUDIO_CODEC, '-sample_fmt', _server.NORMALIZE_SAMPLE_FORMAT, str(write_path)]
+        normalize_cmd = [ffmpeg_bin, '-y', '-i', str(audio_path), '-af', normalize_filter, '-ar', _server.NORMALIZE_SAMPLE_RATE, '-ac', _server.NORMALIZE_CHANNELS, '-c:a', _server.NORMALIZE_AUDIO_CODEC, '-sample_fmt', _server.NORMALIZE_SAMPLE_FORMAT, str(write_path)]
         proc = _server.subprocess.run(normalize_cmd, capture_output=True, text=True, timeout=600)
         if proc.returncode != 0:
             error_tail = (proc.stderr or '')[-800:]

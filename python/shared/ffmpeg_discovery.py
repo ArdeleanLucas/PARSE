@@ -245,6 +245,66 @@ def discover_ffprobe(
     raise FfmpegNotFoundError(_not_found_message("ffprobe", FFPROBE_OVERRIDE_ENV))
 
 
+# ---------------------------------------------------------------------------
+# Cached accessors
+# ---------------------------------------------------------------------------
+#
+# The `-version` probe in `_verify_with_version` spawns a subprocess, so callers
+# on a hot path (per-request server routes, per-chunk decode loops) must not
+# re-run discovery on every call. These module-level lazy singletons resolve the
+# binary once and reuse it; `reset_ffmpeg_cache()` clears them (mainly for tests
+# and for a future "the bundled binary moved" re-resolve hook).
+
+_CACHED_FFMPEG: Optional[str] = None
+_CACHED_FFPROBE: Optional[str] = None
+
+
+def cached_ffmpeg(
+    *,
+    verify: Callable[[str], bool] = _verify_with_version,
+) -> str:
+    """Return a discovered ffmpeg path, resolving at most once per process.
+
+    Long-running / high-frequency callers (server routes, per-chunk decode
+    loops) should use this instead of `discover_ffmpeg` so the `-version` probe
+    runs once rather than per request/frame. Raises `FfmpegNotFoundError` (once,
+    uncached) when nothing verifies, so a later install + `reset_ffmpeg_cache()`
+    can recover without a restart.
+    """
+    global _CACHED_FFMPEG
+    if _CACHED_FFMPEG is None:
+        _CACHED_FFMPEG = discover_ffmpeg(verify=verify)
+    return _CACHED_FFMPEG
+
+
+def cached_ffprobe(
+    *,
+    ffmpeg_path: Optional[str] = None,
+    verify: Callable[[str], bool] = _verify_with_version,
+) -> str:
+    """Return a discovered ffprobe path, resolving at most once per process.
+
+    See `cached_ffmpeg`. When `ffmpeg_path` is omitted and ffmpeg has already
+    been cached, the cached ffmpeg path seeds the sibling lookup.
+    """
+    global _CACHED_FFPROBE
+    if _CACHED_FFPROBE is None:
+        seed = ffmpeg_path if ffmpeg_path is not None else _CACHED_FFMPEG
+        _CACHED_FFPROBE = discover_ffprobe(ffmpeg_path=seed, verify=verify)
+    return _CACHED_FFPROBE
+
+
+def reset_ffmpeg_cache() -> None:
+    """Clear the cached ffmpeg/ffprobe paths so the next call re-discovers.
+
+    Intended for tests and for a future re-resolve hook (e.g. after a bundled
+    binary is installed at runtime).
+    """
+    global _CACHED_FFMPEG, _CACHED_FFPROBE
+    _CACHED_FFMPEG = None
+    _CACHED_FFPROBE = None
+
+
 def _override_count(tool: str, explicit: Optional[str]) -> int:
     """How many leading candidates are explicit/env overrides (for insertion)."""
     count = 0

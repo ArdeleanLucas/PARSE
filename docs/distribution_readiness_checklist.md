@@ -80,15 +80,15 @@ Goal: usable by external testers on macOS + Windows with managed runtime.
 - [ ] Frozen per-platform Python runtime implemented (PyInstaller/Nuitka; no required manual Python install). Pin inside Python 3.10–3.12 (3.13 blocked by the `cgi` import in `python/server.py`).
 - [ ] Deterministic dependency set produced (lockfile + wheelhouse). Today `python/requirements.txt` is floor-pinned (`>=`) with no lock — this is a Gate B prerequisite.
 - [ ] Runtime preflight checks surface missing optional dependencies clearly.
-- [x] ffmpeg/ffprobe availability policy is implemented and documented. Resolver: `python/shared/ffmpeg_discovery.py` (`discover_ffmpeg` / `discover_ffprobe`), used by `python/normalize_audio.py`. Discovery order and env vars are documented in the "ffmpeg/ffprobe discovery policy" note below.
+- [x] ffmpeg/ffprobe availability policy is implemented and documented. Resolver: `python/shared/ffmpeg_discovery.py` (`discover_ffmpeg` / `discover_ffprobe`, plus cached `cached_ffmpeg` / `cached_ffprobe` accessors). The server normalize route (`python/server_routes/media.py`), the peaks MP3 fallback (`python/peaks.py`), and the normalize CLI (`python/normalize_audio.py`) all go through the shared discovery policy, so a packaged app that bundles ffmpeg off-PATH works over HTTP, not just from the standalone CLI. Other standalone CLI utilities (`video_sync.py`, `video_clip_extract.py`, `export_review_data.py`, `batch_reextract.py`) still call bare `ffmpeg`/`ffprobe` and are a noted follow-up. Discovery order and env vars are documented in the "ffmpeg/ffprobe discovery policy" note below.
 
 ### ffmpeg/ffprobe discovery policy (B2 evidence)
 
 `python/shared/ffmpeg_discovery.py` resolves `ffmpeg` (and `ffprobe`) by trying candidates in this order and returning the first that verifies via a `-version` probe:
 
 1. **Explicit path argument** — a caller-supplied path (e.g. the `normalize_audio.py --ffmpeg` CLI flag). Highest priority; a set-but-invalid `--ffmpeg` fails fast rather than silently auto-discovering.
-2. **`PARSE_FFMPEG` / `PARSE_FFPROBE`** override env vars (with the legacy `FFMPEG_PATH` honored below the new `PARSE_FFMPEG` var, for back-compat).
-3. **Bundled desktop location** — the `PARSE_BUNDLED_BIN` directory (set by the desktop shell) and paths relative to a frozen executable (`sys._MEIPASS` / `sys.executable`'s dir). This makes discovery ready for a future packaging step that ships ffmpeg alongside the frozen backend; nothing is bundled today.
+2. **`PARSE_FFMPEG` / `PARSE_FFPROBE`** override env vars (with the legacy `FFMPEG_PATH` honored below the new `PARSE_FFMPEG` var, for back-compat). Back-compat behavior delta: an invalid legacy `FFMPEG_PATH` now falls through silently to the next candidate — the old `normalize_audio` resolver printed a warning for a set-but-invalid `FFMPEG_PATH`; the shared policy does not.
+3. **Bundled desktop location** — the `PARSE_BUNDLED_BIN` directory (reserved for a future bundling step; nothing sets it yet) and paths relative to a frozen executable (`sys._MEIPASS` / `sys.executable`'s dir). This makes discovery ready for a future packaging step that ships ffmpeg alongside the frozen backend; nothing is bundled today.
 4. **`PATH`** via `shutil.which` (covers Homebrew / apt / system installs on macOS/Linux and Windows `PATH`).
 5. **Common per-OS install locations** — macOS: `/opt/homebrew/bin`, `/usr/local/bin`; Linux: `/usr/bin`, `/usr/local/bin`; Windows: `%ProgramFiles%\ffmpeg\bin` plus the Chocolatey path (`C:\ProgramData\chocolatey\bin`) as one fallback among others, not the primary.
 

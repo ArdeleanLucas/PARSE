@@ -20,8 +20,11 @@ from shared.ffmpeg_discovery import (
     FFPROBE_OVERRIDE_ENV,
     LEGACY_FFMPEG_ENV,
     FfmpegNotFoundError,
+    cached_ffmpeg,
+    cached_ffprobe,
     discover_ffmpeg,
     discover_ffprobe,
+    reset_ffmpeg_cache,
 )
 
 
@@ -231,6 +234,97 @@ def test_ffprobe_nothing_found_raises(monkeypatch):
     with pytest.raises(FfmpegNotFoundError) as excinfo:
         discover_ffprobe(verify=lambda candidate: False)
     assert FFPROBE_OVERRIDE_ENV in str(excinfo.value)
+
+
+# --- cached accessors (server routes + peaks hot paths) --------------------
+#
+# media.py (normalize route) and peaks.py (MP3 fallback) call the cached
+# accessors so the `-version` probe runs once, not per request/frame. Those
+# modules pull heavy deps (soundfile/numpy) that need not import for this seam:
+# the caching contract lives in shared.ffmpeg_discovery and is tested directly.
+
+
+@pytest.fixture(autouse=True)
+def _reset_cache_between_tests():
+    reset_ffmpeg_cache()
+    yield
+    reset_ffmpeg_cache()
+
+
+def test_cached_ffmpeg_resolves_once(monkeypatch):
+    _clear_env(monkeypatch)
+    monkeypatch.setattr(fd.shutil, "which", lambda tool: "/usr/bin/ffmpeg")
+
+    calls = []
+
+    def _counting_verify(candidate: str) -> bool:
+        calls.append(candidate)
+        return candidate == "/usr/bin/ffmpeg"
+
+    first = cached_ffmpeg(verify=_counting_verify)
+    verify_calls_after_first = len(calls)
+    second = cached_ffmpeg(verify=_counting_verify)
+
+    assert first == second == "/usr/bin/ffmpeg"
+    # Second call returns the cached path without re-running discovery.
+    assert len(calls) == verify_calls_after_first
+
+
+def test_reset_ffmpeg_cache_forces_rediscovery(monkeypatch):
+    _clear_env(monkeypatch)
+    monkeypatch.setattr(fd.shutil, "which", lambda tool: "/usr/bin/ffmpeg")
+
+    calls = []
+
+    def _counting_verify(candidate: str) -> bool:
+        calls.append(candidate)
+        return candidate == "/usr/bin/ffmpeg"
+
+    cached_ffmpeg(verify=_counting_verify)
+    calls_after_first = len(calls)
+    reset_ffmpeg_cache()
+    cached_ffmpeg(verify=_counting_verify)
+
+    # After reset, discovery ran again (more verify calls than the first pass).
+    assert len(calls) > calls_after_first
+
+
+def test_cached_ffmpeg_propagates_not_found(monkeypatch):
+    _clear_env(monkeypatch)
+    monkeypatch.setattr(fd.shutil, "which", lambda tool: None)
+
+    with pytest.raises(FfmpegNotFoundError):
+        cached_ffmpeg(verify=lambda candidate: False)
+
+
+def test_cached_ffprobe_seeds_from_cached_ffmpeg(monkeypatch):
+    _clear_env(monkeypatch)
+    # Point the ffmpeg env override at /custom/bin/ffmpeg so it becomes the
+    # cached ffmpeg path; ffprobe should then prefer its sibling over PATH.
+    monkeypatch.setenv(FFMPEG_OVERRIDE_ENV, "/custom/bin/ffmpeg")
+    monkeypatch.setattr(fd.shutil, "which", lambda tool: "/usr/bin/ffprobe")
+
+    cached_ffmpeg(verify=_verify_only("/custom/bin/ffmpeg"))
+    result = cached_ffprobe(verify=_verify_only("/custom/bin/ffprobe", "/usr/bin/ffprobe"))
+    assert result == "/custom/bin/ffprobe"
+
+
+def test_cached_ffprobe_resolves_once(monkeypatch):
+    _clear_env(monkeypatch)
+    monkeypatch.setattr(fd.shutil, "which", lambda tool: "/usr/bin/ffprobe")
+
+    calls = []
+
+    def _counting_verify(candidate: str) -> bool:
+        calls.append(candidate)
+        return candidate == "/usr/bin/ffprobe"
+
+    first = cached_ffprobe(verify=_counting_verify)
+    calls_after_first = len(calls)
+    second = cached_ffprobe(verify=_counting_verify)
+
+    assert first == second == "/usr/bin/ffprobe"
+    assert len(calls) == calls_after_first
 
 
 # --- normalize_audio integration (still hermetic) --------------------------
