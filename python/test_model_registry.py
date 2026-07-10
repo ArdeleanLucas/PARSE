@@ -387,6 +387,27 @@ def test_ortho_provider_hard_fail_guard_preserved(no_roots):
         )
 
 
+def test_ortho_provider_uses_registry_ct2_when_empty(monkeypatch, tmp_path):
+    from ai.providers.local_whisper import LocalWhisperProvider
+
+    bundled = tmp_path / "bundled"
+    bundled.mkdir()
+    model_dir = _write_model(bundled, "installed-ortho", _manifest("installed-ortho", "ortho", "faster-whisper-ct2"))
+    monkeypatch.setenv(model_registry.BUNDLED_MODELS_ENV, str(bundled))
+
+    # ORTH's real default model_path is non-empty (razhan/whisper-base-sdh), so
+    # we explicitly pass an empty ortho.model_path to exercise the registry
+    # fallback branch. The registry block runs right after model_path is read
+    # and before the ORTH hard-fail guard, so a registered CT2 absolute path
+    # populates model_path and satisfies the guard (positive counterpart to
+    # test_ortho_provider_hard_fail_guard_preserved).
+    provider = LocalWhisperProvider(
+        config={"ortho": {"model_path": "", "device": "cpu", "compute_type": "int8"}},
+        config_section="ortho",
+    )
+    assert provider.model_path == str(model_dir.resolve())
+
+
 # --------------------------------------------------------------------------- #
 # Loader wiring — Aligner.load (IPA). Do not actually load torch.
 # --------------------------------------------------------------------------- #
@@ -464,6 +485,50 @@ def test_aligner_uses_registry_hf_model_when_installed(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError):
         fa.Aligner.load()
     assert seen["model_name"] == str(model_dir.resolve())
+
+
+def test_ipa_registry_ignored_when_wrong_format(monkeypatch, tmp_path):
+    import ai.forced_align as fa
+
+    bundled = tmp_path / "bundled"
+    bundled.mkdir()
+    # Wrong format for IPA: the loader only accepts hf-transformers from the
+    # registry. A faster-whisper-ct2 ipa-stage model must be ignored.
+    _write_model(bundled, "ct2-ipa", _manifest("ct2-ipa", "ipa", "faster-whisper-ct2"))
+    monkeypatch.setenv(model_registry.BUNDLED_MODELS_ENV, str(bundled))
+
+    seen = {}
+
+    def fake_from_pretrained(name, *args, **kwargs):
+        # Capture the resolved model_name then raise to stop before any real
+        # weight load; records whatever name the substitution block produced.
+        seen.setdefault("model_name", name)
+        raise RuntimeError("stop-after-substitution")
+
+    monkeypatch.setattr(fa, "_PRELOADED_ALIGNER", None, raising=False)
+
+    import types as _types
+
+    stub = _types.SimpleNamespace(
+        Wav2Vec2CTCTokenizer=_types.SimpleNamespace(from_pretrained=fake_from_pretrained),
+        Wav2Vec2FeatureExtractor=_types.SimpleNamespace(from_pretrained=fake_from_pretrained),
+        Wav2Vec2ForCTC=_types.SimpleNamespace(from_pretrained=fake_from_pretrained),
+        Wav2Vec2Processor=_types.SimpleNamespace(from_pretrained=fake_from_pretrained),
+    )
+    torch_stub = _types.SimpleNamespace(
+        set_num_threads=lambda *a: None,
+        set_num_interop_threads=lambda *a: None,
+    )
+    monkeypatch.setitem(sys.modules, "transformers", stub)
+    monkeypatch.setitem(sys.modules, "torch", torch_stub)
+    monkeypatch.setattr(fa, "resolve_device", lambda *a, **k: "cpu")
+    monkeypatch.setattr(fa, "_configure_torch_cpu_thread_limits", lambda *a, **k: None)
+
+    # Default model_name (no explicit override): the wrong-format registry model
+    # must NOT be substituted, so the default HF repo id is preserved.
+    with pytest.raises(RuntimeError):
+        fa.Aligner.load()
+    assert seen["model_name"] == fa.DEFAULT_MODEL_NAME
 
 
 def test_aligner_explicit_model_not_overridden_by_registry(monkeypatch, tmp_path):
