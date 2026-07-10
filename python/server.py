@@ -186,7 +186,7 @@ _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 _job_streaming_lock = threading.Lock()
 _job_streaming_sidecar: Optional[JobStreamingSidecar] = None
-_ROUTE_MODULE_NAMES = ("progress_ipc", "annotate", "compare", "tags", "ipa_review", "jobs", "exports", "config", "clef", "locks", "chat", "media", "lexeme_rerun", "tag_filtered_rerun")
+_ROUTE_MODULE_NAMES = ("progress_ipc", "annotate", "compare", "tags", "ipa_review", "jobs", "exports", "config", "clef", "locks", "chat", "media", "lexeme_rerun", "tag_filtered_rerun", "models")
 _ROUTE_BINDINGS_LOCK = threading.Lock()
 _ROUTE_BINDINGS_INSTALLED = False
 
@@ -1456,7 +1456,8 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if request_path == "/api/project": self._api_get_project(); return
         if request_path == "/api/config": self._api_get_config(); return
         if request_path == "/api/survey-overlap": self._api_get_survey_overlap(); return
-
+        if request_path == "/api/models": self._api_get_models(); return
+        if len(parts) == 3 and parts[0] == "api" and parts[1] == "models": self._api_get_model(parts[2]); return
         if request_path == "/api/auth/status":
             self._api_auth_status()
             return

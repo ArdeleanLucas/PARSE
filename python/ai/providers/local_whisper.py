@@ -60,6 +60,29 @@ class LocalWhisperProvider(provider_module.AIProvider):
         section_config = self.config.get(self.config_section, {})
         self.model_path = str(section_config.get("model_path", "")).strip()
 
+        # Desktop model-registry fallback (additive, fallback-only). When the
+        # section supplies NO model_path, consult the installed-model registry
+        # for a faster-whisper-ct2 pack matching this stage and, if found, use
+        # its absolute entrypoint as the model source. This changes nothing for
+        # the web product: with no bundled/user model roots present the resolver
+        # returns None and model_path stays exactly as configured (STT default
+        # "" → faster-whisper "base"; ORTH default "razhan/whisper-base-sdh" is
+        # non-empty so it never reaches this branch and its hard-fail guards
+        # below are untouched).
+        if not self.model_path:
+            stage = "ortho" if self.config_section == "ortho" else (
+                "stt" if self.config_section == "stt" else ""
+            )
+            if stage:
+                try:
+                    from ai.model_registry import resolve_stage_model
+
+                    resolved = resolve_stage_model(stage)
+                except Exception:
+                    resolved = None
+                if resolved is not None and resolved.format == "faster-whisper-ct2":
+                    self.model_path = str(resolved.entrypoint_path)
+
         # ORTH must not silently swap its model_path. Earlier revisions
         # fell back to ``stt.model_path`` when ``ortho.model_path`` was
         # empty or looked like a HuggingFace repo id (faster-whisper needs

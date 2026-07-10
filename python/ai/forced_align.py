@@ -194,6 +194,24 @@ class Aligner:
         2026-04-23). The explicit construction is also faster — no
         extra auto-tokenizer discovery round-trip.
         """
+        # Desktop model-registry fallback (additive, fallback-only). Only when
+        # the caller did NOT override the model (i.e. still the default HF repo
+        # id) do we consult the installed-model registry for an hf-transformers
+        # IPA pack. from_pretrained accepts a local directory, so a resolved
+        # record's absolute entrypoint replaces the HF repo id. This preserves
+        # web behavior exactly: with no bundled/user model roots present the
+        # resolver returns None and model_name stays DEFAULT_MODEL_NAME (→ HF
+        # download, unchanged). An explicit override is never overridden.
+        if model_name == DEFAULT_MODEL_NAME:
+            try:
+                from ai.model_registry import resolve_stage_model
+
+                resolved = resolve_stage_model("ipa")
+            except Exception:
+                resolved = None
+            if resolved is not None and resolved.format == "hf-transformers":
+                model_name = str(resolved.entrypoint_path)
+
         # Persistent-worker fast path: when a long-lived worker pre-loaded
         # the default model at startup, subsequent calls for the same
         # model reuse the cached instance instead of reloading 1.2 GB
