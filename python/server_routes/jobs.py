@@ -401,6 +401,8 @@ def _compute_subprocess_entry(job_id: str, compute_type: str, payload: _server.D
             result = _server._compute_speaker_boundaries('child-{0}'.format(job_id), payload)
         elif normalized_type in {'full_pipeline', 'full-pipeline', 'pipeline'}:
             result = _server._compute_full_pipeline('child-{0}'.format(job_id), payload)
+        elif normalized_type in {'model_install', 'model-install', 'modelinstall'}:
+            result = _server._compute_model_install('child-{0}'.format(job_id), payload)
         elif normalized_type in {'lexemes_rerun_by_tag', 'lexemes-rerun-by-tag', 'tagged_rerun', 'tagged-rerun'}:
             result = _server._compute_lexemes_rerun_by_tag('child-{0}'.format(job_id), payload)
         elif normalized_type in {'lexeme_rerun_ipa', 'lexeme-rerun-ipa', 'lexeme_ipa', 'lexeme-ipa'}:
@@ -1035,6 +1037,8 @@ def _run_compute_job(job_id: str, compute_type: str, payload: _server.Dict[str, 
             result = _server._compute_speaker_boundaries(job_id, payload)
         elif normalized_type in {'full_pipeline', 'full-pipeline', 'pipeline'}:
             result = _server._compute_full_pipeline(job_id, payload)
+        elif normalized_type in {'model_install', 'model-install', 'modelinstall'}:
+            result = _server._compute_model_install(job_id, payload)
         elif normalized_type in {'lexemes_rerun_by_tag', 'lexemes-rerun-by-tag', 'tagged_rerun', 'tagged-rerun'}:
             result = _server._compute_lexemes_rerun_by_tag(job_id, payload)
         elif normalized_type in {'lexeme_rerun_ipa', 'lexeme-rerun-ipa', 'lexeme_ipa', 'lexeme-ipa'}:

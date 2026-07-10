@@ -384,6 +384,8 @@ When the matching `src/api/contracts/*` client helpers land, these routes MUST b
 
 A lightweight, community-extensible catalog of known models per language remains a nice-to-have so survey linguists have a starting point, without PARSE bundling or endorsing every one. It is not required for v1: the paste-a-Hugging-Face-repo-id install source covers the "I already found a model" case, which is the primary field need.
 
+**Build status (storage + API landed):** the model-registry read/resolve core (`python/ai/model_registry.py`) plus the write side (`python/ai/model_install.py` + `python/server_routes/models.py`) are in place: `POST /api/models/install` (job-tracked, pack-upload or HF download), `DELETE /api/models/{id}` (user models only), and `GET`/`POST /api/models/binding` (per-project stage→model binding persisted under the `project.json` `models` key). **Open follow-up (not yet built):** wiring the providers/aligner to auto-consult the per-project binding during stage resolution. `resolve_stage_model(stage, binding_id=...)` already accepts a binding id, but no provider passes the project's stored binding yet — a project's selection is stored and validated but not consulted at compute time. That resolution wiring is the next step, tracked separately from this storage+API landing.
+
 ## 9.5 Local AI + MCP tool surface (offline)
 
 **Decision (2026-07-08): the offline desktop build ships an MCP server that a local AI model can drive.** PARSE's ~67-tool surface is already exposed two ways in the current codebase, and both carry into the frozen desktop app:

@@ -33,6 +33,10 @@ _MINIMAL_PAYLOADS: dict[str, dict[str, Any]] = {
     "lexemes_rerun_by_tag": {"speaker": "Test01", "tagLabels": ["Smoke"], "field": "ortho"},
     "lexeme_rerun_ipa": {"speaker": "Test01", "concept_key": "root", "start": 1.0, "end": 2.0},
     "lexeme_rerun_ortho": {"speaker": "Test01", "concept_key": "root", "start": 1.0, "end": 2.0},
+    # model_install is normally started via its dedicated /api/models/install route
+    # (which parses multipart/JSON and sets "mode"); it is also reachable through
+    # the generic compute route with an HF-mode payload — the runner infers mode.
+    "model_install": {"hfRepoId": "org/model", "stage": "stt", "format": "faster-whisper-ct2"},
 }
 
 

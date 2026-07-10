@@ -1457,6 +1457,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if request_path == "/api/config": self._api_get_config(); return
         if request_path == "/api/survey-overlap": self._api_get_survey_overlap(); return
         if request_path == "/api/models": self._api_get_models(); return
+        if request_path == "/api/models/binding": self._api_get_models_binding(); return
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "models": self._api_get_model(parts[2]); return
         if request_path == "/api/auth/status":
             self._api_auth_status()
@@ -1511,6 +1512,8 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         raise ApiError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
     def _dispatch_api_post(self, request_path: str) -> None:
+        if request_path == "/api/models/install": self._api_post_models_install(); return
+        if request_path == "/api/models/binding": self._api_post_models_binding(); return
         if request_path == "/api/locks/cleanup": self._api_post_locks_cleanup(); return
         if request_path == "/api/onboard/speaker":
             self._api_post_onboard_speaker()
@@ -1692,6 +1695,7 @@ class RangeRequestHandler(http.server.SimpleHTTPRequestHandler):
         if len(parts) == 5 and parts[0] == "api" and parts[1] == "compare" and parts[2] == "canonical-lexemes": self._api_delete_compare_canonical_lexeme(parts[3], parts[4]); return
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "concepts": self._api_delete_concept(parts[2]); return
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "speakers": self._api_delete_speaker(parts[2]); return
+        if len(parts) == 3 and parts[0] == "api" and parts[1] == "models": self._api_delete_model(parts[2]); return
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "concepts" and parts[3] == "survey-links":
             self._api_delete_concept_survey_link(parts[2])
             return
