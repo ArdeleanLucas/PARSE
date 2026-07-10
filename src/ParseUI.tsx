@@ -6,7 +6,7 @@ import {
   ArrowUpDown, Volume2,
   Tags, Import, AudioLines, Type, Mic,
   Workflow, Network, Trash2, ChevronDown as CDown,
-  Download,
+  Download, Boxes,
   Sun, Moon,
 } from 'lucide-react';
 import { startCompute, pollCompute, detectTimestampOffset, detectTimestampOffsetFromPairs, applyTimestampOffset, pollOffsetDetectJob, getCompareBundles, getConceptIdentity, postConceptIdentityOverride } from './api/client';
@@ -98,6 +98,7 @@ import {
   type CompareComputeMode,
 } from './components/parse/compareComputeContract';
 import { OffsetAdjustmentModal } from './components/parse/modals/OffsetAdjustmentModal';
+import { ModelsManager } from './components/settings/ModelsManager';
 import { AIChat } from './components/shared/AIChat';
 import { getClefConfig, getContactLexemeCoverage, saveClefFormSelections } from './api/client';
 import type { ClefConfigStatus, CompareBundle, ConceptIdentityOverrideRequest, ConceptIdentityResponse, ContactLexemePopulateResult, SurveyOverlapPatch, Tag } from './api/types';
@@ -2087,6 +2088,14 @@ export function ParseUI() {
                     </button>
                     <div className="my-1 border-t border-slate-100"/>
                     <button
+                      data-testid="actions-open-models"
+                      onClick={() => { setActionsMenuOpen(false); modals.models.open(); }}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                    >
+                      <Boxes className="h-3.5 w-3.5 text-slate-400"/> Models…
+                    </button>
+                    <div className="my-1 border-t border-slate-100"/>
+                    <button
                       onClick={resetProject}
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-rose-600 hover:bg-rose-50"
                     >
@@ -2765,6 +2774,10 @@ export function ParseUI() {
       <ClefSourcesReportModal
         open={modals.sourcesReport.isOpen}
         onClose={modals.sourcesReport.close}
+      />
+      <ModelsManager
+        open={modals.models.isOpen}
+        onClose={modals.models.close}
       />
       <OffsetAdjustmentModal
         open={offsetState.phase !== 'idle' && offsetState.phase !== 'detecting' && offsetState.phase !== 'applying'}

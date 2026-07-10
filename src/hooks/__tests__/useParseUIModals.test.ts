@@ -83,4 +83,20 @@ describe('useParseUIModals', () => {
     expect(result.current.sourcesReport.isOpen).toBe(false);
     expect(result.current.batchReport.isOpen).toBe(false);
   });
+
+  it('opens and closes the models manager modal', () => {
+    const { result } = renderHook(() => useParseUIModals());
+
+    expect(result.current.models.isOpen).toBe(false);
+
+    act(() => {
+      result.current.models.open();
+    });
+    expect(result.current.models.isOpen).toBe(true);
+
+    act(() => {
+      result.current.models.close();
+    });
+    expect(result.current.models.isOpen).toBe(false);
+  });
 });
