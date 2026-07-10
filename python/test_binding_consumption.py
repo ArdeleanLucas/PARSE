@@ -160,6 +160,37 @@ def test_stale_binding_falls_through_gracefully(monkeypatch, tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# 4b. Wrong-stage binding (bound id exists but is a DIFFERENT stage) -> ignored
+# --------------------------------------------------------------------------- #
+
+def test_wrong_stage_binding_not_honored(monkeypatch, tmp_path):
+    """Locks in the ``record.stage == target_stage`` guard through the provider.
+
+    Distinct from the stale-binding case: here the bound id DOES exist, it is
+    just registered for the wrong stage. The stt binding points at the ipa
+    model's id, so the guard must reject it and fall through to the single
+    legitimate stt model -- never the ipa model's entrypoint.
+    """
+    from ai.providers.local_whisper import LocalWhisperProvider
+
+    bundled = tmp_path / "bundled"
+    bundled.mkdir()
+    only_stt = _write_model(bundled, "the-only-stt", "stt", "faster-whisper-ct2")
+    _write_model(bundled, "wrong-stage-ipa", "ipa", "hf-transformers")
+    monkeypatch.setenv(model_registry.BUNDLED_MODELS_ENV, str(bundled))
+
+    # Bind stt -> the IPA model's id. The bound id exists but is stage=ipa, so
+    # the record.stage == target_stage guard must skip it.
+    project = tmp_path / "project"
+    _project_with_binding(project, {"stt": "wrong-stage-ipa"})
+    _use_project_root(monkeypatch, project)
+
+    provider = LocalWhisperProvider(config=_stt_config(), config_section="stt")
+    # Wrong-stage binding ignored -> falls through to the single stt model.
+    assert provider.model_path == str(only_stt.resolve())
+
+
+# --------------------------------------------------------------------------- #
 # 5. IPA equivalent for the aligner (bound ipa model used; no binding -> default)
 # --------------------------------------------------------------------------- #
 
