@@ -185,6 +185,31 @@ jobs:
           cd desktop
           npx electron-builder --config electron-builder.yml --mac --arm64 --publish never
 
+      # --- End-to-end smoke test: the ASSEMBLED .app's bundled backend. --- #
+      # Distinct from the earlier freeze smoke, which tests the raw
+      # dist/parse-backend/ onedir BEFORE packaging. This one drives the backend
+      # as it actually ships inside PARSE.app — electron-builder's copy of the
+      # onedir under Contents/Resources/backend/, with the afterPack +x-bit fix
+      # applied. It proves, end-to-end:
+      #   1. the exec bit survived the extraResources copy (afterPack's guarantee),
+      #   2. the frozen backend inside the packaged .app actually launches, and
+      #   3. /api/health responds — i.e. the shipped app's backend works.
+      # We launch the backend executable DIRECTLY (not via Electron), so no GUI
+      # or virtual display is needed on the runner. A FULL Electron-GUI launch —
+      # the renderer spawning the backend through backend-supervisor.js — is a
+      # separate future step that needs a virtual display.
+      - name: Smoke-test packaged app backend
+        run: bash desktop/scripts/smoke-packaged-backend.sh
+
+      - name: Upload packaged backend smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-backend-smoke-log
+          path: /tmp/parse-packaged-backend-smoke.log
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Upload macOS installer artifacts
         uses: actions/upload-artifact@v4
         with:
