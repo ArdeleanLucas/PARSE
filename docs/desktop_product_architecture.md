@@ -273,7 +273,7 @@ Delivery rules:
 
 ## 9.3 On-disk layout — two model roots
 
-The registry reads from **two roots**, both of which the Electron shell communicates to the backend at launch. This mirrors the existing bundled-binary discovery pattern (the ffmpeg `PARSE_BUNDLED_BIN` env var; see `python/shared/ffmpeg_discovery.py` and checklist B2).
+The registry reads from **two roots**, both of which the Electron shell communicates to the backend at launch. This reuses the existing bundled-resource *discovery* pattern (the ffmpeg `PARSE_BUNDLED_BIN` env var, which `python/shared/ffmpeg_discovery.py` reads and skips when unset; see checklist B2). Note the discovery side is the only part that exists today: the backend already knows how to read and skip these env vars, but nothing in `desktop/` sets `PARSE_BUNDLED_BIN` or `PARSE_BUNDLED_MODELS` yet — wiring the shell to set them is part of the pending packaging work (the "bundle IPA into Resources" increment in checklist gate B).
 
 1. **Bundled root (read-only).** The app Resources `models/` directory, discoverable via a new env var the Electron shell sets at launch — `PARSE_BUNDLED_MODELS=<resourcesPath>/models`. Unset in dev → the bundled root is simply skipped (exactly how `PARSE_BUNDLED_BIN` behaves today). Bundled models are read-only; the Models manager cannot remove them.
 2. **User root (writable).** `PARSE_USER_DATA/models/`. `PARSE_USER_DATA` is already passed from the Electron shell to the backend (see `desktop/backend-supervisor.js`, which sets `PARSE_USER_DATA: this._options.userDataRoot`). This is where every installed and downloaded model lands.
