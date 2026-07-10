@@ -31,6 +31,13 @@ concurrency:
 env:
   NODE_VERSION: "22"
   PYTHON_VERSION: "3.12"
+  # Bundled read-only IPA acoustic model (hybrid-delivery decision, §9.4). The
+  # fetch step below stages this HF repo into dist/bundled-models/<id>/ and
+  # electron-builder copies it to the app's Resources/models/. Kept here so the
+  # download step and the actions/cache key share one source of truth.
+  BUNDLED_MODEL_REPO: "facebook/wav2vec2-xlsr-53-espeak-cv-ft"
+  BUNDLED_MODEL_ID: "wav2vec2-xlsr-53-espeak-ipa"
+  BUNDLED_MODELS_STAGE_DIR: "dist/bundled-models"
 
 defaults:
   run:
@@ -170,6 +177,42 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      # --- Stage the bundled read-only IPA model (hybrid delivery, §9.4). --- #
+      # desktop/scripts/fetch-bundled-models.py snapshot_downloads the wav2vec2
+      # IPA repo into dist/bundled-models/<id>/ and writes a manifest.json, so
+      # electron-builder's extraResources copies it to the app's Resources/models/
+      # and the Electron shell sets PARSE_BUNDLED_MODELS at launch. This must run
+      # AFTER the Python deps install (the script needs huggingface_hub, which the
+      # lock provides) and BEFORE the DMG build (electron-builder reads the staged
+      # dir). The ~1.2GB download grows the DMG (~684MB -> ~1.9GB) BY DESIGN —
+      # hybrid delivery bundles only the IPA core; the STT model is a first-run
+      # fetch handled by the frontend install pipeline (tracked separately).
+      - name: Cache bundled IPA model
+        id: bundled-model-cache
+        uses: actions/cache@v4
+        with:
+          # Cache the staged model dir so the ~1.2GB download is not repeated on
+          # every run. Keyed on the model repo id + slug so a repo/id change
+          # invalidates the cache.
+          path: ${{ env.BUNDLED_MODELS_STAGE_DIR }}
+          key: ${{ runner.os }}-bundled-model-${{ env.BUNDLED_MODEL_ID }}-${{ hashFiles('desktop/scripts/fetch-bundled-models.py') }}
+          restore-keys: |
+            ${{ runner.os }}-bundled-model-${{ env.BUNDLED_MODEL_ID }}-
+
+      # Skip the ~1.2GB download entirely on a cache hit (mirrors the
+      # node_modules cache guard above); the packaged-app smoke step still
+      # asserts the manifest is present inside the built .app.
+      - name: Fetch bundled IPA model
+        if: steps.bundled-model-cache.outputs.cache-hit != 'true'
+        run: |
+          python desktop/scripts/fetch-bundled-models.py \
+            --repo-id "${BUNDLED_MODEL_REPO}" \
+            --id "${BUNDLED_MODEL_ID}" \
+            --dest-root "${BUNDLED_MODELS_STAGE_DIR}"
+          echo "--- ${BUNDLED_MODELS_STAGE_DIR}/${BUNDLED_MODEL_ID}/ ---"
+          ls -la "${BUNDLED_MODELS_STAGE_DIR}/${BUNDLED_MODEL_ID}/"
+          test -f "${BUNDLED_MODELS_STAGE_DIR}/${BUNDLED_MODEL_ID}/manifest.json"
+
       # --- Package: electron-builder assembles the DMG/zip and bundles the freeze. --- #
       - name: Install desktop shell dependencies
         run: |
@@ -199,6 +242,11 @@ jobs:
       # the renderer spawning the backend through backend-supervisor.js — is a
       # separate future step that needs a virtual display.
       - name: Smoke-test packaged app backend
+        env:
+          # The smoke script also asserts the bundled IPA model shipped at
+          # Resources/models/${BUNDLED_MODEL_ID}/manifest.json — pass the id so it
+          # matches the fetch step above rather than relying on its default.
+          BUNDLED_MODEL_ID: ${{ env.BUNDLED_MODEL_ID }}
         run: bash desktop/scripts/smoke-packaged-backend.sh
 
       - name: Upload packaged backend smoke log

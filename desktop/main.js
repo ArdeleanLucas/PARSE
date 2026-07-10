@@ -6,7 +6,7 @@ const { spawn } = require('child_process');
 const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
 
 const { createBackendSupervisor } = require('./backend-supervisor');
-const { resolveBackendLauncher } = require('./backend-launcher');
+const { resolveBackendLauncher, resolveBundledModelsDir } = require('./backend-launcher');
 const projectStore = require('./project-store');
 
 // Resolved project root for desktop-runtime mode (the folder passed to the
@@ -399,10 +399,15 @@ async function startSupervisedBackend() {
     // no python); dev builds keep the existing `python3 python/server.py` shell
     // command. resolveBackendLauncher() encapsulates that choice.
     const launcher = resolveBackendLauncher(app.isPackaged, process.resourcesPath);
+    // Read-only bundled models dir (packaged: `<resourcesPath>/models`). Undefined
+    // in dev, so the supervisor omits PARSE_BUNDLED_MODELS and the backend registry
+    // behaves exactly as the web product (no bundled root).
+    const bundledModelsRoot = resolveBundledModelsDir(app.isPackaged, process.resourcesPath);
 
     supervisor = createBackendSupervisor({
       projectRoot: selectedProjectRoot || getBackendCwd(),
       userDataRoot: app.getPath('userData'),
+      bundledModelsRoot,
       // Dev mode gets the python shell command; packaged mode passes NO python
       // fallback (null). When packaged, the frozen executable is what runs, so a
       // python command must never be handed to the supervisor — otherwise a
