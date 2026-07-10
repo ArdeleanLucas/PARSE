@@ -39,6 +39,11 @@ export interface UseParseUIModalsResult {
     open: () => void;
     close: () => void;
   };
+  models: {
+    isOpen: boolean;
+    open: () => void;
+    close: () => void;
+  };
 }
 
 export function useParseUIModals(): UseParseUIModalsResult {
@@ -49,6 +54,7 @@ export function useParseUIModals(): UseParseUIModalsResult {
   const [clefModalOpen, setClefModalOpen] = useState(false);
   const [clefInitialTab, setClefInitialTab] = useState<ClefConfigModalTab>('languages');
   const [sourcesReportOpen, setSourcesReportOpen] = useState(false);
+  const [modelsOpen, setModelsOpen] = useState(false);
 
   const openImport = useCallback(() => setImportOpen(true), []);
   const closeImport = useCallback(() => setImportOpen(false), []);
@@ -76,6 +82,9 @@ export function useParseUIModals(): UseParseUIModalsResult {
   const openSourcesReport = useCallback(() => setSourcesReportOpen(true), []);
   const closeSourcesReport = useCallback(() => setSourcesReportOpen(false), []);
 
+  const openModels = useCallback(() => setModelsOpen(true), []);
+  const closeModels = useCallback(() => setModelsOpen(false), []);
+
   return {
     import: { isOpen: importOpen, open: openImport, close: closeImport },
     commentsImport: { isOpen: commentsImportOpen, open: openCommentsImport, close: closeCommentsImport },
@@ -83,5 +92,6 @@ export function useParseUIModals(): UseParseUIModalsResult {
     batchReport: { isOpen: batchReportOpen, open: openBatchReport, close: closeBatchReport },
     clef: { isOpen: clefModalOpen, initialTab: clefInitialTab, open: openClef, close: closeClef },
     sourcesReport: { isOpen: sourcesReportOpen, open: openSourcesReport, close: closeSourcesReport },
+    models: { isOpen: modelsOpen, open: openModels, close: closeModels },
   };
 }

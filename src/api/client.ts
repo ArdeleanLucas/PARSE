@@ -19,3 +19,4 @@ export * from "./contracts/clef-contact-lexeme";
 export * from "./contracts/concepts";
 export * from "./contracts/compare";
 export * from "./contracts/speakers";
+export * from "./contracts/models";
