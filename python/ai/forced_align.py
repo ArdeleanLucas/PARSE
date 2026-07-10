@@ -206,7 +206,22 @@ class Aligner:
             try:
                 from ai.model_registry import resolve_stage_model
 
-                resolved = resolve_stage_model("ipa")
+                # Consult the active project's ipa-stage binding so the resolver
+                # can disambiguate when multiple ipa models are installed.
+                # Guarded: any failure (import error, corrupt project.json,
+                # unexpected exception) falls back to binding_id None — exactly
+                # the pre-binding behavior. The project root is cwd (mirrors
+                # ``server._project_root()``; imported lazily and via cwd rather
+                # than importing server to avoid a circular import).
+                binding_id = None
+                try:
+                    from ai.model_install import read_binding
+
+                    binding_id = read_binding(Path.cwd().resolve()).get("ipa")
+                except Exception:
+                    binding_id = None
+
+                resolved = resolve_stage_model("ipa", binding_id=binding_id)
             except Exception:
                 resolved = None
             if resolved is not None and resolved.format == "hf-transformers":
