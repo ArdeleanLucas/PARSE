@@ -138,32 +138,41 @@ describe('installModelFromHf', () => {
 
 describe('deleteModel', () => {
   it('DELETEs /api/models/{id}', async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ ok: true, id: 'user-x' }));
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ id: 'user-x', deleted: true }));
 
     const result = await deleteModel('user-x');
 
     const [url, init] = fetchSpy.mock.calls[0];
     expect(url).toBe('/api/models/user-x');
     expect(init?.method).toBe('DELETE');
-    expect(result).toEqual({ ok: true, id: 'user-x' });
+    expect(result).toEqual({ id: 'user-x', deleted: true });
   });
 });
 
 describe('getModelBinding', () => {
-  it('GETs /api/models/binding and normalizes missing stages to null', async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ stt: 'model-a' }));
+  it('GETs /api/models/binding, unwraps the {binding} envelope, and normalizes missing stages to null', async () => {
+    // Backend returns the binding wrapped: { binding: {...}, project: "..." }.
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ binding: { stt: 'model-a' }, project: '/proj' }),
+    );
 
     const binding = await getModelBinding();
 
     expect(fetchSpy.mock.calls[0][0]).toBe('/api/models/binding');
     expect(binding).toEqual({ stt: 'model-a', ipa: null, ortho: null });
   });
+
+  it('returns all-null when the binding envelope is missing', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ project: '/proj' }));
+    expect(await getModelBinding()).toEqual({ stt: null, ipa: null, ortho: null });
+  });
 });
 
 describe('setModelBinding', () => {
-  it('POSTs {stage, modelId} and returns the updated binding', async () => {
+  it('POSTs {stage, modelId} and unwraps the {binding} envelope from the response', async () => {
+    // POST returns the same { binding, project } envelope as the GET.
     fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ stt: 'model-a', ipa: null, ortho: null }),
+      jsonResponse({ binding: { stt: 'model-a', ipa: null, ortho: null }, project: '/proj' }),
     );
 
     const binding = await setModelBinding('stt', 'model-a');
@@ -176,7 +185,9 @@ describe('setModelBinding', () => {
   });
 
   it('sends modelId: null to clear a binding', async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ stt: null, ipa: null, ortho: null }));
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ binding: { stt: null, ipa: null, ortho: null }, project: '/proj' }),
+    );
 
     await setModelBinding('ipa', null);
 

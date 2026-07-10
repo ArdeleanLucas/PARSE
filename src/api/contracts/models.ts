@@ -117,8 +117,8 @@ export async function installModelFromHf(
 }
 
 export interface DeleteModelResult {
-  ok: boolean;
   id: string;
+  deleted: boolean;
 }
 
 /** DELETE /api/models/{id} — synchronous; user models only. */
@@ -128,31 +128,43 @@ export async function deleteModel(id: string): Promise<DeleteModelResult> {
   });
 }
 
+/**
+ * The backend wraps the binding map in an envelope:
+ * `{ "binding": {stt, ipa, ortho}, "project": "..." }` (both GET and POST).
+ * Unwrap `.binding` before normalizing per-stage.
+ */
+interface BindingResponse {
+  binding?: Partial<ModelBinding>;
+  project?: string;
+}
+
+function unwrapBinding(payload: BindingResponse | null | undefined): ModelBinding {
+  const b = payload?.binding ?? {};
+  return {
+    stt: b.stt ?? null,
+    ipa: b.ipa ?? null,
+    ortho: b.ortho ?? null,
+  };
+}
+
 /** GET /api/models/binding → the active project's stage bindings. */
 export async function getModelBinding(): Promise<ModelBinding> {
-  const payload = await apiFetch<Partial<ModelBinding>>(BINDING_PATH);
-  return {
-    stt: payload?.stt ?? null,
-    ipa: payload?.ipa ?? null,
-    ortho: payload?.ortho ?? null,
-  };
+  const payload = await apiFetch<BindingResponse>(BINDING_PATH);
+  return unwrapBinding(payload);
 }
 
 /**
  * POST /api/models/binding — assign (or clear, with `modelId === null`) the
- * model bound to a pipeline stage for the active project.
+ * model bound to a pipeline stage for the active project. The POST response
+ * carries the same `{binding, project}` envelope as the GET.
  */
 export async function setModelBinding(
   stage: ModelStage,
   modelId: string | null,
 ): Promise<ModelBinding> {
-  const payload = await apiFetch<Partial<ModelBinding>>(BINDING_PATH, {
+  const payload = await apiFetch<BindingResponse>(BINDING_PATH, {
     method: "POST",
     body: JSON.stringify({ stage, modelId }),
   });
-  return {
-    stt: payload?.stt ?? null,
-    ipa: payload?.ipa ?? null,
-    ortho: payload?.ortho ?? null,
-  };
+  return unwrapBinding(payload);
 }

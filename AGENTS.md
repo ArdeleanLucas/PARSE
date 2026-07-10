@@ -607,10 +607,10 @@ All `src/api/client.ts` (barrel; concrete helpers live under `src/api/contracts/
 | `saveClefFormSelections()` | `POST /api/clef/form-selections` | ✅ |
 | No frontend helper yet | `POST /api/clef/clear` | ✅ Direct HTTP + MCP/chat tool `clef_clear_data`; add a `src/api/contracts/*` helper before any frontend UI calls it |
 | No frontend helper yet | `POST /api/locks/cleanup` | ✅ Admin/stale-lock cleanup route; startup cleanup also runs server-side |
-| No frontend helper yet | `GET /api/models`, `GET /api/models/{id}` | ✅ Desktop model registry read routes (bundled + user models) |
-| No frontend helper yet | `POST /api/models/install` | ✅ Job-tracked (202 + `{jobId}`, compute_type `model_install`); multipart pack upload OR JSON `{hfRepoId, stage, format, name?}` |
-| No frontend helper yet | `DELETE /api/models/{id}` | ✅ Synchronous; USER models only (bundled are read-only and refused) |
-| No frontend helper yet | `GET /api/models/binding`, `POST /api/models/binding` | ✅ Per-project stage→model binding in `project.json` `models` key; POST `{stage, modelId}` (validated; `modelId` null clears) |
+| `listModels()` / `getModel()` | `GET /api/models`, `GET /api/models/{id}` | ✅ Desktop model registry read routes (bundled + user models) |
+| `installModelPack()` / `installModelFromHf()` | `POST /api/models/install` | ✅ Job-tracked (202 + `{jobId}`, compute_type `model_install`); multipart pack upload OR JSON `{hfRepoId, stage, format, name?}` |
+| `deleteModel()` | `DELETE /api/models/{id}` | ✅ Synchronous; USER models only (bundled are read-only and refused); returns `{id, deleted}` |
+| `getModelBinding()` / `setModelBinding()` | `GET /api/models/binding`, `POST /api/models/binding` | ✅ Per-project stage→model binding in `project.json` `models` key; response wraps `{binding, project}`; POST `{stage, modelId}` (validated; `modelId` null clears) |
 
 **Rule:** Keep this table current. Every new client helper must have a matching server route before merge.
 

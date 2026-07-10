@@ -12,6 +12,7 @@ import {
   type ModelRecord,
   type ModelStage,
 } from "../api/client";
+import type { ComputeStatus } from "../api/types";
 
 /** compute_type the backend registers the install job under. */
 export const MODEL_INSTALL_COMPUTE_TYPE = "model_install";
@@ -90,7 +91,7 @@ export const useModelStore = create<ModelStore>()((set, get) => {
     if (get().install.jobId !== jobId) {
       return;
     }
-    let poll;
+    let poll: ComputeStatus;
     try {
       poll = await pollCompute(MODEL_INSTALL_COMPUTE_TYPE, jobId);
     } catch (err) {

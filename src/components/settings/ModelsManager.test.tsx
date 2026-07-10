@@ -129,6 +129,23 @@ describe("ModelsManager", () => {
     expect(actions.setBinding).toHaveBeenCalledWith("stt", "stt-user");
   });
 
+  it("filters each stage dropdown to only its own stage models", () => {
+    setState({ models: [STT_USER, IPA_BUNDLED] });
+    render(<ModelsManager open onClose={vi.fn()} />);
+
+    // The STT select offers the STT model but NOT the IPA model.
+    const sttSelect = screen.getByTestId("model-binding-stt") as HTMLSelectElement;
+    const sttValues = Array.from(sttSelect.options).map((o) => o.value);
+    expect(sttValues).toContain("stt-user");
+    expect(sttValues).not.toContain("ipa-bundled");
+
+    // The IPA select offers the IPA model but NOT the STT model.
+    const ipaSelect = screen.getByTestId("model-binding-ipa") as HTMLSelectElement;
+    const ipaValues = Array.from(ipaSelect.options).map((o) => o.value);
+    expect(ipaValues).toContain("ipa-bundled");
+    expect(ipaValues).not.toContain("stt-user");
+  });
+
   it("clears a binding when Unassigned is chosen", () => {
     setState({ models: [STT_USER], binding: { stt: "stt-user", ipa: null, ortho: null } });
     render(<ModelsManager open onClose={vi.fn()} />);
