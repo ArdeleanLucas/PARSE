@@ -49,6 +49,13 @@ from ai.model_registry import (
 # Accepted pack container extensions for local file install.
 PACK_EXTENSIONS = frozenset({".zip", ".parsemodel"})
 
+# Cap the total (and per-member) UNCOMPRESSED pack size before we decompress
+# anything. ``zf.testzip()`` and extraction both inflate every member, so a
+# high-ratio zip bomb would balloon during validation; summing the declared
+# ``file_size`` fields (cheap, no decompression) and rejecting an oversized pack
+# up front bounds that. 10 GiB is generous for a real model directory.
+_MAX_UNCOMPRESSED_BYTES = 10 * 1024**3
+
 # Map a manifest ``format`` to the runtime engine we record when synthesizing a
 # manifest for an HF download. The pack path trusts the embedded manifest's
 # engine; this table only backs the generated-manifest (HF) path.
@@ -288,6 +295,23 @@ def install_pack(
         raise ModelInstallError("pack is not a valid zip archive")
 
     with zipfile.ZipFile(src) as zf:
+        # Zip-bomb guard: reject before testzip()/extraction (both decompress
+        # every member). Sum the DECLARED uncompressed sizes — cheap, no inflate.
+        infos = zf.infolist()
+        total_uncompressed = sum(zi.file_size for zi in infos)
+        if total_uncompressed > _MAX_UNCOMPRESSED_BYTES:
+            raise ModelInstallError(
+                "pack uncompressed size {0} bytes exceeds the {1}-byte cap; refused".format(
+                    total_uncompressed, _MAX_UNCOMPRESSED_BYTES
+                )
+            )
+        for zi in infos:
+            if zi.file_size > _MAX_UNCOMPRESSED_BYTES:
+                raise ModelInstallError(
+                    "pack member {0!r} uncompressed size {1} bytes exceeds the {2}-byte cap; refused".format(
+                        zi.filename, zi.file_size, _MAX_UNCOMPRESSED_BYTES
+                    )
+                )
         bad = zf.testzip()
         if bad is not None:
             raise ModelInstallError("pack archive is corrupt (member {0})".format(bad))

@@ -204,6 +204,26 @@ def test_install_pack_parsemodel_extension_accepted(user_root, tmp_path):
     assert result["id"] == "pm"
 
 
+def test_install_pack_uncompressed_size_cap_rejects_before_extract(monkeypatch, user_root, tmp_path):
+    """A pack whose declared uncompressed size exceeds the cap is refused up front.
+
+    Rather than fabricate a multi-GB file, we drop the cap to a tiny value so a
+    normal small pack trips the guard. The guard must fire BEFORE extraction, so
+    no model dir (and no staging dir) is created.
+    """
+    monkeypatch.setattr(model_install, "_MAX_UNCOMPRESSED_BYTES", 10)
+    pack = _build_pack(tmp_path, manifest=_manifest("bomb", "stt", "faster-whisper-ct2"))
+
+    with pytest.raises(model_install.ModelInstallError) as exc:
+        model_install.install_pack(str(pack))
+    assert "cap" in str(exc.value).lower()
+    assert exc.value.status_hint == 400
+    # Guard fired before extraction: no model dir, no leftover staging dir.
+    assert not (user_root / "bomb").exists()
+    if user_root.exists():
+        assert not any(p.name.startswith(".staging-") for p in user_root.iterdir())
+
+
 # --------------------------------------------------------------------------- #
 # HF install (snapshot_download monkeypatched)
 # --------------------------------------------------------------------------- #
@@ -550,17 +570,17 @@ def test_binding_get_post_routes(monkeypatch, user_root, tmp_path):
 
     model_install.install_pack(str(_build_pack(tmp_path, manifest=_manifest("bind-stt", "stt", "faster-whisper-ct2"))))
 
-    # GET default -> all None.
+    # GET default -> all None. The route resolves the root only via
+    # _project_root() (monkeypatched above); no ?project= override exists.
     get_h = _HandlerHarness()
-    get_h._request_query_params = lambda: {}
     get_h._api_get_models_binding()
     status, payload = get_h.sent_json[0]
     assert status == HTTPStatus.OK
     assert payload["binding"] == {"stt": None, "ipa": None, "ortho": None}
+    assert payload["project"] == str(project)
 
     # POST set.
     post_h = _HandlerHarness()
-    post_h._request_query_params = lambda: {}
     post_h._read_json_body = lambda required=True: {"stage": "stt", "modelId": "bind-stt"}
     post_h._api_post_models_binding()
     status, payload = post_h.sent_json[0]
@@ -569,7 +589,6 @@ def test_binding_get_post_routes(monkeypatch, user_root, tmp_path):
 
     # POST stage-mismatch -> 400.
     bad_h = _HandlerHarness()
-    bad_h._request_query_params = lambda: {}
     bad_h._read_json_body = lambda required=True: {"stage": "ortho", "modelId": "bind-stt"}
     with pytest.raises(server.ApiError) as exc:
         bad_h._api_post_models_binding()

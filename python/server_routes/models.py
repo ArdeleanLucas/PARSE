@@ -57,7 +57,9 @@ def _api_get_model(self, model_id: str) -> None:
 # Accepted pack file extensions on the upload field.
 _PACK_UPLOAD_EXTENSIONS = (".zip", ".parsemodel")
 # Guard the pack upload size the same way onboarding guards audio uploads.
-_INSTALL_MAX_UPLOAD_BYTES = getattr(_server, "ONBOARD_MAX_UPLOAD_BYTES", 8 * 1024 * 1024 * 1024)
+# ``ONBOARD_MAX_UPLOAD_BYTES`` (server.py, 2 GB) always exists — reference it
+# directly rather than a misleading fallback literal.
+_INSTALL_MAX_UPLOAD_BYTES = _server.ONBOARD_MAX_UPLOAD_BYTES
 
 
 def _api_post_models_install(self) -> None:
@@ -272,7 +274,7 @@ def _api_get_models_binding(self) -> None:
     """GET /api/models/binding — the per-project stage→model binding map."""
     from ai import model_install
 
-    project_root = _resolve_binding_project_root(self)
+    project_root = _server._project_root()
     binding = model_install.read_binding(project_root)
     self._send_json(_server.HTTPStatus.OK, {"binding": binding, "project": str(project_root)})
 
@@ -289,26 +291,12 @@ def _api_post_models_binding(self) -> None:
     raw_model_id = body.get("modelId")
     if raw_model_id is None:
         raw_model_id = body.get("model_id")
-    project_root = _resolve_binding_project_root(self)
+    project_root = _server._project_root()
     try:
         binding = model_install.set_binding(project_root, stage, raw_model_id)
     except model_install.ModelInstallError as exc:
         raise _server.ApiError(_status_from_hint(exc), str(exc)) from exc
     self._send_json(_server.HTTPStatus.OK, {"binding": binding, "project": str(project_root)})
-
-
-def _resolve_binding_project_root(self) -> _server.Any:
-    """Resolve the project root for a binding request.
-
-    Honors an explicit ``?project=`` query param (matching how ``GET /api/project``
-    lets the desktop shell target a root), otherwise falls back to the server's
-    default ``_project_root()``.
-    """
-    params = self._request_query_params()
-    values = params.get("project") or []
-    if values and str(values[0]).strip():
-        return _server.pathlib.Path(str(values[0]).strip()).expanduser()
-    return _server._project_root()
 
 
 def _status_from_hint(exc) -> _server.Any:
