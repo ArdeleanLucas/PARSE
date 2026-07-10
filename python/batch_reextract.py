@@ -46,10 +46,62 @@ import subprocess
 import sys
 from pathlib import Path
 
+from shared.ffmpeg_discovery import (
+    FFMPEG_OVERRIDE_ENV,
+    FfmpegNotFoundError,
+    discover_ffmpeg,
+)
+
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
+
+def _verify_ffmpeg_binary(candidate: str) -> bool:
+    """Return True if `candidate -version` runs and exits 0."""
+    try:
+        probe = subprocess.run(
+            [candidate, "-version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return False
+    return probe.returncode == 0
+
+
+def resolve_ffmpeg_binary(cli_ffmpeg: str) -> str:
+    """Resolve an ffmpeg binary using the cross-platform discovery policy.
+
+    The CLI ``--ffmpeg-bin`` flag stays the highest-priority override: if set but
+    not executable it fails fast rather than auto-discovering. When omitted,
+    ffmpeg is resolved via the shared ordered policy (env override ->
+    bundled/frozen dir -> PATH -> common per-OS locations).
+    """
+    candidate = cli_ffmpeg.strip()
+    if candidate:
+        if _verify_ffmpeg_binary(candidate):
+            return candidate
+        print(
+            f"ERROR: --ffmpeg-bin is set but not executable: {candidate}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    try:
+        return discover_ffmpeg(verify=_verify_ffmpeg_binary)
+    except FfmpegNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        print(
+            f"You can also pass --ffmpeg-bin /path/to/ffmpeg, or set "
+            f"{FFMPEG_OVERRIDE_ENV}=/path/to/ffmpeg.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -88,10 +140,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--ffmpeg-bin",
         metavar="PATH",
-        default="ffmpeg",
+        default="",
         help=(
-            "Path (or name) of the ffmpeg binary. Defaults to 'ffmpeg' (must be on PATH). "
-            "Example: --ffmpeg-bin C:/ffmpeg/bin/ffmpeg.exe"
+            "Path (or name) of the ffmpeg binary (highest priority). When omitted, "
+            "ffmpeg is auto-discovered via the PARSE_FFMPEG environment variable, a "
+            "bundled/frozen desktop directory, PATH, and common per-OS install "
+            "locations. Example: --ffmpeg-bin C:/ffmpeg/bin/ffmpeg.exe"
         ),
     )
     p.add_argument(
@@ -487,6 +541,20 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
 
+    # --- Resolve ffmpeg ---
+    # --ffmpeg-bin stays the highest-priority override; when omitted the binary
+    # is auto-discovered (env / bundled-frozen / PATH / common locations). In
+    # dry-run (default, no --execute) ffmpeg is never spawned, so discovery is
+    # best-effort there and falls back to a plain 'ffmpeg' display token.
+    ffmpeg_explicit = bool(args.ffmpeg_bin.strip())
+    if not args.execute and not ffmpeg_explicit:
+        try:
+            ffmpeg_bin = discover_ffmpeg(verify=_verify_ffmpeg_binary)
+        except FfmpegNotFoundError:
+            ffmpeg_bin = "ffmpeg"
+    else:
+        ffmpeg_bin = resolve_ffmpeg_binary(args.ffmpeg_bin)
+
     # --- Load decisions ---
     print(f"Loading decisions from: {args.decisions}")
     decisions = load_decisions(args.decisions)
@@ -533,7 +601,7 @@ def main():
     missing_sources = 0
 
     for i, job in enumerate(jobs, start=1):
-        cmd = build_ffmpeg_cmd(job, ffmpeg_bin=args.ffmpeg_bin)
+        cmd = build_ffmpeg_cmd(job, ffmpeg_bin=ffmpeg_bin)
         cmd_str = format_cmd_for_display(cmd)
 
         # Annotation line
