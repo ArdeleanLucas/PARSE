@@ -22,7 +22,7 @@ Use this file to track practical readiness for shipping PARSE Desktop on macOS +
 - **Current target milestone:** Gate A — Internal Alpha (macOS), revived 2026-07-08
 - **Overall readiness:** Plan refreshed; no packaging work started yet
 - **Open blockers (2026-07-08):** frozen Python runtime + dependency lock; desktop-hardened security defaults (`0.0.0.0`/CORS today); packaging pipeline (no electron-builder/freeze config); project-lifecycle contract + UI. Offset/spectrogram compute-route mismatch is **resolved** (routes implemented).
-- **Key decisions:** runtime = freeze per platform (PyInstaller/Nuitka); bundle Whisper + wav2vec2, no ORTH model, models plug-and-play per project (see architecture §9.2–§9.4).
+- **Key decisions:** runtime = freeze per platform (PyInstaller/Nuitka); **hybrid model delivery** (2026-07-09) — bundle only the wav2vec2 IPA acoustic core in Resources; the standard STT model and every other model install through one plug-in registry (no hardcoded STT default); no ORTH model bundled; models plug-and-play per project via a manifest-driven registry with two roots (bundled Resources + writable user data). See architecture §9.2–§9.4.
 
 ---
 
@@ -96,9 +96,13 @@ If nothing verifies, an actionable error names the override env vars and how to 
 
 ## B3) Data/model management
 
-- [ ] Whisper (STT) and wav2vec2 (IPA) ship bundled so a fresh install transcribes and produces IPA offline. No ORTH model is bundled.
-- [ ] Plug-and-play model install path implemented — a linguist can add a model (e.g. `razhan/whisper-base-sdh`) per project without editing code/config by hand (see architecture §9.4).
-- [ ] Model cache location configurable.
+**Design decided 2026-07-09 (architecture §9.2–§9.4):** hybrid delivery + one manifest-driven registry. Bundle only the wav2vec2 IPA acoustic core (read-only, in Resources); deliver the standard STT model and every plug-in through the same registry (no hardcoded STT default); no ORTH model bundled. Two roots: bundled Resources (`PARSE_BUNDLED_MODELS`) + writable user data (`PARSE_USER_DATA/models/`). The items below are the remaining implementation, broken into increments.
+
+- [ ] **Registry core + read routes.** Model registry scans both roots, parses `manifest.json` (schema_version 1), and resolves stage → model by the precedence in §9.4.2. `GET /api/models` + `GET /api/models/{id}`. Backward-compat guarantee holds: with no models root, stage loading is exactly as today (config `model_path` / HF repo id). *Design: decided. Build: pending.*
+- [ ] **Install + per-project binding + job-tracking.** `POST /api/models/install` (202 + `{jobId}`; multipart pack OR `{hfRepoId, stage, format}`), `DELETE /api/models/{id}` (user only), `GET`/`POST /api/models/binding`. Install is job-tracked per the long-running-endpoint rule (registered at both dispatch sites in `python/server_routes/jobs.py`, per-unit `_set_compute_progress`). HF-repo installs generate a manifest and store under the user root. Integrity checks run on unpack/download. *Design: decided. Build: pending.*
+- [ ] **Settings > Models manager (frontend).** Installed-models list (name, stage, size, source badge, bundled-vs-user), Add control (upload pack OR paste HF repo id → job-tracked progress via `startCompute`/`pollCompute`), Remove (user models only), per-project stage-assignment dropdowns (STT/IPA/ORTH). First-run prompt to download the standard STT pack when no STT model is installed. *Design: decided. Build: pending.*
+- [ ] **Packaging: bundle IPA into Resources + first-run STT fetch.** Ship the wav2vec2 IPA model read-only under app Resources `models/`; Electron shell sets `PARSE_BUNDLED_MODELS=<resourcesPath>/models` at launch (mirrors `PARSE_BUNDLED_BIN`). First run with no STT model installed fetches the standard STT pack through the install pipeline. *Design: decided. Build: pending.*
+- [ ] Model cache location configurable (default = user root `PARSE_USER_DATA/models/`; user-selectable via Settings > Storage).
 - [ ] Model download/install flow includes integrity checks.
 - [x] CPU-only mode works without GPU dependencies. Device resolution defaults to CPU when no CUDA is present: `resolve_compute_device(stage, config_device=, section_default="auto")` in `python/ai/device.py` maps `"auto"` → `"cuda"` only when `torch.cuda.is_available()`, else `"cpu"`. wav2vec2 IPA is CPU-safe through the same resolver (`python/ai/forced_align.py`, `resolve_compute_device("ipa", ...)`; torch on CPU needs no compute_type). faster-whisper `compute_type` is now device-aware: on a CPU-resolved device `float16` is coerced to `int8` before model load (`python/ai/providers/local_whisper.py`), because ctranslate2 supports `int8`/`int8_float32`/`int16`/`float32` on CPU but not `float16` (which would otherwise silently degrade to `float32` — slower, higher memory). Any other explicit CPU compute_type is honored; GPU keeps `float16`. This lets a frozen CPU-only build run STT/ORTH offline with a supported, low-memory compute type. Covered by `python/test_local_whisper_cpu_compute_type.py`.
 - [x] GPU detection + automatic fallback to CPU implemented. `resolve_compute_device` falls back proactively (an explicit `"cuda"` request on a machine without CUDA resolves to `"cpu"` with a warning) and the faster-whisper loader falls back reactively (a CUDA runtime failure at model load retries `device="cpu"`, `compute_type="int8"`; `python/ai/providers/local_whisper.py`). GPU behavior is otherwise unchanged (`device` startswith `"cuda"` keeps `float16`).
@@ -120,7 +124,7 @@ If nothing verifies, an actionable error names the override env vars and how to 
 See `docs/plans/generalize-beyond-southern-kurdish.md` for the full work breakdown.
 
 - [ ] No hardcoded `"sdh"` / `"ku"` / `"kur-Arab"` language defaults on server or compute paths.
-- [ ] STT model is selected per project, not hardcoded to `razhan/whisper-base-sdh`.
+- [ ] STT model is selected per project, not hardcoded to `razhan/whisper-base-sdh` (satisfied by the per-project stage → model binding in the model registry, architecture §9.4.2).
 - [ ] `config/phonetic_rules.json` ships empty; SK rules available as a named preset.
 - [ ] Orthography→IPA conversion dispatches by `(language, script)` — no implicit SK-Arabic fallback.
 - [ ] At least one non-SK language validated end-to-end through annotate + compare.
@@ -185,6 +189,7 @@ These items should be tracked continuously, not only at gate boundaries.
 - [ ] Project create/update API route(s) are fully implemented and used consistently.
 - [ ] Compute route expectations in frontend match backend implementation.
 - [ ] Endpoint naming and payloads are documented in one canonical source.
+- [ ] Model registry routes (`GET /api/models`, `GET /api/models/{id}`, `POST /api/models/install`, `DELETE /api/models/{id}`, `GET`/`POST /api/models/binding`) land in the `AGENTS.md`/`CLAUDE.md` client/server contract table when their `src/api/contracts/*` helpers ship (architecture §9.4.5).
 
 ## D2) Legacy compatibility cleanup
 

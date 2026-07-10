@@ -189,9 +189,9 @@ Use Electron `app.getPath('userData')` as root.
     temp/
     waveform/
     stt/
-  models/
-    manifest.json
-    whisper/
+  models/               (user model root; each model is <id>/manifest.json + files — see §9.3)
+    <id>/
+      manifest.json
   runtime/
     python/            (bundled/managed runtime assets)
   backups/
@@ -260,32 +260,129 @@ Use Electron `app.getPath('userData')` as root.
 3. **Cloud AI optional**
    - OpenAI/xAI/Ollama connectors (provider-dependent)
 
-## 9.2 Model strategy — bundled baseline + plug-and-play registry
+## 9.2 Model strategy — hybrid delivery + plug-and-play registry
 
-**Decision (2026-07-08):**
+**Decision (2026-07-09, supersedes the 2026-07-08 "bundle both models" baseline):** delivery is **hybrid** — bundle only the always-needed acoustic core, and deliver every other model (including the standard STT model) through one plug-in pipeline. There is no special-cased hardcoded STT default; "the standard STT model" is simply the first model-pack the registry installs. This unifies "the shipped default" and "a user plug-in" into a single mechanism.
 
-- **Bundle as standard:** a general STT model (Whisper via `faster-whisper`) and the wav2vec2 IPA/alignment model. These ship in the installer so a fresh install can transcribe and produce IPA fully offline on first run.
-- **Do not bundle any orthography (ORTH) model.** ORTH is inherently language-specific — there is no sensible default. `config/phonetic_rules.json` / SK presets ship as named presets, not defaults (this dovetails with the Beta linguistic-portability lane, checklist B6).
-- **Plug-and-play models are a first-class design goal, not a nice-to-have.** A survey linguist working on a language PARSE has never seen must be able to obtain a model (for example `razhan/whisper-base-sdh` for Southern Kurdish) and "plug it in" per project/language without editing code or config files by hand. This needs deliberate design — see §9.4.
+Delivery rules:
 
-## 9.3 Model manifest and cache
+- **Bundle one model only — the IPA acoustic core.** The wav2vec2 IPA/alignment model (as one example, `facebook/wav2vec2-xlsr-53-espeak-cv-ft`) ships read-only inside the installer/DMG under app Resources. It is the always-needed acoustic core, so bundling it keeps the app usable offline for IPA immediately on first run.
+- **Do not bake the standard STT model into the installer.** The standard STT model (as one example, a Whisper `small` multilingual model, ~460 MB) is fetched on first run — but it is delivered *through the same plug-in pipeline as any other model*. It is just the first model-pack the registry installs; there is no hardcoded STT default path. See §9.4 for the first-run fetch and the resolution precedence.
+- **Do not bundle any orthography (ORTH) model.** ORTH is inherently language-specific — there is no sensible default. Users plug an ORTH model in per project/language if they want one. `config/phonetic_rules.json` / SK presets ship as named presets, not defaults (this dovetails with the Beta linguistic-portability lane, checklist B6).
+- **Plug-and-play models are a first-class design goal, not a nice-to-have.** A survey linguist working on a language PARSE has never seen must be able to obtain a model (for example `razhan/whisper-base-sdh` for Southern Kurdish) and "plug it in" per project/language without editing code or config files by hand. §9.4 specifies that mechanism as the plan-of-record.
 
-- Maintain a **model manifest** (name, version, checksum, size, license, min runtime, task type STT/ORTH/IPA, and `(language, script)` applicability).
-- User-selectable model cache location (default in the app user-data `models/` dir).
-- Download/import manager with checksum verification and a clear fallback when a preferred model is unavailable.
+## 9.3 On-disk layout — two model roots
 
-## 9.4 Plug-and-play model design (open design task)
+The registry reads from **two roots**, both of which the Electron shell communicates to the backend at launch. This reuses the existing bundled-resource *discovery* pattern (the ffmpeg `PARSE_BUNDLED_BIN` env var, which `python/shared/ffmpeg_discovery.py` reads and skips when unset; see checklist B2). Note the discovery side is the only part that exists today: the backend already knows how to read and skip these env vars, but nothing in `desktop/` sets `PARSE_BUNDLED_BIN` or `PARSE_BUNDLED_MODELS` yet — wiring the shell to set them is part of the pending packaging work (the "bundle IPA into Resources" increment in checklist gate B).
 
-The goal: a linguist finds a model and installs it into PARSE the way they install a font or a Praat plugin — no terminal.
+1. **Bundled root (read-only).** The app Resources `models/` directory, discoverable via a new env var the Electron shell sets at launch — `PARSE_BUNDLED_MODELS=<resourcesPath>/models`. Unset in dev → the bundled root is simply skipped (exactly how `PARSE_BUNDLED_BIN` behaves today). Bundled models are read-only; the Models manager cannot remove them.
+2. **User root (writable).** `PARSE_USER_DATA/models/`. `PARSE_USER_DATA` is already passed from the Electron shell to the backend (see `desktop/backend-supervisor.js`, which sets `PARSE_USER_DATA: this._options.userDataRoot`). This is where every installed and downloaded model lands.
 
-Design surface to specify before Beta:
+Each installed model — in either root — is a subdirectory named by its stable `id`:
 
-1. **A model package contract** — what a "pluggable PARSE model" is on disk (the model artifact + a manifest entry declaring task, `(language, script)`, runtime, license, checksum). CT2-compatible artifacts for the faster-whisper path; do **not** depend on ad-hoc local HF cache structure.
-2. **An install path** — "Add model…" in Settings > Models that accepts a local file/folder (offline field use) and, optionally, a curated download source. Verify checksum, register in the manifest, surface license.
-3. **Per-project binding** — a project selects which STT/ORTH/IPA model it uses; selection is not hardcoded (see the Beta linguistic-portability lane, checklist B6 — "STT model is selected per project, not hardcoded to `razhan/whisper-base-sdh`").
-4. **Discoverability** — a lightweight, community-extensible catalog of known models per language so survey linguists have a starting point, without PARSE having to bundle or endorse every one.
+```text
+<root>/models/
+  <id>/
+    manifest.json      (the model-pack manifest, schema below)
+    <model files>      (or an entrypoint subdir the manifest points at)
+```
 
-This subsection is the anchor for that design work; it is intentionally not yet a finished spec.
+The default cache location is the user root above; it remains user-selectable via Settings > Storage as today.
+
+## 9.3.1 Model-pack + manifest contract (schema_version 1)
+
+A **PARSE model-pack** is a zip whose root contains `manifest.json` plus the model files (or an entrypoint subdirectory). Installing a pack normalizes it to `<user root>/models/<id>/`. The manifest is the single source of truth for how the registry resolves and loads a model:
+
+```json
+{
+  "schema_version": 1,
+  "id": "whisper-small",                      // stable unique slug = install dir name
+  "name": "Whisper small (multilingual)",     // display name
+  "stage": "stt",                             // one of: "stt" | "ipa" | "ortho"
+  "format": "faster-whisper-ct2",             // "faster-whisper-ct2" (CTranslate2 dir for faster-whisper) | "hf-transformers" (HF from_pretrained dir)
+  "engine": "faster-whisper",                 // informational: "faster-whisper" | "wav2vec2" | "hf-whisper"
+  "languages": ["*"],                         // ["*"] = any, or a list of language codes
+  "entrypoint": ".",                          // path within the model dir passed to the loader (WhisperModel(dir) / from_pretrained(dir))
+  "version": "1.0.0",
+  "source": { "type": "bundled|user|hf", "ref": "<hf repo id | pack filename | ''>" },
+  "size_bytes": 460000000                     // optional, for UI display
+}
+```
+
+Field semantics:
+
+- **`id`** — stable unique slug; it is also the install directory name, so it must be filesystem-safe and unique across both roots.
+- **`stage`** — which pipeline stage the model serves: `stt`, `ipa`, or `ortho`. Stage→model resolution (§9.4) keys off this.
+- **`format`** — how the loader consumes the model dir. `faster-whisper-ct2` is a CTranslate2 model directory loaded by faster-whisper; `hf-transformers` is a Hugging Face `from_pretrained` directory. `format` (how to load) is intentionally distinct from `engine` (informational label).
+- **`entrypoint`** — a path *within* the model dir that the loader receives. It resolves to an absolute local directory that the loader consumes. `"."` means the model dir itself.
+- **`languages`** — `["*"]` means the model applies to any language; otherwise a list of language codes used for display/filtering only (it does not override an explicit per-project binding).
+- **`source`** — provenance for display and re-fetch: `bundled` (shipped in Resources), `user` (installed from an uploaded pack), or `hf` (downloaded from a Hugging Face repo id, recorded in `ref`).
+
+### How a manifest maps to the existing loaders
+
+The registry does not introduce a new loading path. Both existing loaders already accept **either** a local directory **or** a Hugging Face repo id, so a model-pack's `entrypoint` simply resolves to an absolute local directory the loader consumes:
+
+- **STT and faster-whisper-format ORTH** — `WhisperModel(<entrypoint_dir>)` (faster-whisper over a CTranslate2 directory).
+- **wav2vec2 IPA and HF-transformers ORTH** — `*.from_pretrained(<entrypoint_dir>)` (for example `Wav2Vec2ForCTC.from_pretrained(...)` in `python/ai/forced_align.py`, or the HF-Whisper ORTH provider).
+
+So resolving a stage to a model means: look up the stage's model id, read its manifest, and hand the loader the absolute `entrypoint` directory. No loader change is required for the desktop registry; it feeds local directories into the paths that already exist.
+
+## 9.4 Plug-and-play model design (decided — plan of record)
+
+**Decided 2026-07-09.** The goal is unchanged: a linguist finds a model and installs it into PARSE the way they install a font or a Praat plugin — no terminal. This subsection is now the single source of truth for that mechanism; the sections below are the plan the implementation PRs build against, not open design questions.
+
+The mechanism is one **desktop model registry** that scans the two roots of §9.3, reads each `manifest.json`, and answers two questions: *what models are installed?* and *which model serves this stage for this project?* The same registry delivers the standard STT model (§9.2) and any user plug-in — they differ only in `source`.
+
+### 9.4.1 Install sources (two)
+
+Both sources normalize to a directory under the user root — `PARSE_USER_DATA/models/<id>/` with a `manifest.json`:
+
+1. **A model-pack zip** the user uploads or drops in. PARSE unpacks it, validates the manifest against schema_version 1, and stores it under the user root by its `id`.
+2. **A Hugging Face repo id** the user pastes (for example `razhan/whisper-base-sdh`). PARSE downloads the repo, **wraps it with a generated manifest** (filling `id`, `stage`, `format`, `source.type = "hf"`, `source.ref = <repo id>`, `entrypoint = "."`), and stores it under the user root.
+
+Because downloads and unpacks are slow, **install MUST be a job-tracked background operation** — return `202 + {jobId}` immediately and emit progress — per the AGENTS.md long-running-endpoint rule. The Models manager shows install progress from the job.
+
+### 9.4.2 Stage → model resolution precedence
+
+For a given pipeline stage (`stt` / `ipa` / `ortho`) the registry resolves a model in this order:
+
+1. **Explicit per-project binding.** `project.json` carries a `models` mapping of stage → model `id`, e.g. `"models": { "stt": "whisper-small", "ipa": "wav2vec2-espeak", "ortho": "razhan-whisper-base-sdh" }`. If the stage has a binding, use that model id.
+2. **The single installed model for that stage.** If exactly one model of that stage is installed (across both roots) and there is no explicit binding, use it.
+3. **First-run fetch (STT only).** If the stage is `stt` and no STT model is installed, trigger the first-run fetch of the standard STT pack (§9.2) through the install pipeline above. This is the *only* stage with an implicit fetch, and it is not a hardcoded model path — it is the registry installing its first model-pack.
+4. **Clear error otherwise.** If none of the above resolves (e.g. ORTH with no model installed and no binding), the stage errors clearly, naming the stage and pointing at Settings > Models — it does not silently pick a model or fall back to a hardcoded default.
+
+### 9.4.3 Backward-compatibility guarantee (additive, desktop-oriented)
+
+The registry is **purely additive**. When no models directory / registry entry exists for a stage — which is the case for the web product and for any non-desktop deployment — behavior is **exactly as today**: the stage loads from the existing `config` `model_path` / Hugging Face repo id, unchanged. The registry only takes over resolution when a desktop models root is present and has an entry for the stage. No existing config path is removed or rewritten; the desktop registry is a resolution layer that sits *in front of* the current behavior and defers to it whenever it has nothing to say.
+
+### 9.4.4 Settings > Models manager (v1 UX)
+
+A Settings panel that makes the registry usable without a terminal:
+
+- **Installed-models list** — each row shows name, stage, size, a source badge (bundled vs user), and whether it is read-only (bundled) or removable (user).
+- **Add control** — either upload a model-pack zip or paste a Hugging Face repo id. Either path kicks off the job-tracked install (§9.4.1) and shows install progress inline.
+- **Remove** — user models only; bundled models are read-only and cannot be removed.
+- **Per-project stage assignment** — dropdowns for STT / IPA / ORTH, each listing the installed models of that stage, writing the `project.json` `models` binding (§9.4.2, precedence step 1).
+- **First-run** — if no STT model is installed, the panel prompts to download the standard STT pack, driving the first-run fetch (§9.4.2, step 3) through the same install job.
+
+### 9.4.5 HTTP surface (to be implemented)
+
+The registry is exposed over the loopback HTTP backend. These routes are the plan of record for the implementation PRs:
+
+| Route | Purpose |
+|---|---|
+| `GET /api/models` | List installed models (both roots), with manifest fields for the manager. |
+| `GET /api/models/{id}` | Detail for one model. |
+| `POST /api/models/install` | Install a model. **202 + `{jobId}`**; accepts either a multipart model-pack upload or a JSON body `{hfRepoId, stage, format}`. Job-tracked (§9.4.1). |
+| `DELETE /api/models/{id}` | Remove a model (user models only; bundled are read-only). |
+| `GET /api/models/binding?project=<root>` | Read the per-project stage → model id binding. |
+| `POST /api/models/binding` | Write the per-project stage → model id binding. |
+
+When the matching `src/api/contracts/*` client helpers land, these routes MUST be added to the client/server contract table in `AGENTS.md` / `CLAUDE.md` (the "every new client helper must have a matching server route before merge" rule). `POST /api/models/install` follows the long-running-endpoint checklist: register the install `compute_type` at both dispatch sites in `python/server_routes/jobs.py`, emit `_set_compute_progress` as the download/unpack advances, and have the frontend consume it via `startCompute` / `pollCompute` — never a bare `apiFetch` against the start endpoint.
+
+### 9.4.6 Discoverability (unchanged intent)
+
+A lightweight, community-extensible catalog of known models per language remains a nice-to-have so survey linguists have a starting point, without PARSE bundling or endorsing every one. It is not required for v1: the paste-a-Hugging-Face-repo-id install source covers the "I already found a model" case, which is the primary field need.
 
 ## 9.5 Local AI + MCP tool surface (offline)
 
