@@ -49,6 +49,23 @@ if [ ! -x "${EXE}" ]; then
 fi
 echo "Packaged backend exec bit OK: ${EXE}"
 
+# (2b) Assert the bundled read-only IPA model shipped inside the app (hybrid
+# delivery, §9.4). The fetch step stages dist/bundled-models/<id>/ and
+# electron-builder's extraResources copies it to Resources/models/<id>/. Its
+# manifest.json presence proves the model actually bundled — without it, the
+# backend registry would find no bundled root and the IPA stage would fall back
+# to a config/HF path instead of the shipped model. The model id defaults to the
+# fetch script's DEFAULT_ID and can be overridden via BUNDLED_MODEL_ID.
+BUNDLED_MODEL_ID="${BUNDLED_MODEL_ID:-wav2vec2-xlsr-53-espeak-ipa}"
+MODEL_MANIFEST="${APP}/Contents/Resources/models/${BUNDLED_MODEL_ID}/manifest.json"
+if [ ! -f "${MODEL_MANIFEST}" ]; then
+  echo "::error::bundled IPA model manifest not found in the packaged app: ${MODEL_MANIFEST}"
+  echo "--- Resources/models ---"
+  ls -la "${APP}/Contents/Resources/models" || true
+  exit 1
+fi
+echo "Bundled IPA model manifest OK: ${MODEL_MANIFEST}"
+
 # (3) Launch the packaged backend directly and poll /api/health.
 PORT=8811
 PROJECT_DIR="$(mktemp -d)" # fresh project dir so the desktop-mode bootstrap can initialize it

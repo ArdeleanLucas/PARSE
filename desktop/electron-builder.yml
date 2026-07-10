@@ -60,6 +60,26 @@ extraResources:
     filter:
       - "**/*"
 
+  # Bundle the read-only wav2vec2 IPA acoustic model (hybrid-delivery decision,
+  # §9.4). The models are staged at BUILD time into `../dist/bundled-models/<id>/`
+  # by desktop/scripts/fetch-bundled-models.py (NOT committed to the repo).
+  #
+  #   from: ../dist/bundled-models         (fetch script writes each model as <id>/)
+  #   to:   models                          (-> Contents/Resources/models/ in the .app)
+  #
+  # IMPORTANT — as with the backend entry above, electron-builder copies the
+  # CONTENTS of the `from` directory into `to`, NOT the `from` dir itself. So
+  # `from: ../dist/bundled-models` + `to: models` lands each staged `<id>/`
+  # directly at `Resources/models/<id>/`, giving the model-pack layout the
+  # backend registry expects: `Resources/models/<id>/manifest.json`. The Electron
+  # shell then sets PARSE_BUNDLED_MODELS=`<resourcesPath>/models` at launch
+  # (backend-launcher.js::resolveBundledModelsDir). This grows the DMG (~684MB ->
+  # ~1.9GB) — expected per the hybrid-delivery decision.
+  - from: ../dist/bundled-models
+    to: models
+    filter:
+      - "**/*"
+
 # --- macOS target ---------------------------------------------------------- #
 mac:
   category: public.app-category.education

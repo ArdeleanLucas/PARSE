@@ -106,6 +106,11 @@ class BackendSupervisor extends EventEmitter {
     this._options = {
       projectRoot: options.projectRoot || process.cwd(),
       userDataRoot: options.userDataRoot || '',
+      // Read-only bundled-models root (packaged: `<resourcesPath>/models`).
+      // Undefined in dev — the backend registry treats an absent
+      // PARSE_BUNDLED_MODELS as "no bundled root", so we omit the env var
+      // entirely (never set an empty string) when this is not provided.
+      bundledModelsRoot: options.bundledModelsRoot || undefined,
       backendCommand: options.backendCommand || defaultBackendCommand(),
       backendExecutable: options.backendExecutable || null,
       backendArgs: options.backendArgs || [],
@@ -246,6 +251,16 @@ class BackendSupervisor extends EventEmitter {
       PARSE_USER_DATA: this._options.userDataRoot,
       ...this._options.env,
     };
+
+    // Point the backend's model registry at the read-only bundled models root
+    // ONLY when we actually have one (packaged builds). The registry treats an
+    // unset/blank PARSE_BUNDLED_MODELS as "no bundled root", so in dev we omit
+    // the key entirely rather than setting an empty string — mirroring how
+    // main.js leaves it undefined when not packaged. Set AFTER the spread so a
+    // caller-provided `env` cannot accidentally reintroduce a blank value.
+    if (this._options.bundledModelsRoot) {
+      env.PARSE_BUNDLED_MODELS = this._options.bundledModelsRoot;
+    }
 
     // Choose the spawn form: a direct frozen executable (packaged) or the dev
     // shell command string. `_resolveSpawn` also guards a missing/unusable

@@ -23,6 +23,33 @@ function frozenBackendExeName(platform) {
   return platform === 'win32' ? 'parse-backend.exe' : 'parse-backend';
 }
 
+// Name of the bundled read-only models directory shipped inside the app's
+// Resources. electron-builder.yml copies the CONTENTS of `../dist/bundled-models`
+// into `Resources/models`, so at runtime the layout is:
+//   <resourcesPath>/models/<id>/manifest.json (+ model files)
+// This mirrors the `PARSE_BUNDLED_BIN` pattern for bundled ffmpeg.
+const BUNDLED_MODELS_DIR = 'models';
+
+// Resolve the read-only bundled-models directory the backend should scan.
+//
+// The backend's python model registry reads PARSE_BUNDLED_MODELS
+// (python/ai/model_registry.py::bundled_models_root) and treats an unset/absent
+// value as "no bundled root" — so we set it ONLY when packaged, where the
+// models actually ship inside Resources. In dev there is no bundled Resources
+// dir, so we return undefined and the supervisor omits the env var entirely
+// (never an empty string), keeping the web/dev behavior identical to before.
+//
+// Packaged: `<resourcesPath>/models`, matching electron-builder.yml's
+// `extraResources: { from: ../dist/bundled-models, to: models }`.
+// Pure function (no `require('electron')`) so it is unit-testable under
+// plain `node --test`, exactly like resolveBackendLauncher.
+function resolveBundledModelsDir(isPackaged, resourcesPath) {
+  if (!isPackaged) {
+    return undefined;
+  }
+  return path.join(resourcesPath, BUNDLED_MODELS_DIR);
+}
+
 // The dev backend command (shell string). Mirrors main.js's getBackendCommand()
 // default, and honors the same PARSE_BACKEND_CMD override.
 function devBackendCommand(platform, env) {
@@ -64,7 +91,9 @@ function resolveBackendLauncher(isPackaged, resourcesPath, options = {}) {
 
 module.exports = {
   resolveBackendLauncher,
+  resolveBundledModelsDir,
   devBackendCommand,
   frozenBackendExeName,
   FROZEN_BACKEND_DIR,
+  BUNDLED_MODELS_DIR,
 };
