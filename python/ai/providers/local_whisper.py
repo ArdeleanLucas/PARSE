@@ -77,7 +77,23 @@ class LocalWhisperProvider(provider_module.AIProvider):
                 try:
                     from ai.model_registry import resolve_stage_model
 
-                    resolved = resolve_stage_model(stage)
+                    # Consult the active project's per-stage binding so that, when
+                    # multiple models are installed for this stage, the resolver can
+                    # disambiguate. Guarded: any failure (import error, corrupt
+                    # project.json, unexpected exception) falls back to binding_id
+                    # None — i.e. exactly the pre-binding behavior. The project root
+                    # is cwd (mirrors ``server._project_root()``; imported lazily and
+                    # via cwd rather than importing server to avoid a circular
+                    # import, since server imports providers).
+                    binding_id = None
+                    try:
+                        from ai.model_install import read_binding
+
+                        binding_id = read_binding(Path.cwd().resolve()).get(stage)
+                    except Exception:
+                        binding_id = None
+
+                    resolved = resolve_stage_model(stage, binding_id=binding_id)
                 except Exception:
                     resolved = None
                 if resolved is not None and resolved.format == "faster-whisper-ct2":
