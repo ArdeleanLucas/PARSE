@@ -149,7 +149,7 @@ Goal: stable, supportable desktop release for end users.
 
 ## C1) Release engineering and trust
 
-Tracking: issue #693. Signing/notarization is wired through electron-builder but blocked on credentials only Lucas can provide (Apple Developer ID Application certificate + team id, and App Store Connect API key or app-specific password). CI currently ships an unsigned DMG.
+Tracking: issue #693. electron-builder handles macOS signing/notarization once configured, but today `desktop/electron-builder.yml` deliberately omits the signing identity, hardenedRuntime, and notarization config, and the credentials only Lucas can provide (Apple Developer ID Application certificate + team id, and App Store Connect API key or app-specific password) are not set up. CI currently ships an unsigned DMG.
 
 - [ ] Code signing enabled for release artifacts.
 - [ ] macOS notarization completed for release builds.
