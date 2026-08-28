@@ -145,7 +145,7 @@ $ gh pr view N --repo ArdeleanLucas/PARSE --json baseRefName
 
 ## Merge and close-out authority (added 2026-08-28)
 
-- **Agents submit PRs; only Lucas merges.** Never run `gh pr merge` — not even when asked to merge mid-session (the one authorized merge, PR #190 on 2026-04-24, was explicitly not blanket authorization). If asked, hand back the PR URL instead.
+- **Agents submit PRs; only Lucas merges.** Never run `gh pr merge` — not even when asked to merge mid-session (the one historically authorized merge, PR #190, was explicitly not blanket authorization). If asked, hand back the PR URL instead.
 - **Never force-push `main`** on any PARSE repo. Never push to `ArdeleanLucas/review_tool` `main` (deployment target). Both are Lucas-only actions.
 - **`gh issue close` IS allowed** when the closing comment is pre-staged in a merged PR's body as part of its declared close-out plan: verify the source PR is merged, then run the prepared command verbatim. Closing without pre-staged text, with improvised or edited text, or outside the task's declared scope still requires asking Lucas first.
 
@@ -155,7 +155,7 @@ Lucas's live batches share the machine with agent work. Two 2026-04-29 incidents
 
 - **Hard ban:** agents never run `parse-run`, `npm run dev` / `vite`, browser automation, or any screenshot/preview capture tool. Verification is `npx vitest run` + `./node_modules/.bin/tsc --noEmit` + `npm run build` (plus the backend gates). Express visual bugs as vitest DOM assertions (region `data-start`/`data-end`, serialized `getBoundingClientRect()`); if a bug truly cannot be expressed as a DOM assertion, escalate to Lucas — do not screenshot.
 - **Boot smokes and live validation run isolated:** `PARSE_PORT=18766 PARSE_WS_PORT=18767 python python/server.py` with a minimal fixture copied to `/tmp/parse-isolation-<slug>/` — never the default ports 8766/8767, never `/home/lucas/parse-workspace`. Regression: PRs #218/#219 boot-smoked on 8766 and killed a running session.
-- **Never kill a process holding a port** — it may be a live batch; pick another port or stop and ask. Never restart `parse-run` or touch `/tmp/parse-runtime` without Lucas's explicit go-ahead. Related: a merged PR is not live until `parse-run` restarts — the running backend imports from a `/tmp/parse-runtime` worktree pinned at boot.
+- **Never kill a process holding a port** — it may be a live batch; pick another port or stop and ask. Never restart `parse-run` without Lucas's explicit go-ahead. Related: a merged PR is not live until `parse-run` restarts — the running server keeps the code it loaded at boot.
 
 ## Agent identities and parallel worktrees (added 2026-04-27)
 
