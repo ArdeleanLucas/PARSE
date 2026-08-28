@@ -83,6 +83,8 @@ Core endpoints:
 - `GET /api/mcp/tools/{toolName}` — one tool schema
 - `POST /api/mcp/tools/{toolName}` — execute one MCP-visible tool via HTTP
 
+The POST request body is the tool's parameters as one flat JSON object (for example `{"speaker": "Saha01", "dryRun": true}`) — parameters are not nested under an `"arguments"` key. Responses use the `{"tool": ..., "ok": ..., "result": ...}` envelope (`error` instead of `result` on failure).
+
 The `mode` query parameter accepts:
 
 - `active` — obey `config/mcp_config.json` or the legacy root-level `mcp_config.json`

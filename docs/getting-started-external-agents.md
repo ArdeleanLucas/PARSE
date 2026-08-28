@@ -15,6 +15,8 @@ PARSE can be used programmatically by external agents and automation without ope
 
 If you are deciding where to start, use **MCP first**. It exposes PARSE tools directly, including workflow macros such as `run_full_annotation_pipeline`, `prepare_compare_mode`, and `export_complete_lingpy_dataset`.
 
+Use a shipped surface even from custom scripts. When PARSE has a tool that does what you need, call it through the stdio adapter, the HTTP MCP bridge (`POST /api/mcp/tools/{toolName}` — the request body is the tool's parameters as one flat JSON object, not wrapped under an `"arguments"` key), or the `parse_mcp` package. Do not import the underlying Python helpers directly, and do not call `ParseChatTools.execute()` from a side script: both bypass schema validation, exposure gating, dry-run wiring, and the standard `{tool, ok, result}` envelope, so bugs surface in a path production callers never exercise. The CLI scripts under `scripts/` are for `--help` introspection and offline debugging, not live workspace mutations.
+
 ## Prerequisites
 
 Before connecting an external agent, make sure the following are in place:
