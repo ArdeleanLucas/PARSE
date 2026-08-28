@@ -143,6 +143,20 @@ $ gh pr view N --repo ArdeleanLucas/PARSE --json baseRefName
 
 **Labels mandatory on every `gh pr create`:** include the MC parent label (for example `--label MC-384`) plus at least one type label (`docs`, `bugfix`, `feat`, `test`, `chore`, etc.) directly on `gh pr create`; verify before announcing with `gh pr view <N> --repo ArdeleanLucas/PARSE --json labels`. Regression: PR #421 shipped with `labels: []`, breaking MC-parent filtering.
 
+## Merge and close-out authority (added 2026-08-28)
+
+- **Agents submit PRs; only Lucas merges.** Never run `gh pr merge` — not even when asked to merge mid-session (the one authorized merge, PR #190 on 2026-04-24, was explicitly not blanket authorization). If asked, hand back the PR URL instead.
+- **Never force-push `main`** on any PARSE repo. Never push to `ArdeleanLucas/review_tool` `main` (deployment target). Both are Lucas-only actions.
+- **`gh issue close` IS allowed** when the closing comment is pre-staged in a merged PR's body as part of its declared close-out plan: verify the source PR is merged, then run the prepared command verbatim. Closing without pre-staged text, with improvised or edited text, or outside the task's declared scope still requires asking Lucas first.
+
+## Live-runtime safety — agents (added 2026-08-28)
+
+Lucas's live batches share the machine with agent work. Two 2026-04-29 incidents set these rules: a second `parse-run` OOM-killed the box mid-batch, and a `browser_snapshot` against the dev server killed a live ORTH batch.
+
+- **Hard ban:** agents never run `parse-run`, `npm run dev` / `vite`, browser automation, or any screenshot/preview capture tool. Verification is `npx vitest run` + `./node_modules/.bin/tsc --noEmit` + `npm run build` (plus the backend gates). Express visual bugs as vitest DOM assertions (region `data-start`/`data-end`, serialized `getBoundingClientRect()`); if a bug truly cannot be expressed as a DOM assertion, escalate to Lucas — do not screenshot.
+- **Boot smokes and live validation run isolated:** `PARSE_PORT=18766 PARSE_WS_PORT=18767 python python/server.py` with a minimal fixture copied to `/tmp/parse-isolation-<slug>/` — never the default ports 8766/8767, never `/home/lucas/parse-workspace`. Regression: PRs #218/#219 boot-smoked on 8766 and killed a running session.
+- **Never kill a process holding a port** — it may be a live batch; pick another port or stop and ask. Never restart `parse-run` or touch `/tmp/parse-runtime` without Lucas's explicit go-ahead. Related: a merged PR is not live until `parse-run` restarts — the running backend imports from a `/tmp/parse-runtime` worktree pinned at boot.
+
 ## Agent identities and parallel worktrees (added 2026-04-27)
 
 The three implementation lanes are:
@@ -278,6 +292,7 @@ Every PR review must check these, and **apply the fixes during the review — do
 1. **Language/data-agnostic text.** The PR title, description, and review comments describe the *generic mechanism first* — the behavior, code path, or invariant — not one natural language, speaker, or corpus. Real data may appear only as a demoted example (e.g. "...the Persian/Farsi reference row, as one case"); the text must still read as general if the example were removed. Rewrite dataset-bound framing ("fixes the Kurdish hair concept") into the mechanism it changes ("fixes per-speaker flag state for any concept; hair was the observed case").
 2. **Human-readable language.** Plain, simple, clear prose. Short sentences, lead with what changed and why. No filler or jargon stacks. A non-author engineer should understand the PR from the description alone.
 3. **Docs assessment.** State explicitly whether the change warrants docs: *present* / *missing-but-warranted* / *not needed*. Any docs touched by the diff (README, `docs/`, in-repo guides, doc comments) must also satisfy rules 1 and 2. If docs are missing but warranted and the addition is small, add them in the PR.
+4. **No "Phase N" scheduling labels in live docs.** Use descriptive section titles or milestone names (Alpha/Beta/Public). Archived docs under `docs/archive/` keep their historical phase labels — don't rewrite frozen records.
 
 When the PR body or a comment violates rule 1 or 2, edit it in the same pass: `gh pr edit <N> --repo <repo> --body "<rewritten>"` for the description, an edited/follow-up comment for review text, and direct file edits for docs in the diff. Record what was changed in the review's final verdict.
 
@@ -636,6 +651,7 @@ The following validation items remain important, but they are **not hard blocker
 - Use `parse-worktree-new <slug>` to create worktrees; use `parse-worktree-clean` to remove merged ones.
 - The canonical clone at `/home/lucas/gh/tarahassistant/PARSE-rebuild` MUST stay on `main`. Never `git checkout -b` inside it; always create a worktree first. See §Parallel work via worktrees for the recipe and rationale (`parse-run` reads from this clone).
 - After your PR merges, the post-merge cleanup recipe in §Parallel work via worktrees is mandatory, not optional. If the canonical clone is on any branch other than `main` when you declare done, the handoff is incomplete.
+- After a PR reaches terminal state, prune its remote branch if GitHub didn't (`git push origin --delete <branch>`) — including orphan `revert-*` branches from one-click reverts and branches of closed-unmerged PRs. Never delete the branch of an OPEN PR; GitHub silently closes the PR.
 - Do not branch from pre-cutover archive bundles or stale local refs without an explicit reason; cutover-era history is read-only.
 
 ## Ownership + Coordination
@@ -668,6 +684,7 @@ New queued work for `parse-front-end`, `parse-back-end`, and `parse-coordinator`
 ### Rules
 
 - New coordinator task queueing should go into `.hermes/handoffs/`, not `docs: queue <agent> next task` PRs.
+- One handoff file per task — never a paired kickoff file. The agent's initial prompt is delivered in chat, not written to disk.
 - Handoff front matter must record at minimum: `agent`, `queued_by`, `queued_at`, `status`, and optional `related_prs`.
 - Lifecycle is file-based: `queued` → `in-progress` → `done` (move completed items into `.hermes/handoffs/<agent>/done/`).
 - Historical queue-prompt PRs remain part of the audit trail, but they are no longer the preferred mechanism for staging the next task.
