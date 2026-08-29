@@ -16,7 +16,7 @@ A PARSE workspace (the directory you point the app or scripts at) typically cont
 |-----------------------------|----------------------------------------------|------------------------------------|--------------|-------|
 | `concepts.csv`              | Master list of all concept rows (the "concepts table") | `id` (stable primary key)         | Low (append mostly) | Source of truth for identity. `source_item` + `source_survey` are for grouping/display only. |
 | `parse-enrichments.json`    | All comparative + review state (flags, cognates, borrowings, merges, canonical choices, notes, etc.) | `Concept.key` (see below)         | High        | The main file affected by keying changes and migrations. See **The `parse-enrichments.json` Block Map** below for every block's shape and the manual-vs-automatic precedence. |
-| `annotations/<Speaker>.json` (or `.parse.json`) | Per-speaker time-aligned tiers (ipa, ortho, concept, ...) | `concept_id` = raw csv `id`       | High        | The "source recording" of fieldwork. Concept tier uses underlying ids. |
+| `annotations/<Speaker>.json` (or `.parse.json`) | Per-speaker time-aligned tiers (ipa, ortho, concept, ...) | `concept_id` = raw csv `id`       | High        | The "source recording" of fieldwork. Concept tier uses underlying ids. When both files exist, `<Speaker>.parse.json` is the live one — the plain `.json` can be stale. |
 | `parse-tags.json`           | Shared tag vocabulary + per-concept tag assignments | csv `id`s (never source keys)     | Medium      | Already id-namespaced. |
 | `survey-overlap.json`, `source_index.json`, peaks, coarse transcripts, etc. | Supporting survey linking, search, visualization | Various                           | Varies      | Not decision state. |
 | `audio/...`                 | Source audio and segments                    | Paths in annotations / transcripts| Low         | Referenced, not keyed by concept. |
@@ -83,6 +83,12 @@ Other top-level keys may be written by tools or pipelines (notes blocks, `*_appl
 - **`GROUP`** — a single uppercase cognate-class letter, local to one concept.
 
 All **concept-keyed** blocks are subject to the SAFE / AMBIGUOUS legacy-key promotion described below. `canonical_lexemes` (bundle-keyed) and tags (already id-namespaced) are not.
+
+### The uid transition — every reader promotes at its own read point
+
+During the MC-458 uid transition, enrichment decisions can arrive keyed three ways: by concept-identity **uid** (current — the frontend writes compare-mode decisions under the uid key), by raw csv row id (legacy and auto values: LexStat compute, old imports), or by `bundle:<slug>` (legacy `canonical_lexemes`). `GET /api/enrichments` promotes legacy keys to uid before serving, so the UI always looks correct — but **every exporter and out-of-band reader has its own read path** and must promote independently: call `migration.concept_uid_enrichments.promote_legacy_uid_keys(project_root, payload)` right after reading the file, and if the consumer then looks values up by csv id, also `expand_uid_keys_for_legacy_read(...)`. A reader that skips this serves stale or auto cognate values — a wrong or coarser letter, or `?` for a speaker grouped only under the uid key.
+
+Regression that motivates the rule: `export_concept_nexus` (PR #665) was developed in parallel off a base predating the #666 promote fixes, never promoted, and produced a wrong BEAST2 matrix; fixed in #668. Acceptance check for any new cognate export: its decoded cognate letters must be cell-for-cell identical to `export_concept_appendix_md` for the same selection.
 
 ## How Data Flows at Runtime (Load + Promotion)
 

@@ -10,6 +10,8 @@ import server
 
 def test_server_py_is_thin_orchestrator() -> None:
     server_path = pathlib.Path(server.__file__).resolve()
+    # splitlines() differs from `wc -l` by 1 when the file lacks a trailing newline —
+    # check the budget with len(read_text().splitlines()), not wc.
     line_count = len(server_path.read_text(encoding="utf-8").splitlines())
     # Budget raised to absorb compare-bundle dispatch entries added by PR #368 (MC-368-B),
     # then again for atomic _write_json_file (tmp+fsync+os.replace) durability hardening (MC-463-B),
